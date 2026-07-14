@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Asteroids</title>
+  <style>
+    * { margin: 0; box-sizing: border-box; }
+    body { background: #111; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; }
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      width: min(100vw, calc(100vh * 420 / 240));
+      height: min(100vh, calc(100vw * 240 / 420));
+    }
+    #status {
+      position: fixed; left: 50%; top: 12px; transform: translateX(-50%);
+      color: #aaa; font: 12px monospace; pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+<div id="status">connecting...</div>
+<canvas id="c"></canvas>
+<script src="game.js"></script>
+</body>
+</html>
