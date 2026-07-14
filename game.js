@@ -253,6 +253,50 @@ const remotes = new Map();
 let asteroids = [];
 let bullets = [];
 
+let clockOffset = 0;
+let pingMs = 0;
+let syncTick = 0;
+let syncSt = 0;
+
+function applyNtp(ct, st, serverTick) {
+  const t3 = Date.now();
+  const rtt = t3 - ct;
+  pingMs = pingMs ? pingMs * 0.75 + rtt * 0.25 : rtt;
+  const offset = st - (ct + t3) * 0.5;
+  clockOffset = clockOffset ? clockOffset * 0.75 + offset * 0.25 : offset;
+  syncTick = serverTick;
+  syncSt = st;
+}
+
+function serverNow() { return Date.now() + clockOffset; }
+
+function gameTimeSec() {
+  return syncTick / TPS + (serverNow() - syncSt) / 1000;
+}
+
+function fmtServerTime() {
+  const d = new Date(serverNow());
+  return d.toISOString().slice(11, 23);
+}
+
+function fmtGameTime(sec) {
+  const s = Math.max(0, sec);
+  const m = Math.floor(s / 60);
+  const r = (s % 60).toFixed(1);
+  return m > 0 ? `${m}:${r.padStart(4, '0')}` : `${r}s`;
+}
+
+function updateHud() {
+  if (!connected || !myId) return;
+  statusEl.textContent =
+    `p${myId} | ping ${Math.round(pingMs)}ms | srv ${fmtServerTime()} | game ${fmtGameTime(gameTimeSec())}`;
+}
+
+function sendPing() {
+  if (!connected || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ t: 'ping', ct: Date.now() }));
+}
+
 function sendInput() {
   if (!connected || ws.readyState !== 1) return;
   ws.send(JSON.stringify({
@@ -282,6 +326,10 @@ function updateLocalRotation(dt) {
 }
 
 function applySnapshot(msg) {
+  if (msg.st != null) {
+    syncTick = msg.tick;
+    syncSt = msg.st;
+  }
   asteroids = msg.asteroids.map(a => ({
     x: a[0], y: a[1], angle: a[2], pts: a[7]
   }));
@@ -352,7 +400,10 @@ async function connect() {
 
   statusEl.textContent = 'joining...';
   ws = new WebSocket(base.replace(/^http/, 'ws'));
-  ws.onopen = () => { statusEl.textContent = 'connected'; };
+  ws.onopen = () => {
+    statusEl.textContent = 'connected';
+    sendPing();
+  };
   ws.onclose = () => {
     connected = false;
     statusEl.textContent = 'disconnected — reconnecting...';
@@ -366,7 +417,13 @@ async function connect() {
       myId = msg.id;
       connected = true;
       viewAngle = serverAngle = -Math.PI / 2;
-      statusEl.textContent = `player ${myId}`;
+      applyNtp(Date.now(), msg.st, msg.tick);
+      updateHud();
+      return;
+    }
+    if (msg.t === 'pong' && connected) {
+      applyNtp(msg.ct, msg.st, msg.tick);
+      updateHud();
       return;
     }
     if (msg.t === 'snap' && connected) applySnapshot(msg);
@@ -374,6 +431,7 @@ async function connect() {
 }
 
 setInterval(sendInput, TICK_MS);
+setInterval(sendPing, 2000);
 let lastFrame = performance.now();
 
 function frame(now) {
@@ -381,6 +439,7 @@ function frame(now) {
   lastFrame = now;
   if (connected) {
     updateLocalRotation(dt);
+    updateHud();
     render();
   }
   requestAnimationFrame(frame);

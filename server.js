@@ -156,7 +156,7 @@ function packSnap() {
   }
   const as = asteroids.map(a => [a.x, a.y, a.angle, a.vx, a.vy, a.spin, a.r, a.pts]);
   const bs = bullets.map(b => [b.x, b.y, b.vx, b.vy, b.owner]);
-  return JSON.stringify({ t: 'snap', tick, players: ps, asteroids: as, bullets: bs });
+  return JSON.stringify({ t: 'snap', tick, st: Date.now(), players: ps, asteroids: as, bullets: bs });
 }
 
 const MIME = {
@@ -188,11 +188,15 @@ wss.on('connection', (ws) => {
   const p = spawnPlayer(id);
   players.set(id, p);
   ws.playerId = id;
-  ws.send(JSON.stringify({ t: 'welcome', id, tick }));
+  ws.send(JSON.stringify({ t: 'welcome', id, tick, st: Date.now() }));
 
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.t === 'ping') {
+      ws.send(JSON.stringify({ t: 'pong', ct: msg.ct, st: Date.now(), tick }));
+      return;
+    }
     const pl = players.get(ws.playerId);
     if (!pl || msg.t !== 'in') return;
     pl.inp.l = msg.l ? 1 : 0;
