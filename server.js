@@ -7,7 +7,12 @@ const PORT = 8765;
 const W = 420, H = 240;
 const TPS = 30;
 const TICK_MS = 1000 / TPS;
-const SHOOT = { ammo: 5, cooldown: 8, reload: 45, speed: 3.5 };
+const SHOOT = { ammo: 5, cooldown: 8, reload: 45, speed: 7 };
+const MAX_HP = 100;
+const PLAYER_R = 10;
+const BULLET_TYPES = {
+  default: { dmg: 20 }
+};
 const THRUST = 0.09;
 const MAX_SPEED = 8;
 const TURN = 0.18;
@@ -62,10 +67,24 @@ function spawnPlayer(id) {
   ];
   const [x, y] = spots[slot];
   return {
-    id, x, y, vx: 0, vy: 0, angle: -Math.PI / 2,
+    id, x, y, vx: 0, vy: 0, angle: -Math.PI / 2, hp: MAX_HP,
     shootAmmo: SHOOT.ammo, shootCd: 0, reloadLeft: 0, bursting: false,
     inp: { l: 0, r: 0, u: 0, sp: 0 }
   };
+}
+
+function respawnPlayer(p) {
+  const slot = (p.id - 1) % 4;
+  const spots = [
+    [W * 0.25, H * 0.5], [W * 0.75, H * 0.5],
+    [W * 0.5, H * 0.25], [W * 0.5, H * 0.75]
+  ];
+  const [x, y] = spots[slot];
+  p.x = x; p.y = y; p.vx = 0; p.vy = 0;
+  p.angle = -Math.PI / 2;
+  p.hp = MAX_HP;
+  p.shootAmmo = SHOOT.ammo;
+  p.shootCd = 0; p.reloadLeft = 0; p.bursting = false;
 }
 
 function applyInput(p) {
@@ -90,10 +109,12 @@ function updateShooting(p) {
 
   bullets.push({
     owner: p.id,
+    type: 'default',
+    dmg: BULLET_TYPES.default.dmg,
     x: p.x + Math.cos(p.angle) * 10,
     y: p.y + Math.sin(p.angle) * 10,
-    vx: Math.cos(p.angle) * SHOOT.speed + p.vx,
-    vy: Math.sin(p.angle) * SHOOT.speed + p.vy
+    vx: Math.cos(p.angle) * SHOOT.speed,
+    vy: Math.sin(p.angle) * SHOOT.speed
   });
   p.shootAmmo--;
   p.shootCd = SHOOT.cooldown;
@@ -108,6 +129,14 @@ function tryStartBurst(p) {
   p.bursting = true;
 }
 
+function torusDistSq(x1, y1, x2, y2) {
+  let dx = Math.abs(x1 - x2);
+  let dy = Math.abs(y1 - y2);
+  if (dx > W / 2) dx = W - dx;
+  if (dy > H / 2) dy = H - dy;
+  return dx * dx + dy * dy;
+}
+
 function updateBullets() {
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
@@ -117,6 +146,17 @@ function updateBullets() {
       bullets.splice(i, 1);
       continue;
     }
+    let hit = false;
+    for (const p of players.values()) {
+      if (p.id === b.owner || p.hp <= 0) continue;
+      if (torusDistSq(b.x, b.y, p.x, p.y) < PLAYER_R * PLAYER_R) {
+        p.hp -= b.dmg;
+        if (p.hp <= 0) respawnPlayer(p);
+        hit = true;
+        break;
+      }
+    }
+    if (hit) { bullets.splice(i, 1); continue; }
     for (let j = asteroids.length - 1; j >= 0; j--) {
       const a = asteroids[j];
       const dx = b.x - a.x, dy = b.y - a.y;
@@ -152,10 +192,10 @@ function step() {
 function packSnap() {
   const ps = [];
   for (const p of players.values()) {
-    ps.push([p.id, p.x, p.y, p.vx, p.vy, p.angle]);
+    ps.push([p.id, p.x, p.y, p.vx, p.vy, p.angle, p.hp]);
   }
   const as = asteroids.map(a => [a.x, a.y, a.angle, a.vx, a.vy, a.spin, a.r, a.pts]);
-  const bs = bullets.map(b => [b.x, b.y, b.vx, b.vy, b.owner]);
+  const bs = bullets.map(b => [b.x, b.y, b.vx, b.vy, b.owner, b.type]);
   return JSON.stringify({ t: 'snap', tick, st: Date.now(), players: ps, asteroids: as, bullets: bs });
 }
 

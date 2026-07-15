@@ -228,21 +228,37 @@ const shipShape = [9, 0, -6, 5, -6, -5];
 
 const keys = {};
 let spaceLatch = false;
-let spacePulse = false;
+let enterLatch = false;
+let shootPulse = false;
+
+function turnLeft() { return keys.ArrowLeft || keys.KeyA; }
+function turnRight() { return keys.ArrowRight || keys.KeyD; }
+function thrustUp() { return keys.ArrowUp || keys.KeyW; }
+
+const GAME_KEYS = new Set([
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'Enter'
+]);
 
 addEventListener('keydown', e => {
   keys[e.code] = true;
+  if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'Space' && !spaceLatch) {
     spaceLatch = true;
-    spacePulse = true;
+    shootPulse = true;
+  }
+  if (e.code === 'Enter' && !enterLatch) {
+    enterLatch = true;
+    shootPulse = true;
   }
 });
 addEventListener('keyup', e => {
   keys[e.code] = false;
   if (e.code === 'Space') spaceLatch = false;
+  if (e.code === 'Enter') enterLatch = false;
 });
 
-const player = { x: W / 2, y: H / 2, vx: 0, vy: 0 };
+const player = { x: W / 2, y: H / 2, vx: 0, vy: 0, hp: 100 };
 let viewAngle = -Math.PI / 2;
 let serverAngle = -Math.PI / 2;
 
@@ -289,7 +305,7 @@ function fmtGameTime(sec) {
 function updateHud() {
   if (!connected || !myId) return;
   statusEl.textContent =
-    `p${myId} | ping ${Math.round(pingMs)}ms | srv ${fmtServerTime()} | game ${fmtGameTime(gameTimeSec())}`;
+    `p${myId} ${player.hp}hp | ping ${Math.round(pingMs)}ms | srv ${fmtServerTime()} | game ${fmtGameTime(gameTimeSec())}`;
 }
 
 function sendPing() {
@@ -299,18 +315,22 @@ function sendPing() {
 
 function sendInput() {
   if (!connected || ws.readyState !== 1) return;
-  ws.send(JSON.stringify({
-    t: 'in',
-    l: keys.ArrowLeft ? 1 : 0,
-    r: keys.ArrowRight ? 1 : 0,
-    u: keys.ArrowUp ? 1 : 0,
-    sp: spacePulse ? 1 : 0
-  }));
-  if (spacePulse) spacePulse = false;
+  const inp = getInput();
+  ws.send(JSON.stringify({ t: 'in', ...inp }));
+  if (shootPulse) shootPulse = false;
+}
+
+function getInput() {
+  return {
+    l: turnLeft() ? 1 : 0,
+    r: turnRight() ? 1 : 0,
+    u: thrustUp() ? 1 : 0,
+    sp: shootPulse ? 1 : 0
+  };
 }
 
 function reconcileRotation() {
-  if (!keys.ArrowLeft && !keys.ArrowRight) {
+  if (!turnLeft() && !turnRight()) {
     viewAngle = serverAngle;
     return;
   }
@@ -321,8 +341,8 @@ function reconcileRotation() {
 }
 
 function updateLocalRotation(dt) {
-  if (keys.ArrowLeft) viewAngle -= TURN_RATE * dt;
-  if (keys.ArrowRight) viewAngle += TURN_RATE * dt;
+  if (turnLeft()) viewAngle -= TURN_RATE * dt;
+  if (turnRight()) viewAngle += TURN_RATE * dt;
 }
 
 function applySnapshot(msg) {
@@ -345,11 +365,12 @@ function applySnapshot(msg) {
       player.vx = row[3];
       player.vy = row[4];
       serverAngle = row[5];
+      player.hp = row[6];
       reconcileRotation();
       continue;
     }
     remotes.set(id, {
-      x: row[1], y: row[2], vx: row[3], vy: row[4], angle: row[5]
+      x: row[1], y: row[2], vx: row[3], vy: row[4], angle: row[5], hp: row[6]
     });
   }
   for (const id of remotes.keys()) {
