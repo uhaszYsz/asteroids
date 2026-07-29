@@ -5333,9 +5333,9 @@ function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive) {
   gl.disableVertexAttribArray(soACol);
 }
 
-/* ========== Pickup 3D boxes (22×22 strip6 + shiny metal shader) ========== */
-const PICKUP_STRIP_FRAMES = 6;
-/** Sheet order: health, default, laser, railgun, rocket, shotgun. */
+/* ========== Pickup 3D boxes (22×22 strip9 + shiny metal shader) ========== */
+const PICKUP_STRIP_FRAMES = 9;
+/** Sheet: health, default, laser, railgun, rocket, shotgun, plasma, asteroidgun, voidcannon. */
 const PICKUP_FRAME = {
   health: 0,
   default: 1,
@@ -5343,9 +5343,9 @@ const PICKUP_FRAME = {
   railgun: 3,
   rocket: 4,
   shotgun: 5,
-  plasma: 2,
-  voidcannon: 3,
-  asteroidgun: 4
+  plasma: 6,
+  asteroidgun: 7,
+  voidcannon: 8
 };
 /** Half-extent of the square pickup crate (sheet cells are 22×22). */
 const PICKUP_BOX_HALF = 7 * RES_SCALE * 0.6;
@@ -5524,7 +5524,7 @@ let pickupTexReady = false;
     pickupTexReady = true;
   };
   img.onerror = () => console.error('Failed to load pickup sprite strip');
-  img.src = 'sprites/sprite3_strip6.png';
+  img.src = 'sprites/powerups_strip9.png';
 })();
 
 function pickupFrameIndex(u) {
