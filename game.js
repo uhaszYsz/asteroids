@@ -412,9 +412,6 @@ const SFX = {
   railFire: 'sounds/rail3.wav',
   pickup: 'sounds/pickup.wav',
   money: 'sounds/money.wav',
-  pickDefault: 'sounds/pickDefault.ogg',
-  pickLaser: 'sounds/pickLaser.ogg',
-  pickRailgun: 'sounds/pickRailgun.ogg',
   pickShotgun: 'sounds/pickShotgun.ogg',
   shotgun: 'sounds/shootShootgun1.wav',
   shoot: [
@@ -7607,18 +7604,6 @@ function emitWeaponPickupFx(x, y, weaponName, level) {
   }
 }
 
-function pickupSfxForWeapon(weapon) {
-  switch (weapon) {
-    case 'default': return SFX.pickDefault;
-    case 'laser': return SFX.pickLaser;
-    case 'railgun': return SFX.pickRailgun;
-    case 'shotgun': return SFX.pickShotgun;
-    case 'plasma': return SFX.pickLaser;
-    case 'voidcannon': return SFX.pickRailgun;
-    default: return SFX.pickup; // rocket / unknown → generic
-  }
-}
-
 function playPickupSfx(kind, weapon, level) {
   if (kind === 'health') {
     playSfx(SFX.pickup, { vol: 0.9, pool: 3 });
@@ -7628,9 +7613,8 @@ function playPickupSfx(kind, weapon, level) {
     playSfx(SFX.pickup, { vol: 1, pool: 3 });
     return;
   }
-  playSfx(pickupSfxForWeapon(weapon), { vol: 0.9, pool: 3 });
-  // Same-weapon upgrade: weapon sting + generic pickup.
-  if ((level | 0) > 1) playSfx(SFX.pickup, { vol: 0.8, pool: 3 });
+  // All weapon pickups / upgrades share one sting.
+  playSfx(SFX.pickShotgun, { vol: 0.9, pool: 3 });
 }
 
 /** Pickup vanishes — health uses heal FX; weapons use shared level-scaled pickup FX. */
