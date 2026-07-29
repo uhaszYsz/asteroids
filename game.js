@@ -3216,19 +3216,26 @@ const gbAPos = gl.getAttribLocation(gridBakeProg, 'aPos');
 const gbAUV = gl.getAttribLocation(gridBakeProg, 'aUV');
 const gridBakeBuf = gl.createBuffer();
 
-/* ========== Menu title neon pulses (brighten the baked background) ========== */
+/* ========== Menu title boom ripples (fill + outline masks, no baked text color) ========== */
 const menuNeonFS = `
   precision mediump float;
   uniform sampler2D uBake;
+  uniform sampler2D uMask;
   uniform vec4 uPulses[8]; // xy = world center, z = radius, w = strength
+  uniform float uAges[8];  // seconds since birth
+  uniform vec2 uSats[8];   // x = core sat, y = rim sat
+  uniform float uPower;    // 2.0 = twice explosion boom power
   uniform vec2 uWorldOrigin;
   uniform vec2 uWorldSize;
   varying vec2 vUV;
   void main() {
-    vec4 bg = texture2D(uBake, vUV);
-    if (bg.a < 0.01) discard;
+    vec4 bake = texture2D(uBake, vUV);
+    if (bake.a < 0.04) discard;
+    float mask = texture2D(uMask, vUV).a;
+    if (mask < 0.05) discard;
     vec2 world = uWorldOrigin + vUV * uWorldSize;
-    float glow = 0.0;
+    vec3 rgb = vec3(0.0);
+    float lit = 0.0;
     for (int i = 0; i < 8; i++) {
       float str = uPulses[i].w;
       if (str > 0.001) {
@@ -3240,18 +3247,33 @@ const menuNeonFS = `
           0.24 * sin(ang * 3.0 + seed) +
           0.15 * sin(ang * 5.0 - seed * 1.9) +
           0.10 * sin(ang * 8.0 + seed * 0.55) +
-          0.06 * sin(ang * 13.0 - seed * 2.4);
+          0.06 * sin(ang * 13.0 - seed * 2.4) +
+          0.04 * sin(ang * 21.0 + seed * 3.1);
         float stretch = 1.0 + 0.14 * sin(ang * 2.0 + seed * 0.7);
         float R = max(1.0, uPulses[i].z) * stretch * (1.0 + wobble);
         float t = clamp(d / max(R, 1.0), 0.0, 1.0);
-        float cover = 1.0 - smoothstep(0.72, 1.0, t);
-        glow += str * cover * cover;
+        float cover = 1.0 - smoothstep(0.78, 1.0, t);
+        if (cover > 0.001) {
+          float age = uAges[i];
+          vec3 redTarget = vec3(1.0, 0.12, 0.04);
+          vec3 yellowTarget = vec3(1.0, 0.92, 0.18);
+          vec3 coreCol = mix(vec3(1.0), redTarget, clamp(age / 0.7, 0.0, 1.0));
+          vec3 rimCol = mix(redTarget, yellowTarget, clamp(age / 0.4, 0.0, 1.0));
+          float lumC = dot(coreCol, vec3(0.299, 0.587, 0.114));
+          float lumR = dot(rimCol, vec3(0.299, 0.587, 0.114));
+          coreCol = mix(vec3(lumC), coreCol, clamp(uSats[i].x, 0.7, 1.0));
+          rimCol = mix(vec3(lumR), rimCol, clamp(uSats[i].y, 0.7, 1.0));
+          vec3 boomCol = mix(coreCol, rimCol, t);
+          float amt = clamp(str * cover * uPower, 0.0, 1.0);
+          // Same energy stack as arena boom lights (mix + additive), ×uPower.
+          rgb += boomCol * (amt + amt * 0.55);
+          lit += amt;
+        }
       }
     }
-    glow = clamp(glow, 0.0, 1.0);
-    if (glow < 0.02) discard;
-    // Additive: output bg color × glow → adds brightness on top of existing draw.
-    gl_FragColor = vec4(bg.rgb * glow, 1.0);
+    if (lit < 0.02) discard;
+    float a = min(1.0, bake.a * mask);
+    gl_FragColor = vec4(rgb * a, a);
   }
 `;
 const menuNeonProg = gl.createProgram();
@@ -3260,12 +3282,18 @@ gl.attachShader(menuNeonProg, shader(gl.FRAGMENT_SHADER, menuNeonFS));
 linkProgram(menuNeonProg);
 const mnURes = gl.getUniformLocation(menuNeonProg, 'uRes');
 const mnUBake = gl.getUniformLocation(menuNeonProg, 'uBake');
+const mnUMask = gl.getUniformLocation(menuNeonProg, 'uMask');
 const mnUPulses = gl.getUniformLocation(menuNeonProg, 'uPulses[0]');
+const mnUAges = gl.getUniformLocation(menuNeonProg, 'uAges[0]');
+const mnUSats = gl.getUniformLocation(menuNeonProg, 'uSats[0]');
+const mnUPower = gl.getUniformLocation(menuNeonProg, 'uPower');
 const mnUWorldOrigin = gl.getUniformLocation(menuNeonProg, 'uWorldOrigin');
 const mnUWorldSize = gl.getUniformLocation(menuNeonProg, 'uWorldSize');
 const mnAPos = gl.getAttribLocation(menuNeonProg, 'aPos');
 const mnAUV = gl.getAttribLocation(menuNeonProg, 'aUV');
 const _menuNeonPulses = new Float32Array(8 * 4);
+const _menuNeonAges = new Float32Array(8);
+const _menuNeonSats = new Float32Array(8 * 2);
 let menuTitleOutlineTex = null;
 let menuTitleOutlineReady = false;
 let menuTitleFillTex = null;
@@ -3273,8 +3301,10 @@ let menuTitleFillReady = false;
 const menuTitleOutlinePulses = [];
 const menuTitleFillPulses = [];
 let menuTitleNeonNextAt = 0;
-const MENU_NEON_LIFE_MS = 900;
+const MENU_NEON_LIFE_MS = 2000; // same life as arena boom lights
 const MENU_NEON_MAX = 8;
+const MENU_NEON_POWER = 2.0; // 2× explosion boom light power
+const MENU_NEON_INTERVAL_MS = 200;
 let gridBakeTex = null;
 let gridBakeKey = '';
 let gridBakeVerts = null;
@@ -3868,7 +3898,7 @@ function ensureGridBakeTexture() {
   const c0 = spawnPadColorKey(0);
   const c1 = spawnPadColorKey(1);
   const key = [
-    'arena33', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
+    'arena34', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
     practiceMode ? 'p1' : 'p0', inGame ? 'g1' : 'menu', c0, c1
   ].join(':');
   if (!gridBakeDirty && gridBakeTex && gridBakeKey === key) return true;
@@ -3917,8 +3947,8 @@ function ensureGridBakeTexture() {
 }
 
 /**
- * Etch title fully into the grid bake (fill + outline + shadow = lattice only).
- * Same idea as spawn-pad recolors: no solid stamps.
+ * Menu title: no colored text bake — only upload fill + outline alpha masks.
+ * Boom-style light ripples are drawn later, clipped to those shapes on the grid.
  */
 function paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw) {
   const label = 'ASTEROIDS';
@@ -3927,8 +3957,6 @@ function paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw) {
   const fontPx = Math.max(31, Math.min(tw, th) * 0.1008);
   const font = fontPx + 'px "Press Start 2P", Consolas, monospace';
   const outlineW = Math.max(5, fontPx * 0.14);
-  const shx = Math.max(3, fontPx * 0.07);
-  const shy = Math.max(3, fontPx * 0.09);
 
   function makeMask(draw) {
     const cnv = document.createElement('canvas');
@@ -3945,7 +3973,7 @@ function paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw) {
     return cnv;
   }
 
-  // Solid glyph interior.
+  // Solid glyph interior (alpha shape only — not drawn onto bake).
   const fillMask = makeMask((m) => {
     m.fillStyle = '#fff';
     m.fillText(label, cx, cy);
@@ -3961,66 +3989,8 @@ function paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw) {
     m.fillText(label, cx, cy);
   });
 
-  // Full glyph silhouette (fill ∪ outline) for shadow.
-  const fullMask = makeMask((m) => {
-    m.fillStyle = '#fff';
-    m.fillText(label, cx, cy);
-    m.strokeStyle = '#fff';
-    m.lineWidth = outlineW;
-    m.strokeText(label, cx, cy);
-  });
-
-  function latticeThroughMask(mask, color, lineMul) {
-    const layer = document.createElement('canvas');
-    layer.width = tw;
-    layer.height = th;
-    const lctx = layer.getContext('2d');
-    lctx.strokeStyle = color;
-    lctx.lineWidth = Math.max(lw, rs * 0.85) * (lineMul || 1);
-    paintLatticePattern(lctx, tw, th, lineStep, rs, topo, false);
-    paintLatticePattern(lctx, tw, th, lineStep, rs, topo, true);
-    lctx.globalCompositeOperation = 'destination-in';
-    lctx.drawImage(mask, 0, 0);
-    ctx.drawImage(layer, 0, 0);
-  }
-
-  // Shadow first (offset full silhouette as dark lattice).
-  ctx.save();
-  ctx.translate(shx, shy);
-  latticeThroughMask(fullMask, 'rgba(6, 10, 18, 0.95)', 1.05);
-  ctx.restore();
-
-  // Interior cyan lattice.
-  const fillLayer = document.createElement('canvas');
-  fillLayer.width = tw;
-  fillLayer.height = th;
-  {
-    const lctx = fillLayer.getContext('2d');
-    lctx.strokeStyle = 'rgba(120, 230, 255, 1)';
-    lctx.lineWidth = Math.max(lw, rs * 0.85);
-    paintLatticePattern(lctx, tw, th, lineStep, rs, topo, false);
-    paintLatticePattern(lctx, tw, th, lineStep, rs, topo, true);
-    lctx.globalCompositeOperation = 'destination-in';
-    lctx.drawImage(fillMask, 0, 0);
-  }
-  ctx.drawImage(fillLayer, 0, 0);
-
-  // Outline magenta lattice (thicker lines so the ring reads).
-  const outlineLayer = document.createElement('canvas');
-  outlineLayer.width = tw;
-  outlineLayer.height = th;
-  {
-    const lctx = outlineLayer.getContext('2d');
-    lctx.strokeStyle = 'rgba(255, 90, 180, 1)';
-    lctx.lineWidth = Math.max(lw, rs * 0.85) * 1.25;
-    paintLatticePattern(lctx, tw, th, lineStep, rs, topo, false);
-    paintLatticePattern(lctx, tw, th, lineStep, rs, topo, true);
-    lctx.globalCompositeOperation = 'destination-in';
-    lctx.drawImage(outlineMask, 0, 0);
-  }
-  ctx.drawImage(outlineLayer, 0, 0);
-  uploadMenuTitleMaskTex(fillLayer, true);
-  uploadMenuTitleMaskTex(outlineLayer, false);
+  uploadMenuTitleMaskTex(fillMask, true);
+  uploadMenuTitleMaskTex(outlineMask, false);
 }
 
 function uploadMenuTitleMaskTex(cnv, isFill) {
@@ -4061,7 +4031,6 @@ function tickMenuTitleNeonPulses(now) {
     return;
   }
   if (!menuTitleNeonNextAt) menuTitleNeonNextAt = now;
-  // Title is etched at bake UV (0.5, 0.25) — spawn blasts in matching world space.
   const ox = gridBakeOriginX;
   const oy = gridBakeOriginY;
   const ww = gridBakeWorldW;
@@ -4072,26 +4041,31 @@ function tickMenuTitleNeonPulses(now) {
   const areaCy = oy + wh * 0.25;
   const textW = fontPx * 8.2;
   const textH = fontPx * 1.4;
-  // Fill lights bias toward the glyph interior; outline lights use the full AABB.
   const fillW = textW * 0.78;
   const fillH = textH * 0.72;
   const oxFill = areaCx - fillW * 0.5;
   const oyFill = areaCy - fillH * 0.5;
   const oxOut = areaCx - textW * 0.5;
   const oyOut = areaCy - textH * 0.5;
+  // Boom radius ~same as arena explosions, slightly larger for title read.
+  const boomR = minSide * 0.18;
   while (now >= menuTitleNeonNextAt) {
-    menuTitleNeonNextAt += 100; // every 0.1s
+    menuTitleNeonNextAt += MENU_NEON_INTERVAL_MS;
     menuTitleFillPulses.push({
       x: oxFill + Math.random() * fillW,
       y: oyFill + Math.random() * fillH,
-      r: minSide * 0.15,
-      born: now
+      r: boomR,
+      born: now,
+      satC: 0.7 + Math.random() * 0.3,
+      satR: 0.7 + Math.random() * 0.3
     });
     menuTitleOutlinePulses.push({
       x: oxOut + Math.random() * textW,
       y: oyOut + Math.random() * textH,
-      r: minSide * 0.16,
-      born: now
+      r: boomR * 1.05,
+      born: now,
+      satC: 0.7 + Math.random() * 0.3,
+      satR: 0.7 + Math.random() * 0.3
     });
   }
   pruneMenuNeonPulses(menuTitleFillPulses, now);
@@ -4102,16 +4076,19 @@ function packMenuNeonPulses(list, now) {
   let n = 0;
   for (let i = list.length - 1; i >= 0 && n < MENU_NEON_MAX; i--) {
     const p = list[i];
-    const age = now - p.born;
-    if (age >= MENU_NEON_LIFE_MS) continue;
-    const u = age / MENU_NEON_LIFE_MS;
-    const env = u < 0.18 ? (u / 0.18) : Math.max(0, 1 - (u - 0.18) / 0.82);
-    const ease = env * env * (3 - 2 * env);
+    const ageMs = now - p.born;
+    if (ageMs >= MENU_NEON_LIFE_MS) continue;
+    // Same linear fade as arena boom lights.
+    const a = 1 - ageMs / MENU_NEON_LIFE_MS;
+    if (a < 0.01) continue;
     const o = n * 4;
     _menuNeonPulses[o] = p.x;
     _menuNeonPulses[o + 1] = p.y;
-    _menuNeonPulses[o + 2] = p.r * (0.85 + 0.35 * u);
-    _menuNeonPulses[o + 3] = ease;
+    _menuNeonPulses[o + 2] = p.r;
+    _menuNeonPulses[o + 3] = a;
+    _menuNeonAges[n] = ageMs * 0.001;
+    _menuNeonSats[n * 2] = p.satC != null ? p.satC : 1;
+    _menuNeonSats[n * 2 + 1] = p.satR != null ? p.satR : 1;
     n++;
   }
   for (let k = n; k < MENU_NEON_MAX; k++) {
@@ -4120,36 +4097,52 @@ function packMenuNeonPulses(list, now) {
     _menuNeonPulses[o + 1] = 0;
     _menuNeonPulses[o + 2] = 0;
     _menuNeonPulses[o + 3] = 0;
+    _menuNeonAges[k] = 0;
+    _menuNeonSats[k * 2] = 1;
+    _menuNeonSats[k * 2 + 1] = 1;
   }
   return n;
 }
 
-/** Additive brightness pulses on the baked grid background (menu only). */
+/** Explosion boom-light ripples on grid lines, clipped to title fill / outline shapes. */
 function drawMenuTitleNeonGlow(now) {
   if (inGame) return;
   if (!gridBakeTex || !gridBakeVertCount) return;
+  if (!menuTitleFillReady && !menuTitleOutlineReady) return;
   tickMenuTitleNeonPulses(now);
 
-  // Merge both pulse lists into one pack for a single draw on the bake texture.
-  const allPulses = menuTitleFillPulses.concat(menuTitleOutlinePulses);
-  if (!packMenuNeonPulses(allPulses, now)) return;
-
   gl.enable(gl.BLEND);
+  // Premultiplied-ish energy over existing grid (same energy stack feel as boom lights).
   gl.blendFunc(gl.ONE, gl.ONE);
   gl.useProgram(menuNeonProg);
   gl.uniform2f(mnURes, W, H);
   if (mnUWorldOrigin) gl.uniform2f(mnUWorldOrigin, gridBakeOriginX, gridBakeOriginY);
   if (mnUWorldSize) gl.uniform2f(mnUWorldSize, gridBakeWorldW, gridBakeWorldH);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, gridBakeTex);
-  gl.uniform1i(mnUBake, 0);
-  gl.uniform4fv(mnUPulses, _menuNeonPulses);
+  if (mnUPower) gl.uniform1f(mnUPower, MENU_NEON_POWER);
   gl.bindBuffer(gl.ARRAY_BUFFER, gridBakeBuf);
   gl.enableVertexAttribArray(mnAPos);
   gl.enableVertexAttribArray(mnAUV);
   gl.vertexAttribPointer(mnAPos, 2, gl.FLOAT, false, 16, 0);
   gl.vertexAttribPointer(mnAUV, 2, gl.FLOAT, false, 16, 8);
-  gl.drawArrays(gl.TRIANGLES, 0, gridBakeVertCount);
+
+  const drawLayer = (ready, tex, pulses) => {
+    if (!ready || !tex) return;
+    if (!packMenuNeonPulses(pulses, now)) return;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, gridBakeTex);
+    gl.uniform1i(mnUBake, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(mnUMask, 1);
+    gl.uniform4fv(mnUPulses, _menuNeonPulses);
+    if (mnUAges) gl.uniform1fv(mnUAges, _menuNeonAges);
+    if (mnUSats) gl.uniform2fv(mnUSats, _menuNeonSats);
+    gl.drawArrays(gl.TRIANGLES, 0, gridBakeVertCount);
+  };
+  drawLayer(menuTitleFillReady, menuTitleFillTex, menuTitleFillPulses);
+  drawLayer(menuTitleOutlineReady, menuTitleOutlineTex, menuTitleOutlinePulses);
+
+  gl.activeTexture(gl.TEXTURE0);
   gl.disableVertexAttribArray(mnAPos);
   gl.disableVertexAttribArray(mnAUV);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -4157,7 +4150,7 @@ function drawMenuTitleNeonGlow(now) {
 
 /**
  * Esports / rink playfield markings.
- * Menu: plain space lattice (nebula-colored) + baked ASTEROIDS title — no sport paint.
+ * Menu: plain space lattice (nebula-colored); title = boom-light ripples in letter masks only.
  * Match: blue lattice + player-colored spawn pads + thick sport accents.
  * Practice/solo/waves: nebula (or white) lattice only — no sport paint.
  */
