@@ -9624,6 +9624,12 @@ const SHIP_MESHES = (() => {
     if (!d) continue;
     kept.push(d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d);
   }
+  // Extra OBJ hulls from models/obj (source: models).
+  for (const d of _shipMeshRawDefs) {
+    if (!d || d.source !== 'models') continue;
+    if (kept.some((k) => k.id === d.id)) continue;
+    kept.push(d);
+  }
   return kept.map(scaleShipMeshDef);
 })();
 
@@ -17673,6 +17679,7 @@ function shipMeshSourceLabel(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien';
+  if (src === 'models') return 'OBJ models';
   if (src === 'tiny') return 'Tiny sprites';
   return 'Default';
 }
@@ -17682,7 +17689,8 @@ function shipMeshSectionOrder(src) {
   if (src === 'elite') return 1;
   if (src === 'fe2') return 2;
   if (src === 'alien') return 3;
-  if (src === 'tiny') return 4;
+  if (src === 'models') return 4;
+  if (src === 'tiny') return 5;
   return 9;
 }
 
@@ -17690,6 +17698,7 @@ function shipMeshSectionTitle(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien ships';
+  if (src === 'models') return 'OBJ models';
   if (src === 'tiny') return 'Tiny sprite ships';
   return 'Default';
 }
