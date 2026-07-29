@@ -866,7 +866,7 @@ const CVARS = {
   cl_bulletghost: {
     value: 1,
     def: 1,
-    help: 'Draw server NTP path as ghost for own corrected bullets (0/1).'
+    help: 'Draw server path as yellow ghost (alpha 0.5) for own predicted bullets (0/1).'
   },
   cl_asteroid_tune: {
     value: 1,
@@ -4705,7 +4705,7 @@ function drawAlphaSegment(x0, y0, x1, y1, color, alpha) {
   drawLines(scratch, color, gl.LINE_STRIP, alpha, false, 4);
 }
 
-function drawPoints(items, color) {
+function drawPoints(items, color, alpha) {
   if (!items.length) return;
   const n = items.length;
   scratchEnsure(n * 2);
@@ -4717,11 +4717,11 @@ function drawPoints(items, color) {
     if (it.big) big = true;
   }
   uploadMainBuf(scratch, n * 2);
-  if (_lightFlashNight > 0.5) {
+  if (_lightFlashNight > 0.5 || (alpha != null && alpha < 1)) {
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   }
-  useDraw(color, 1);
+  useDraw(color, alpha == null ? 1 : alpha);
   gl.uniform1f(uSize, (big ? 3 : 2) * RES_SCALE * getRenderScale());
   gl.drawArrays(gl.POINTS, 0, n);
 }
@@ -9813,6 +9813,7 @@ function updateLocalShooting() {
 
   if (localShoot.shootCd > 0) return;
   emitLocalShootFx();
+  spawnLocalPredictedShot(name);
   localShoot.shootAmmo--;
   localShoot.shootCd = w.cooldown;
   if (localShoot.shootAmmo <= 0) {
@@ -12610,6 +12611,7 @@ function applyResumedMsg(msg) {
   if (msg.asteroids) replaceAsteroidsFromRows(msg.asteroids);
   if (msg.bullets) {
     bullets.clear();
+    clearPendingPredShots();
     stopAllRocketTravelSfx();
     for (const row of msg.bullets) addBullet(unpackBullet(row), false);
   }
@@ -12695,6 +12697,7 @@ function resetMatchState() {
   asteroidGhosts = [];
   stopAllRocketTravelSfx();
   bullets.clear();
+  clearPendingPredShots();
   pickups.clear();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
   remoteLasers.clear();
@@ -12746,20 +12749,13 @@ function bulletAgeTicks(b) {
   return Math.max(0, (now - b.spawnSt) / 1000 * TPS);
 }
 
-/** Wall-clock travel ticks for own corrected shots (immune to NTP offset jitter). */
+/** Wall-clock travel ticks for own predicted / corrected shots (immune to NTP jitter). */
 function bulletLocalTravelTicks(b) {
   return Math.max(0, (performance.now() - b.recvPerf) / TICK_MS);
 }
 
-/** Authoritative pose: NTP for remotes; same wall-clock path as draw for own localOrigin shots. */
+/** Authoritative / ghost pose: always server spawn + NTP age (never localOrigin). */
 function bulletTrueAt(b) {
-  if (b.localOrigin && b.recvPerf != null) {
-    const age = bulletLocalTravelTicks(b);
-    return {
-      x: b.localOrigin.x + b.vx * age,
-      y: b.localOrigin.y + b.vy * age
-    };
-  }
   const age = bulletAgeTicks(b);
   return {
     x: b.spawnX + b.vx * age,
@@ -12767,18 +12763,9 @@ function bulletTrueAt(b) {
   };
 }
 
-function attachLocalBulletOrigin(b) {
-  // Stick to server spawn (already ping-led), backdate so first frame matches age.
-  // Old "current muzzle" attach fought dynamic lead and made ghost/client diverge.
-  b.localOrigin = { x: b.spawnX, y: b.spawnY };
-  const ageMs = Math.max(0, serverNow() - b.spawnSt);
-  b.recvPerf = performance.now() - ageMs;
-  b.showGhost = true;
-}
-
 /**
- * Drawn pose: own live shots follow server spawn on a wall-clock timer
- * (immune to NTP clock-offset jitter after attach).
+ * Drawn pose: own predicted shots use wall-clock from localOrigin;
+ * everyone else uses server NTP.
  */
 function bulletAt(b) {
   if (b.localOrigin && b.recvPerf != null) {
@@ -12789,6 +12776,264 @@ function bulletAt(b) {
     };
   }
   return bulletTrueAt(b);
+}
+
+/** Mirror server predictedFirePose — sim state + same lead as server fire. */
+function localPredictedFirePose() {
+  const lead = shootPredictLeadTicks();
+  const aLead = shootPredictAngleLeadTicks();
+  let x = player.x + (player.vx || 0) * lead;
+  let y = player.y + (player.vy || 0) * lead;
+  if (x < 0) x += W; else if (x > W) x -= W;
+  if (y < 0) y += H; else if (y > H) y -= H;
+  const angle = player.angle + (Number.isFinite(player.av) ? player.av : 0) * aLead;
+  return { x, y, angle };
+}
+
+function localBulletVelocity(ang, speed, relative) {
+  let vx = Math.cos(ang) * speed;
+  let vy = Math.sin(ang) * speed;
+  if (relative) {
+    vx += player.vx || 0;
+    vy += player.vy || 0;
+  }
+  return { vx, vy };
+}
+
+/** Temp negative ids for shots spawned before server bf. */
+let nextPredBulletId = -1;
+/** FIFO: { type, ids: number[] } awaiting matching server fire. */
+const pendingPredShots = [];
+
+function clearPendingPredShots() {
+  pendingPredShots.length = 0;
+}
+
+function wrapPredBulletId() {
+  const id = nextPredBulletId--;
+  if (nextPredBulletId > -1) nextPredBulletId = -1;
+  if (nextPredBulletId < -1e9) nextPredBulletId = -1;
+  return id;
+}
+
+function shotgunPelletMotionLocal(aimAngle, spreadDeg, spdMin, spdMax, rnd) {
+  const spreadRad = (spreadDeg || 0) * Math.PI / 180;
+  const ang = aimAngle + (rnd() - 0.5) * spreadRad;
+  const spd = spdMin + rnd() * (spdMax - spdMin);
+  return { ang, spd };
+}
+
+/**
+ * Instant local projectile(s) matching server fire pose/vel.
+ * Drawn immediately; rebound to server id when bf arrives (ghost = server path).
+ */
+function spawnLocalPredictedShot(typeName) {
+  if (myId == null || deathSpectating || matchPaused) return;
+  const type = typeName || currentWeaponName();
+  if (type === 'laser' || type === 'railgun' || type === 'asteroidgun') return;
+
+  const w = effectiveLocalWeapon(type);
+  const pose = localPredictedFirePose();
+  const mx = pose.x + Math.cos(pose.angle) * MUZZLE;
+  const my = pose.y + Math.sin(pose.angle) * MUZZLE;
+  const firePerf = performance.now();
+  const fireSt = serverNow();
+  const ids = [];
+
+  if (type === 'shotgun') {
+    const count = Math.max(1, w.shotgun | 0);
+    const [spdMin, spdMax] = w.shotgunSpeeds || [4 * RES_SCALE, 9 * RES_SCALE];
+    const rnd = makeShotgunRng(mx, my);
+    for (let i = 0; i < count; i++) {
+      const m = shotgunPelletMotionLocal(pose.angle, w.spread || 0, spdMin, spdMax, rnd);
+      const vel = localBulletVelocity(m.ang, m.spd, !!w.relative);
+      const id = wrapPredBulletId();
+      ids.push(id);
+      bullets.set(id, {
+        id,
+        owner: myId,
+        type: 'shotgun',
+        spawnX: mx,
+        spawnY: my,
+        vx: vel.vx,
+        vy: vel.vy,
+        spawnSt: fireSt,
+        localOrigin: { x: mx, y: my },
+        recvPerf: firePerf,
+        predicted: true,
+        pendingBind: true,
+        showGhost: false
+      });
+    }
+  } else {
+    if (!(w.speed > 0)) return;
+    const vel = localBulletVelocity(pose.angle, w.speed, !!w.relative);
+    const id = wrapPredBulletId();
+    ids.push(id);
+    bullets.set(id, {
+      id,
+      owner: myId,
+      type,
+      spawnX: mx,
+      spawnY: my,
+      vx: vel.vx,
+      vy: vel.vy,
+      spawnSt: fireSt,
+      localOrigin: { x: mx, y: my },
+      recvPerf: firePerf,
+      predicted: true,
+      pendingBind: true,
+      showGhost: false
+    });
+    if (type === 'rocket') startRocketTravelSfx(bullets.get(id));
+  }
+  if (ids.length) pendingPredShots.push({ type, ids, at: firePerf });
+}
+
+/**
+ * Bind a predicted local shot to the authoritative server bullet.
+ * Keeps the drawn path continuous; adopts server velocity; ghost follows server spawn.
+ */
+function bindPredictedToServer(pred, serverB) {
+  const drawn = bulletAt(pred);
+  const srvAge = Math.max(0, (serverNow() - serverB.spawnSt) / TICK_MS);
+  const srvPos = {
+    x: serverB.spawnX + serverB.vx * srvAge,
+    y: serverB.spawnY + serverB.vy * srvAge
+  };
+  let dx = drawn.x - srvPos.x;
+  let dy = drawn.y - srvPos.y;
+  if (dx > W * 0.5) dx -= W; else if (dx < -W * 0.5) dx += W;
+  if (dy > H * 0.5) dy -= H; else if (dy < -H * 0.5) dy += H;
+  const err = Math.hypot(dx, dy);
+
+  const bound = {
+    id: serverB.id,
+    owner: serverB.owner,
+    type: serverB.type || pred.type || 'default',
+    spawnX: serverB.spawnX,
+    spawnY: serverB.spawnY,
+    vx: serverB.vx,
+    vy: serverB.vy,
+    spawnSt: serverB.spawnSt,
+    showGhost: true,
+    predicted: true,
+    pendingBind: false,
+    recvPerf: performance.now() - srvAge * TICK_MS
+  };
+
+  // Close match -> ride the server path (ghost overlays). Large miss ->
+  // keep visual continuity from current drawn pos with server velocity.
+  if (err < 48 * RES_SCALE) {
+    bound.localOrigin = { x: serverB.spawnX, y: serverB.spawnY };
+  } else {
+    bound.localOrigin = {
+      x: drawn.x - serverB.vx * srvAge,
+      y: drawn.y - serverB.vy * srvAge
+    };
+  }
+  return bound;
+}
+
+function takePendingPredShot(type) {
+  for (let i = 0; i < pendingPredShots.length; i++) {
+    const shot = pendingPredShots[i];
+    if (shot.type !== type) continue;
+    if (performance.now() - shot.at > 1500) {
+      for (const id of shot.ids) {
+        if (bullets.has(id) && bullets.get(id).pendingBind) {
+          if (shot.type === 'rocket') stopRocketTravelSfx(id);
+          bullets.delete(id);
+        }
+      }
+      pendingPredShots.splice(i, 1);
+      i--;
+      continue;
+    }
+    pendingPredShots.splice(i, 1);
+    return shot;
+  }
+  return null;
+}
+
+function tryBindOwnBulletFire(serverB) {
+  const type = serverB.type || 'default';
+  if (type === 'shotgun') return false;
+  const shot = takePendingPredShot(type);
+  if (!shot) return false;
+  const pred = bullets.get(shot.ids[0]);
+  if (!pred || !pred.pendingBind) return false;
+  if (pred.type === 'rocket') stopRocketTravelSfx(pred.id);
+  bullets.delete(pred.id);
+  const bound = bindPredictedToServer(pred, serverB);
+  bullets.set(bound.id, bound);
+  if (bound.type === 'rocket') startRocketTravelSfx(bound);
+  return true;
+}
+
+function tryBindOwnShotgunFire(row) {
+  const baseId = row[0] | 0;
+  const x = row[1];
+  const y = row[2];
+  const aim = row[3];
+  const spawnSt = row[6];
+  const count = Math.max(1, row[8] | 0);
+  const shot = takePendingPredShot('shotgun');
+  if (!shot) return false;
+
+  const w = WEAPONS.shotgun;
+  const [spdMin, spdMax] = w.shotgunSpeeds || [4 * RES_SCALE, 9 * RES_SCALE];
+  const rnd = makeShotgunRng(x, y);
+  const n = Math.min(count, shot.ids.length);
+  for (let i = 0; i < n; i++) {
+    const predId = shot.ids[i];
+    const pred = bullets.get(predId);
+    const m = shotgunPelletMotionLocal(aim, w.spread || 0, spdMin, spdMax, rnd);
+    const vel = { vx: Math.cos(m.ang) * m.spd, vy: Math.sin(m.ang) * m.spd };
+    const serverPellet = {
+      id: baseId + i,
+      owner: myId,
+      type: 'shotgun',
+      spawnX: x,
+      spawnY: y,
+      vx: vel.vx,
+      vy: vel.vy,
+      spawnSt
+    };
+    if (pred && pred.pendingBind) {
+      bullets.delete(predId);
+      bullets.set(serverPellet.id, bindPredictedToServer(pred, serverPellet));
+    } else {
+      addBullet(serverPellet, false, false);
+    }
+  }
+  for (let i = n; i < shot.ids.length; i++) {
+    const id = shot.ids[i];
+    if (bullets.has(id) && bullets.get(id).pendingBind) bullets.delete(id);
+  }
+  for (let i = n; i < count; i++) {
+    const m = shotgunPelletMotionLocal(aim, w.spread || 0, spdMin, spdMax, rnd);
+    addBullet({
+      id: baseId + i,
+      spawnX: x,
+      spawnY: y,
+      vx: Math.cos(m.ang) * m.spd,
+      vy: Math.sin(m.ang) * m.spd,
+      owner: myId,
+      spawnSt,
+      type: 'shotgun'
+    }, false, false);
+  }
+  return true;
+}
+
+/** Fallback when no pending predict: wall-clock attach at server spawn. */
+function attachLocalBulletOrigin(b) {
+  b.localOrigin = { x: b.spawnX, y: b.spawnY };
+  const ageMs = Math.max(0, serverNow() - b.spawnSt);
+  b.recvPerf = performance.now() - ageMs;
+  b.showGhost = true;
+  b.predicted = true;
 }
 
 /**
@@ -12941,12 +13186,14 @@ function isShotgunShellFire(row) {
   return row && row[7] === 'shotgun' && (row[8] | 0) > 0;
 }
 
-function addShotgunShellFire(row, withMuzzle, liveFire) {
+function addShotgunShellFire(row, withMuzzle, liveFire) {
+  const owner = row[5] | 0;
+  if (owner === myId && liveFire && tryBindOwnShotgunFire(row)) return;
+
   const baseId = row[0] | 0;
   const x = row[1];
   const y = row[2];
-  const aim = row[3];
-  const owner = row[5] | 0;
+  const aim = row[3];
   const spawnSt = row[6];
   const count = Math.max(1, row[8] | 0);
   const w = WEAPONS.shotgun;
@@ -12969,13 +13216,14 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
       vy: Math.sin(ang) * spd,
       owner,
       spawnSt,
-      type: 'shotgun'
-    }, false, liveFire);
+      type: 'shotgun'
+    }, false, owner === myId ? false : liveFire);
   }
 }
 
-function addBullet(b, withMuzzle, liveFire) {
-  if (liveFire && b.owner === myId) attachLocalBulletOrigin(b);
+function addBullet(b, withMuzzle, liveFire) {
+  if (liveFire && b.owner === myId && tryBindOwnBulletFire(b)) return;
+  if (liveFire && b.owner === myId) attachLocalBulletOrigin(b);
   bullets.set(b.id, b);
   if (b.type === 'rocket' || b.type === 'enemyRocket') startRocketTravelSfx(b);
   if (withMuzzle) {
@@ -15666,8 +15914,8 @@ function renderBullets() {
   const defaultTrail = ((performance.now() / 32) | 0) % 2 === 0;
   for (const b of bullets.values()) {
     const ang = Math.atan2(b.vy, b.vx);
-    // Dim NTP/server path for own corrected shots.
-    if (b.showGhost && cv('cl_bulletghost') > 0) {
+    // Server NTP path as yellow ghost (own predicted shots after bf bind).
+    if (b.showGhost && (cv('cl_bulletghost') | 0) > 0) {
       const g = bulletTrueAt(b);
       if (g.x >= 0 && g.x <= W && g.y >= 0 && g.y <= H) {
         if (b.type === 'rocket' || b.type === 'enemyRocket') {
@@ -15688,7 +15936,7 @@ function renderBullets() {
       else normal.push(pt);
     }
   }
-  if (ghosts.length) drawPoints(ghosts, COL.ghost);
+  if (ghosts.length) drawPoints(ghosts, COL.ghost, 0.5);
   if (normal.length) drawPoints(normal, COL.bullet);
   if (turretPts.length) drawPoints(turretPts, COL.powerTurret);
   if (plasmaPts.length) drawPoints(plasmaPts, COL.plasma);
@@ -15868,6 +16116,7 @@ function enterGameFromWelcome(msg) {
   asteroidGhosts = [];
   stopAllRocketTravelSfx();
   bullets.clear();
+  clearPendingPredShots();
   pickups.clear();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
   remoteLasers.clear();
@@ -16512,10 +16761,17 @@ async function connect() {
         b.vx = row[3];
         b.vy = row[4];
         b.spawnSt = row[6];
-        if (row[7]) b.type = row[7];
-        delete b.localOrigin;
-        delete b.recvPerf;
-        delete b.showGhost;
+        if (row[7]) b.type = row[7];
+        if (b.localOrigin && b.recvPerf != null) {
+          const drawn = bulletAt(b);
+          b.localOrigin = { x: drawn.x, y: drawn.y };
+          b.recvPerf = performance.now();
+          b.showGhost = true;
+        } else {
+          delete b.localOrigin;
+          delete b.recvPerf;
+          delete b.showGhost;
+        }
       } else {
         addBullet(unpackBullet(row), false, false);
       }
@@ -16633,6 +16889,7 @@ async function connect() {
       localShoot.railChargeLeft = 0;
       stopAllRocketTravelSfx();
       bullets.clear();
+      clearPendingPredShots();
 
       let angle = player.angle;
       let color = ownerPlayerColor(myId);
@@ -16746,6 +17003,7 @@ async function connect() {
       if (msg.lives != null) setSoloLives(msg.lives);
       stopAllRocketTravelSfx();
       bullets.clear();
+      clearPendingPredShots();
       // Authoritative asteroid snapshot after death freeze.
       if (msg.asteroids) replaceAsteroidsFromRows(msg.asteroids);
       selectedWeapon = msg.w != null ? (msg.w | 0) : 1;
@@ -18042,6 +18300,7 @@ function demoApplySnap(ev) {
     }
   }
   bullets.clear();
+  clearPendingPredShots();
   stopAllRocketTravelSfx();
   if (ev.bullets) {
     for (const row of ev.bullets) {
