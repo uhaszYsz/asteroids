@@ -1723,9 +1723,28 @@ function rebuildSynthGrid(step, opts) {
 /** Spawn pad lock radius (world px) — punches leave these nodes flat. */
 const GRID_PIN_SPAWN_R = 20;
 
-/** Pin midfield star + spawn discs (matches painted sport markings). */
+/** PvP sport marks only — waves / menu / queue leave the mesh free. */
+function shouldPinSportGridMarks() {
+  return !!(typeof inGame !== 'undefined' && inGame && !practiceMode);
+}
+
+/** Reset non-border pins, then re-apply sport pins if PvP. */
+function refreshGridStaticPins() {
+  if (!GRID_N || !GRID_COLS) return;
+  for (let k = 0; k < GRID_N; k++) {
+    const i = k % GRID_COLS;
+    const j = (k / GRID_COLS) | 0;
+    const border = i === 0 || j === 0 || i === GRID_COLS - 1 || j === GRID_ROWS - 1;
+    gridStaticPin[k] = border ? 1 : 0;
+    gridInvMass[k] = border ? 0 : 1;
+  }
+  applyGridStaticPins();
+}
+
+/** Pin midfield star + spawn discs (PvP sport markings only). */
 function applyGridStaticPins() {
   if (!GRID_N) return;
+  if (!shouldPinSportGridMarks()) return;
   const cx = W * 0.5;
   const cy = H * 0.5;
   const rStar = Math.min(W, H) * 0.14;
@@ -2704,9 +2723,12 @@ function drawSynthGrid(now) {
   const frameDtMs = lastGridMs ? Math.min(50, now - lastGridMs) : (1000 / 60);
   const dt = frameDtMs / 1000;
   lastGridMs = now;
-  // Instant hitch → half-rate grid. Any fps < 58 restarts the hold timer.
-  const instFps = 1000 / Math.max(1, frameDtMs);
-  if (instFps < GRID_FULL_FPS_FLOOR) gridHalvedRate = GRID_HALVED_HOLD_MS;
+  // Instant hitch → half-rate grid. Use smoothed HUD fps — raw frameDt often
+  // spikes to ~33ms whenever the 60Hz lock skips a rAF beat, which falsely
+  // tripped half-rate forever even when the game was solid 60.
+  if (typeof fpsSmooth === 'number' && fpsSmooth > 0 && fpsSmooth < GRID_FULL_FPS_FLOOR) {
+    gridHalvedRate = GRID_HALVED_HOLD_MS;
+  }
   if (gridHalvedRate > 0) gridHalvedRate = Math.max(0, gridHalvedRate - frameDtMs);
   if (gridTestUntilMs > 0 && now >= gridTestUntilMs) {
     gridTestUntilMs = 0;
@@ -12387,7 +12409,10 @@ function setPracticeWaiting(on) {
   const next = !!on;
   const changed = practiceMode !== next;
   practiceMode = next;
-  if (changed) invalidateGridBake();
+  if (changed) {
+    invalidateGridBake();
+    refreshGridStaticPins();
+  }
   if (waitBannerEl) {
     waitBannerEl.classList.toggle('hidden', !practiceMode);
     if (practiceMode) {
@@ -12693,6 +12718,7 @@ function resetMatchState() {
   syncLaserSfx(false);
   shipSmokeLeaks.clear();
   setPracticeWaiting(false);
+  refreshGridStaticPins();
   stopAllRailChargeSfx();
   railCharges.clear();
   railBeams.length = 0;
@@ -16044,6 +16070,7 @@ function enterGameFromWelcome(msg) {
   coopMode = !!(msg.coop || msg.mode === 'coop');
   soloOnlyMode = !!(msg.soloOnly || msg.mode === 'solo' || msg.mode === 'continue');
   setPracticeWaiting(!!msg.practice);
+  refreshGridStaticPins();
   if (msg.lives != null) setSoloLives(msg.lives);
   else if (msg.practice) setSoloLives(3);
   else setSoloLives(0);
