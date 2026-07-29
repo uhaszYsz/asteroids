@@ -3808,7 +3808,7 @@ function ensureGridBakeTexture() {
   const c0 = spawnPadColorKey(0);
   const c1 = spawnPadColorKey(1);
   const key = [
-    'arena27', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
+    'arena28', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
     practiceMode ? 'p1' : 'p0', inGame ? 'g1' : 'menu', c0, c1
   ].join(':');
   if (!gridBakeDirty && gridBakeTex && gridBakeKey === key) return true;
@@ -3857,43 +3857,67 @@ function ensureGridBakeTexture() {
 }
 
 /**
- * Bake title-screen logo into the grid atlas (same canvas → WebGL texture as the lattice).
- * Not HTML — pixels live in gridBakeTex and warp with the mesh.
+ * Etch title into the grid bake like arena background markings:
+ * lattice recolored inside the glyphs (gaps stay open) + thick outline stroke.
+ * No solid fill — grid lines remain visible through the letters.
  */
-function paintMenuTitleBake(ctx, tw, th) {
+function paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw) {
   const label = 'ASTEROIDS';
   const cx = tw * 0.5;
-  // Halfway between top (0) and center (0.5) → ~0.25.
   const cy = th * 0.25;
   const fontPx = Math.max(22, Math.min(tw, th) * 0.072);
-  // Pixel arcade face — already loaded; reads as bake, not DOM UI.
   const font = fontPx + 'px "Press Start 2P", Consolas, monospace';
+  const outlineW = Math.max(4, fontPx * 0.11);
+
+  // Glyph mask (white text on clear).
+  const mask = document.createElement('canvas');
+  mask.width = tw;
+  mask.height = th;
+  const mctx = mask.getContext('2d');
+  mctx.clearRect(0, 0, tw, th);
+  mctx.font = font;
+  mctx.textAlign = 'center';
+  mctx.textBaseline = 'middle';
+  mctx.fillStyle = '#ffffff';
+  mctx.fillText(label, cx, cy);
+
+  function latticeFill(color) {
+    const layer = document.createElement('canvas');
+    layer.width = tw;
+    layer.height = th;
+    const lctx = layer.getContext('2d');
+    lctx.strokeStyle = color;
+    lctx.lineWidth = Math.max(lw, rs * 0.85);
+    paintLatticePattern(lctx, tw, th, lineStep, rs, topo, false);
+    paintLatticePattern(lctx, tw, th, lineStep, rs, topo, true);
+    // Keep lattice only where the glyph mask is opaque.
+    lctx.globalCompositeOperation = 'destination-in';
+    lctx.drawImage(mask, 0, 0);
+    ctx.drawImage(layer, 0, 0);
+  }
+
+  // Offset shadow lattice (dark) — still grid lines, not a solid blob.
   ctx.save();
+  ctx.translate(Math.max(3, fontPx * 0.07), Math.max(3, fontPx * 0.09));
+  latticeFill('rgba(8, 12, 22, 0.92)');
+  ctx.restore();
+
+  // Main title = cyan lattice inside letter shapes.
+  latticeFill('rgba(120, 230, 255, 1)');
+
+  // Thick outline like sport accents (stroke only).
+  ctx.save();
+  ctx.font = font;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = font;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  ctx.miterLimit = 2;
-
-  // Hard drop-shadow (offset copy) under everything.
-  const ox = Math.max(3, fontPx * 0.08);
-  const oy = Math.max(3, fontPx * 0.1);
-  ctx.fillStyle = 'rgba(4, 8, 18, 0.95)';
-  ctx.fillText(label, cx + ox, cy + oy);
-
-  // Outline 2× previous thickness — stroke before fill so it sits in the bake.
-  const outlineW = Math.max(3, fontPx * 0.09);
   ctx.lineWidth = outlineW;
   ctx.strokeStyle = 'rgba(255, 90, 180, 1)';
   ctx.strokeText(label, cx, cy);
-  // Second pass slightly thinner / darker for a double-edge read on the grid.
-  ctx.lineWidth = outlineW * 0.55;
-  ctx.strokeStyle = 'rgba(20, 10, 30, 0.9)';
+  ctx.lineWidth = outlineW * 0.45;
+  ctx.strokeStyle = 'rgba(20, 8, 28, 0.95)';
   ctx.strokeText(label, cx, cy);
-
-  ctx.fillStyle = 'rgba(120, 230, 255, 1)';
-  ctx.fillText(label, cx, cy);
   ctx.restore();
 }
 
@@ -3936,9 +3960,9 @@ function paintSportArenaGrid(ctx, tw, th, lineStep, rs, ox, oy, worldW, worldH, 
   ctx.lineWidth = lw;
   paintLatticePattern(ctx, tw, th, lineStep, rs, topo, true);
 
-  // Title screen: plain grid + logo only.
+  // Title screen: plain grid + logo etched as lattice (background-style).
   if (menuTitle) {
-    paintMenuTitleBake(ctx, tw, th);
+    paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw);
     return;
   }
 
