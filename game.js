@@ -15271,14 +15271,11 @@ function hitPlayerShipLocal(p, other, hit) {
   emitPlayerAsteroidHit(cir.x, cir.y);
 }
 
-function resolveLocalAsteroidCollisions(p) {
+/** Local-only asteroid contact FX (shake/sfx). No stun / bounce / HP — server owns those. */
+function predictLocalAsteroidHitFx(p) {
   if (!p || p.hp <= 0 || p.godLeft > 0) return;
+  if (p.collideCd > 0) return;
   predictAsteroidEdgeTeleports();
-  // Iframes: keep ejecting so prediction doesn't rattle inside a rock.
-  if (p.collideCd > 0) {
-    separateLocalPlayerFromAsteroids(p, 4);
-    return;
-  }
   for (const a of asteroids.values()) {
     if (a.playerShot && (a.ownerId | 0) === (myId | 0)) continue;
     const pos = asteroidAt(a);
@@ -15296,13 +15293,18 @@ function resolveLocalAsteroidCollisions(p) {
       vy: a.vy
     };
     for (const cir of localPlayerHitCircles(p)) {
-      const hit = circleVsAsteroidPoly(cir, ast);
-      if (hit) {
-        hitPlayerAsteroidLocal(p, ast, hit, a);
-        return;
-      }
+      if (!circleVsAsteroidPoly(cir, ast)) continue;
+      // Iframe so we don't re-fire FX every tick; also skips duplicate on astHit.
+      p.collideCd = COLLIDE_IFRAME_TICKS;
+      emitPlayerAsteroidHit(cir.x, cir.y);
+      return;
     }
   }
+}
+
+function resolveLocalAsteroidCollisions(p) {
+  // Full local bounce/stun/HP prediction disabled — use predictLocalAsteroidHitFx instead.
+  return;
 }
 
 /** Position-only eject matching server separatePlayerFromAsteroids. */
@@ -15386,7 +15388,8 @@ function applyInputTo(o, inp, opts) {
       o.godLeft = 0;
     }
   }
-  // Local asteroid/player collision prediction disabled — bounce/stun/HP come from snaps only.
+  // Local asteroid contact: shake only (no stun / bounce / HP).
+  if (opts && opts.localCollide && o === player) predictLocalAsteroidHitFx(o);
 }
 
 function copyShipState(from, to) {
