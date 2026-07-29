@@ -3217,20 +3217,17 @@ const gbAPos = gl.getAttribLocation(gridBakeProg, 'aPos');
 const gbAUV = gl.getAttribLocation(gridBakeProg, 'aUV');
 const gridBakeBuf = gl.createBuffer();
 
-/* ========== Menu title neon pulses (brightness boost on fill + outline) ========== */
+/* ========== Menu title neon pulses (brighten the baked background) ========== */
 const menuNeonFS = `
   precision mediump float;
-  uniform sampler2D uMask;
+  uniform sampler2D uBake;
   uniform vec4 uPulses[8]; // xy = world center, z = radius, w = strength
   uniform vec2 uWorldOrigin;
   uniform vec2 uWorldSize;
   varying vec2 vUV;
-  varying vec2 vWorld;
   void main() {
-    vec4 o = texture2D(uMask, vUV);
-    float mask = max(o.a, max(o.r, max(o.g, o.b)));
-    if (mask < 0.05) discard;
-    // Bake/UV world — same space as title etch + boom lights.
+    vec4 bg = texture2D(uBake, vUV);
+    if (bg.a < 0.01) discard;
     vec2 world = uWorldOrigin + vUV * uWorldSize;
     float glow = 0.0;
     for (int i = 0; i < 8; i++) {
@@ -3254,10 +3251,8 @@ const menuNeonFS = `
     }
     glow = clamp(glow, 0.0, 1.0);
     if (glow < 0.02) discard;
-    // Same hue as lattice; blend toward 2x brightness with the blast gradient.
-    float a = min(1.0, mask * glow);
-    vec3 col = o.rgb * 2.0;
-    gl_FragColor = vec4(col, a);
+    // Additive: output bg color × glow → adds brightness on top of existing draw.
+    gl_FragColor = vec4(bg.rgb * glow, 1.0);
   }
 `;
 const menuNeonProg = gl.createProgram();
@@ -3265,7 +3260,7 @@ gl.attachShader(menuNeonProg, shader(gl.VERTEX_SHADER, gridBakeVS));
 gl.attachShader(menuNeonProg, shader(gl.FRAGMENT_SHADER, menuNeonFS));
 linkProgram(menuNeonProg);
 const mnURes = gl.getUniformLocation(menuNeonProg, 'uRes');
-const mnUMask = gl.getUniformLocation(menuNeonProg, 'uMask');
+const mnUBake = gl.getUniformLocation(menuNeonProg, 'uBake');
 const mnUPulses = gl.getUniformLocation(menuNeonProg, 'uPulses[0]');
 const mnUWorldOrigin = gl.getUniformLocation(menuNeonProg, 'uWorldOrigin');
 const mnUWorldSize = gl.getUniformLocation(menuNeonProg, 'uWorldSize');
@@ -4130,39 +4125,35 @@ function packMenuNeonPulses(list, now) {
   return n;
 }
 
-/** Normal-blend brightness pulses on fill + outline lattice (up to 2×, no recolor). */
+/** Additive brightness pulses on the baked grid background (menu only). */
 function drawMenuTitleNeonGlow(now) {
   if (inGame) return;
-  if (!menuTitleFillReady && !menuTitleOutlineReady) return;
-  if (!gridBakeVertCount) return;
+  if (!gridBakeTex || !gridBakeVertCount) return;
   tickMenuTitleNeonPulses(now);
 
+  // Merge both pulse lists into one pack for a single draw on the bake texture.
+  const allPulses = menuTitleFillPulses.concat(menuTitleOutlinePulses);
+  if (!packMenuNeonPulses(allPulses, now)) return;
+
   gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.blendFunc(gl.ONE, gl.ONE);
   gl.useProgram(menuNeonProg);
   gl.uniform2f(mnURes, W, H);
   if (mnUWorldOrigin) gl.uniform2f(mnUWorldOrigin, gridBakeOriginX, gridBakeOriginY);
   if (mnUWorldSize) gl.uniform2f(mnUWorldSize, gridBakeWorldW, gridBakeWorldH);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, gridBakeTex);
+  gl.uniform1i(mnUBake, 0);
+  gl.uniform4fv(mnUPulses, _menuNeonPulses);
   gl.bindBuffer(gl.ARRAY_BUFFER, gridBakeBuf);
   gl.enableVertexAttribArray(mnAPos);
   gl.enableVertexAttribArray(mnAUV);
   gl.vertexAttribPointer(mnAPos, 2, gl.FLOAT, false, 16, 0);
   gl.vertexAttribPointer(mnAUV, 2, gl.FLOAT, false, 16, 8);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.uniform1i(mnUMask, 0);
-
-  const drawLayer = (ready, tex, pulses) => {
-    if (!ready || !tex) return;
-    if (!packMenuNeonPulses(pulses, now)) return;
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.uniform4fv(mnUPulses, _menuNeonPulses);
-    gl.drawArrays(gl.TRIANGLES, 0, gridBakeVertCount);
-  };
-  drawLayer(menuTitleFillReady, menuTitleFillTex, menuTitleFillPulses);
-  drawLayer(menuTitleOutlineReady, menuTitleOutlineTex, menuTitleOutlinePulses);
-
+  gl.drawArrays(gl.TRIANGLES, 0, gridBakeVertCount);
   gl.disableVertexAttribArray(mnAPos);
   gl.disableVertexAttribArray(mnAUV);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 }
 
 /**
