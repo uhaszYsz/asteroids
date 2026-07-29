@@ -440,6 +440,8 @@ const SFX = {
   shieldOff: 'sounds/shield.wav',
   /** Meteor-gun rock vs world asteroid — only asteroid↔asteroid collision sting. */
   meteorCrash: 'sounds/explosion1.wav',
+  voidHit: 'sounds/voidHit.wav',
+  voidLoop: 'sounds/voidLoop.wav',
   laserImpact: 'sounds/laserImpact.wav',
   laser: 'sounds/laser2.wav',
   death: 'sounds/death2.wav',
@@ -736,6 +738,64 @@ function startRocketTravelSfx(b) {
     } catch (_) {}
   };
   rocketTravelEnded.set(key, onEnded);
+  a.addEventListener('ended', onEnded);
+}
+
+function voidTravelKey(id) {
+  return 'voidTravel:' + id;
+}
+
+const voidTravelEnded = new Map();
+
+function stopVoidTravelSfx(id) {
+  if (id == null) return;
+  const key = voidTravelKey(id);
+  const a = sfxHolds.get(key);
+  const onEnded = voidTravelEnded.get(key);
+  if (a && onEnded) {
+    try { a.removeEventListener('ended', onEnded); } catch (_) {}
+  }
+  voidTravelEnded.delete(key);
+  stopSfxLoop(key);
+}
+
+function stopAllVoidTravelSfx() {
+  for (const key of [...sfxHolds.keys()]) {
+    if (String(key).indexOf('voidTravel:') !== 0) continue;
+    const a = sfxHolds.get(key);
+    const onEnded = voidTravelEnded.get(key);
+    if (a && onEnded) {
+      try { a.removeEventListener('ended', onEnded); } catch (_) {}
+    }
+    voidTravelEnded.delete(key);
+    stopSfxLoop(key);
+  }
+}
+
+function startVoidTravelSfx(b) {
+  if (!b || b.type !== 'voidcannon') return;
+  const id = b.id;
+  const key = voidTravelKey(id);
+  const mine = b.owner === myId;
+  const a = playSfxLoop(key, SFX.voidLoop, {
+    vol: mine ? 0.6 : 0.4,
+    loop: true
+  });
+  if (!a) return;
+  const prev = voidTravelEnded.get(key);
+  if (prev) {
+    try { a.removeEventListener('ended', prev); } catch (_) {}
+  }
+  const onEnded = () => {
+    const still = bullets.get(id);
+    if (!still || still.type !== 'voidcannon') return;
+    try {
+      a.loop = true;
+      a.currentTime = 0;
+      sfxTryPlay(a);
+    } catch (_) {}
+  };
+  voidTravelEnded.set(key, onEnded);
   a.addEventListener('ended', onEnded);
 }
 
@@ -7116,7 +7176,7 @@ function emitLocalShootFx() {
     return;
   }
 
-  if (wpn === 7) {
+  if (wpn === 6) {
     if (localShoot.sfxSkipNext) {
       localShoot.sfxSkipNext = false;
     } else {
@@ -7126,13 +7186,16 @@ function emitLocalShootFx() {
     return;
   }
 
-  if (wpn === 8) {
-    if (localShoot.sfxSkipNext) {
-      localShoot.sfxSkipNext = false;
-    } else {
-      playSfx(SFX.shoot, { vol: 0.85, pool: 8 });
-    }
+  if (wpn === 7) {
+    // Void: travel loop starts when the orb bullet is added (no generic shoot sting).
+    if (localShoot.sfxSkipNext) localShoot.sfxSkipNext = false;
     emitMuzzleFx(m.x, m.y, ang, COL.voidcannon, 11, me.vx, me.vy, { cone: 1.2 });
+    return;
+  }
+
+  if (wpn === 8) {
+    // Asteroid gun: rock spawn FX is separate; no blaster sting.
+    if (localShoot.sfxSkipNext) localShoot.sfxSkipNext = false;
     return;
   }
 
@@ -12595,6 +12658,7 @@ function applyResumedMsg(msg) {
   if (msg.bullets) {
     bullets.clear();
     stopAllRocketTravelSfx();
+    stopAllVoidTravelSfx();
     for (const row of msg.bullets) addBullet(unpackBullet(row), false);
   }
   if (msg.enemies) {
@@ -12679,6 +12743,7 @@ function resetMatchState() {
   soloLives = 3;
   asteroidGhosts = [];
   stopAllRocketTravelSfx();
+  stopAllVoidTravelSfx();
   bullets.clear();
   pickups.clear();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
@@ -12944,6 +13009,7 @@ function addBullet(b, withMuzzle, liveFire) {
   if (liveFire) applyLiveBulletTransitAge(b);
   bullets.set(b.id, b);
   if (b.type === 'rocket' || b.type === 'enemyRocket') startRocketTravelSfx(b);
+  if (b.type === 'voidcannon') startVoidTravelSfx(b);
   if (withMuzzle) {
     const ang = Math.atan2(b.vy, b.vx);
     const origin = { x: b.spawnX, y: b.spawnY };
@@ -12968,7 +13034,6 @@ function addBullet(b, withMuzzle, liveFire) {
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.45, pool: 8 });
     } else if (b.type === 'voidcannon') {
       emitMuzzleFx(origin.x, origin.y, ang, COL.voidcannon, 10, sv.vx, sv.vy, { cone: 1.2 });
-      if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.5, pool: 8 });
     } else if (b.type === 'turret') {
       emitMuzzleFx(origin.x, origin.y, ang, COL.powerTurret, 7, sv.vx, sv.vy);
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.35, pool: 8 });
@@ -12985,6 +13050,7 @@ function removeBullet(id, hitKind, hx, hy) {
     const p = (hx != null && hy != null) ? { x: hx, y: hy } : bulletAt(b);
     emitBulletImpactFx(p.x, p.y, b.type || 'default', kind, b.vx, b.vy);
     if (b.type === 'rocket' || b.type === 'enemyRocket') stopRocketTravelSfx(b.id);
+    if (b.type === 'voidcannon') stopVoidTravelSfx(b.id);
   } else if (hx != null && hy != null) {
     emitBulletImpactFx(hx, hy, 'default', kind);
   }
@@ -13364,6 +13430,7 @@ function pruneBullets() {
     const p = bulletTrueAt(b);
     if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) {
       if (b.type === 'rocket' || b.type === 'enemyRocket') stopRocketTravelSfx(id);
+      if (b.type === 'voidcannon') stopVoidTravelSfx(id);
       bullets.delete(id);
     }
   }
@@ -15816,6 +15883,7 @@ function enterGameFromWelcome(msg) {
   localScore = 0;
   asteroidGhosts = [];
   stopAllRocketTravelSfx();
+  stopAllVoidTravelSfx();
   bullets.clear();
   pickups.clear();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
@@ -16487,7 +16555,10 @@ async function connect() {
       return;
     }
     if (msg.t === 'vd' && inGame) {
-      if (msg.x != null && msg.y != null) emitVoidDamageParticles(msg.x, msg.y);
+      if (msg.x != null && msg.y != null) {
+        emitVoidDamageParticles(msg.x, msg.y);
+        playSfx(SFX.voidHit, { vol: 0.85, pool: 4 });
+      }
       if (msg.k && msg.id != null) beginVoidShake(msg.k, msg.id);
       return;
     }
@@ -16597,6 +16668,7 @@ async function connect() {
       localShoot.bursting = false;
       localShoot.railChargeLeft = 0;
       stopAllRocketTravelSfx();
+      stopAllVoidTravelSfx();
       bullets.clear();
 
       let angle = player.angle;
@@ -16710,6 +16782,7 @@ async function connect() {
       if (msg.names) applyNames(msg.names);
       if (msg.lives != null) setSoloLives(msg.lives);
       stopAllRocketTravelSfx();
+      stopAllVoidTravelSfx();
       bullets.clear();
       // Authoritative asteroid snapshot after death freeze.
       if (msg.asteroids) replaceAsteroidsFromRows(msg.asteroids);
@@ -18015,6 +18088,7 @@ function demoApplySnap(ev) {
   }
   bullets.clear();
   stopAllRocketTravelSfx();
+  stopAllVoidTravelSfx();
   if (ev.bullets) {
     for (const row of ev.bullets) {
       const b = unpackBullet(row);
