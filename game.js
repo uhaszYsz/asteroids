@@ -1014,6 +1014,11 @@ const CVARS = {
     def: 0.5,
     help: 'Grid / bake stroke opacity (0–1).'
   },
+  cl_grid_aliasing: {
+    value: 0,
+    def: 0,
+    help: '1 = LINEAR sample baked grid (blend neighboring texels). 0 = NEAREST (crisp). Off by default.'
+  },
   cl_ast_outline_tex: {
     value: 0,
     def: 0,
@@ -1148,7 +1153,8 @@ function setCvar(name, raw) {
     invalidateGridBake();
   }
   if (name === 'cl_bg_layer' || name === 'cl_bg_dir_invert'
-    || name === 'cl_ast_outline_tex' || name === 'cl_ast_face_tex') {
+    || name === 'cl_ast_outline_tex' || name === 'cl_ast_face_tex'
+    || name === 'cl_grid_aliasing') {
     c.value = (n | 0) !== 0 ? 1 : 0;
   }
   if (name === 'sv_send_asteroids') syncGetAsteroidsCvar();
@@ -3840,8 +3846,9 @@ function ensureGridBakeTexture() {
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  // Filter applied each frame from cl_grid_aliasing (default NEAREST).
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cnv);
 
   gridBakeKey = key;
@@ -4579,6 +4586,9 @@ function drawGridBaked() {
   gl.useProgram(gridBakeProg);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, gridBakeTex);
+  const bakeFilt = (cv('cl_grid_aliasing') | 0) !== 0 ? gl.LINEAR : gl.NEAREST;
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, bakeFilt);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, bakeFilt);
   gl.uniform1i(gbUTex, 0);
   const useNebula = practiceMode && ensureNebulaGLTexture();
   if (gbUNebula) {
@@ -16967,6 +16977,7 @@ const GRID_PANEL_GLOBALS = [
   { name: 'cl_grid_size', min: 2, max: 80, step: 1 },
   { name: 'cl_grid_width', min: 0.25, max: 8, step: 0.25 },
   { name: 'cl_grid_alpha', min: 0, max: 1, step: 0.01 },
+  { name: 'cl_grid_aliasing', min: 0, max: 1, step: 1 },
   { name: 'cl_bg_layer', min: 0, max: 1, step: 1 },
   { name: 'cl_bg_dir_invert', min: 0, max: 1, step: 1 }
 ];
@@ -17135,7 +17146,8 @@ function setGridProbeShape(shape) {
 }
 
 function formatGridCvarValue(name, v) {
-  if (name === 'cl_grid' || name === 'cl_grid_implosion' || name === 'cl_background_bake') {
+  if (name === 'cl_grid' || name === 'cl_grid_implosion' || name === 'cl_background_bake'
+    || name === 'cl_grid_aliasing') {
     return String(v | 0);
   }
   if (name === 'cl_background_bake_quality') return String(Math.max(5, Math.min(14, v | 0)));
