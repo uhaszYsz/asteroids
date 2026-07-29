@@ -4048,13 +4048,19 @@ function emitRoundReset(room) {
  */
 /** Global: seamless asteroid edge portals (sv_portal). Default off for throughput. */
 let svPortal = 0;
-/** Global: fire lead from one-way ping instead of fixed step/angle (sv_dynamic_prediction). */
+/** Global: scale for ping-based fire lead (sv_dynamic_prediction). 0 = fixed step/angle. */
 let svDynamicPrediction = 1;
 /** Global demo recording: 0 off · 1 PvP · 2 PvP + coop/queue waves (sv_demo). Default 2. */
 let svDemo = demoRecorder.getDemoMode();
 
+function clampDynamicPredictionScale(n) {
+  n = Number(n);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n;
+}
+
 function broadcastSvDynamicPrediction() {
-  const msg = { t: 'svDynamicPrediction', v: svDynamicPrediction ? 1 : 0 };
+  const msg = { t: 'svDynamicPrediction', v: svDynamicPrediction };
   for (const c of wss.clients) {
     if (c.readyState === 1) send(c, msg);
   }
@@ -4513,7 +4519,7 @@ function tryStartBurst(p) {
 }
 
 /** Ship pose N ticks ahead: position via vx/vy, aim via av (separate leads).
- *  With sv_dynamic_prediction: lead = round(one-way/tick − cmdDelay) from RTT. */
+ *  With sv_dynamic_prediction: lead = round((one-way/tick − cmdDelay) * scale) from RTT. */
 function clampPredictLeadTicks(n) {
   n = n | 0;
   if (n < 0) n = 0;
@@ -4524,10 +4530,12 @@ function clampPredictLeadTicks(n) {
 function pingBasedPredictLeadTicks(room, p) {
   const rtt = playerRttMs(room, p && p.id) || 0;
   // One-way latency in ticks, minus the client's cmd delay (inputs already
-  // applied locally that many ticks before the server consumes them).
+  // applied locally that many ticks before the server consumes them),
+  // then scaled by sv_dynamic_prediction (1 = legacy strength).
   const oneWayTicks = (rtt * 0.5) / TICK_MS;
   const cmdDelay = playerCmdDelayTicks(room, p && p.id);
-  return clampPredictLeadTicks(Math.round(oneWayTicks - cmdDelay));
+  const scale = svDynamicPrediction > 0 ? svDynamicPrediction : 1;
+  return clampPredictLeadTicks(Math.round((oneWayTicks - cmdDelay) * scale));
 }
 
 function playerCmdDelayTicks(room, playerId) {
@@ -7261,7 +7269,7 @@ function sendWelcome(ws, room, p, extra) {
     names: packRosterNames(room),
     colors: packPlayerColors(room),
     scoreToWin: SCORE_TO_WIN,
-    svDynamicPrediction: svDynamicPrediction ? 1 : 0,
+    svDynamicPrediction: svDynamicPrediction,
     players: packSnap(room).players,
     bullets: room.bullets.map(packBullet),
     asteroids: room.asteroids.map(packAsteroid),
@@ -7396,7 +7404,7 @@ wss.on('connection', (ws) => {
   ws.isAdmin = false;
   initClientLimits(ws);
   initGuestSession(ws);
-  send(ws, { t: 'lobby', st: Date.now(), svDynamicPrediction: svDynamicPrediction ? 1 : 0 });
+  send(ws, { t: 'lobby', st: Date.now(), svDynamicPrediction: svDynamicPrediction });
   sendSession(ws);
   send(ws, packPresence());
   sendTeamState(ws);
@@ -7525,7 +7533,7 @@ wss.on('connection', (ws) => {
 
     if (msg.t === 'svDynamicPrediction') {
       if (!ws.isAdmin) return;
-      svDynamicPrediction = (msg.v | 0) !== 0 ? 1 : 0;
+      svDynamicPrediction = clampDynamicPredictionScale(msg.v);
       broadcastSvDynamicPrediction();
       console.log(`[predict] sv_dynamic_prediction = ${svDynamicPrediction}`);
       return;

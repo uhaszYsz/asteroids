@@ -896,7 +896,7 @@ const CVARS = {
   sv_dynamic_prediction: {
     value: 1,
     def: 1,
-    help: '1 = fire lead from one-way ping − cmd delay (global). 0 = fixed sv_predict_shoot_step/angle. Admin only.'
+    help: 'Scale for ping-based fire lead (global). 0 = fixed sv_predict_shoot_step/angle. 1 = one-way − cmd delay; 2 = 2× that lead. Admin only.'
   },
   sv_portal: {
     value: 1,
@@ -1145,7 +1145,7 @@ function setCvar(name, raw) {
     syncPredictShootCvars();
   }
   if (name === 'sv_dynamic_prediction') {
-    c.value = (n | 0) !== 0 ? 1 : 0;
+    c.value = Math.max(0, n);
     syncDynamicPredictionCvar();
   }
   if (name === 'sv_portal') syncPortalCvar();
@@ -1213,21 +1213,22 @@ function syncDynamicPredictionCvar() {
   if (!ws || ws.readyState !== 1) return;
   ws.send(JSON.stringify({
     t: 'svDynamicPrediction',
-    v: (cv('sv_dynamic_prediction') | 0) !== 0 ? 1 : 0
+    v: Math.max(0, Number(cv('sv_dynamic_prediction')) || 0)
   }));
 }
 
 /** Client-side mirror of server fire lead (for aim cone / debug). */
 function shootPredictLeadTicks() {
-  if ((cv('sv_dynamic_prediction') | 0) !== 0) {
+  const scale = Number(cv('sv_dynamic_prediction'));
+  if (scale > 0) {
     const oneWayTicks = (pingMs * 0.5) / TICK_MS;
-    return Math.max(0, Math.min(8, Math.round(oneWayTicks - adaptiveInputDelay()) | 0));
+    return Math.max(0, Math.min(8, Math.round((oneWayTicks - adaptiveInputDelay()) * scale) | 0));
   }
   return Math.max(0, Math.min(8, cv('sv_predict_shoot_step') | 0));
 }
 
 function shootPredictAngleLeadTicks() {
-  if ((cv('sv_dynamic_prediction') | 0) !== 0) {
+  if (Number(cv('sv_dynamic_prediction')) > 0) {
     return shootPredictLeadTicks();
   }
   return Math.max(0, Math.min(8, cv('sv_predict_shoot_angle') | 0));
@@ -6996,6 +6997,7 @@ function mixRgb(a, b, t) {
 /**
  * Muzzle flash: circles (scale 1×1), sized like the default gun bullet
  * (random 0%…230%), speed = default bullet speed ±50%.
+ * Emits two layers: one inheriting ship/rocket vel, one with base 0 + particle speeds only.
  * `count` scales intensity; optional opts.cone widens the spray (shotgun).
  */
 function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
@@ -7009,8 +7011,7 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
   const bulletSize = 2 * RES_SCALE;
   // Weapon speed is px/tick → particles use px/s.
   const bulletSpd = (WEAPONS.default.speed || (8 * RES_SCALE)) * TPS;
-
-  emitParticles({
+  const base = {
     x, y,
     count: Math.max(4, n),
     speed: bulletSpd,
@@ -7024,10 +7025,12 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
     lifetime: 0.14,
     lifetimeSpread: 0.08,
     color: tint,
-    drag: 2.2,
-    inheritVx: shipVx,
-    inheritVy: shipVy
-  });
+    drag: 2.2
+  };
+
+  emitParticles(Object.assign({}, base, { inheritVx: shipVx, inheritVy: shipVy }));
+  // Second layer: no ship vel — only particle random speed range from 0 base.
+  emitParticles(Object.assign({}, base, { inheritVx: 0, inheritVy: 0 }));
 }
 
 /** Instant local muzzle flash (bullets still come from the server). */
@@ -15762,7 +15765,8 @@ function enterGameFromWelcome(msg) {
   if (msg.colors) applyPlayerColors(msg.colors);
   if (msg.scoreToWin != null) setScoreToWin(msg.scoreToWin);
   if (msg.svDynamicPrediction != null && CVARS.sv_dynamic_prediction) {
-    CVARS.sv_dynamic_prediction.value = (msg.svDynamicPrediction | 0) !== 0 ? 1 : 0;
+    const s = Number(msg.svDynamicPrediction);
+    CVARS.sv_dynamic_prediction.value = Number.isFinite(s) ? Math.max(0, s) : 0;
   }
   applyNtp(Date.now(), msg.st, msg.tick);
   // Re-assert room clock after NTP (inGame is already true so applyNtp won't overwrite).
@@ -15921,7 +15925,8 @@ async function connect() {
     if (msg.t === 'lobby') {
       // Solo game-over sends lobby right after soloOver — keep the over screen.
       if (msg.svDynamicPrediction != null && CVARS.sv_dynamic_prediction) {
-        CVARS.sv_dynamic_prediction.value = (msg.svDynamicPrediction | 0) !== 0 ? 1 : 0;
+        const s = Number(msg.svDynamicPrediction);
+        CVARS.sv_dynamic_prediction.value = Number.isFinite(s) ? Math.max(0, s) : 0;
       }
       if (soloOverOpen) return;
       returnToLobby();
@@ -15991,7 +15996,8 @@ async function connect() {
     }
     if (msg.t === 'svDynamicPrediction') {
       if (CVARS.sv_dynamic_prediction) {
-        CVARS.sv_dynamic_prediction.value = (msg.v | 0) !== 0 ? 1 : 0;
+        const s = Number(msg.v);
+        CVARS.sv_dynamic_prediction.value = Number.isFinite(s) ? Math.max(0, s) : 0;
       }
       return;
     }
