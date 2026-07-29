@@ -438,7 +438,8 @@ const SFX = {
   ],
   asteroidCollide: 'sounds/explosion1.wav',
   shieldOff: 'sounds/shield.wav',
-  meteorCrash: 'sounds/impactsMetalCrash.wav',
+  /** Meteor-gun rock vs world asteroid — only asteroid↔asteroid collision sting. */
+  meteorCrash: 'sounds/explosion1.wav',
   laserImpact: 'sounds/laserImpact.wav',
   laser: 'sounds/laser2.wav',
   death: 'sounds/death2.wav',
