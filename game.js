@@ -9927,8 +9927,8 @@ const spriteShipMesh = new Float32Array(12 * 4);
 const SPRITE_ROOF_PITCH = 0.58;
 /** Screen lift so the ridge reads above the wing tips even at bank=0. */
 const SPRITE_ROOF_LIFT = 0.48;
-/** Player-color silhouette outline width (px), same ballpark as asteroid outline. */
-const SPRITE_SHIP_OUTLINE_W = 2;
+/** Player-color silhouette outline width (screen px; fixed, not scaled by RES_SCALE). */
+const SPRITE_SHIP_OUTLINE_W = 1;
 const SPRITE_SHIP_OUTLINE_DIRS = [
   [1, 0], [-1, 0], [0, 1], [0, -1],
   [1, 1], [-1, 1], [1, -1], [-1, -1]
@@ -10016,7 +10016,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
   const tint = color || COL.self || [0.35, 0.85, 1];
   const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
   const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
-  const outlineW = SPRITE_SHIP_OUTLINE_W * Math.max(1, RES_SCALE);
+  const outlineW = SPRITE_SHIP_OUTLINE_W;
 
   gl.useProgram(spriteShipProg);
   gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
