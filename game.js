@@ -6994,8 +6994,9 @@ function mixRgb(a, b, t) {
 }
 
 /**
- * Layered muzzle flash (core → flame → sparks → smoke).
- * `count` scales intensity; optional opts.cone multiplies cone widths (shotgun).
+ * Muzzle flash: circles (scale 1×1), sized like the default gun bullet
+ * (random 0%…230%), speed = default bullet speed ±50%.
+ * `count` scales intensity; optional opts.cone widens the spray (shotgun).
  */
 function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
   // Ship vel is px/tick; particle vel is px/s — same base as idle thrust.
@@ -7003,112 +7004,27 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
   const shipVy = (vy || 0) * TPS;
   const n = Math.max(1, count == null ? 8 : count | 0);
   const tint = color || COL.bullet;
-  const S = RES_SCALE;
   const cone = (opts && opts.cone > 0) ? opts.cone : 1;
-  // Classic gunpowder palette, lightly pulled toward weapon tint.
-  const colCore = mixRgb([1.0, 0.98, 0.92], tint, 0.12);
-  const colHot = mixRgb([1.0, 0.88, 0.35], tint, 0.2);
-  const colFlame = mixRgb([1.0, 0.42, 0.08], tint, 0.28);
-  const colEmber = mixRgb([1.0, 0.28, 0.05], tint, 0.35);
-  const colSmoke = mixRgb([0.42, 0.38, 0.34], tint, 0.15);
+  // Default bullet GL points: diameter 2×RES_SCALE in world space.
+  const bulletSize = 2 * RES_SCALE;
+  // Weapon speed is px/tick → particles use px/s.
+  const bulletSpd = (WEAPONS.default.speed || (8 * RES_SCALE)) * TPS;
 
-  // White-hot bloom at the tip — brief, tight, fat.
   emitParticles({
     x, y,
-    count: Math.max(2, Math.round(n * 0.45)),
-    speed: 70 * S,
-    speedSpread: 40 * S,
+    count: Math.max(4, n),
+    speed: bulletSpd,
+    speedSpread: bulletSpd, // ±50%
     direction: angle,
-    spread: 0.18 * cone,
-    size: 3.6 * S,
-    sizeSpread: 1.6 * S,
-    scaleY: 1.35,
-    lifetime: 0.045,
-    lifetimeSpread: 0.02,
-    color: colCore,
-    drag: 9,
-    inheritVx: shipVx,
-    inheritVy: shipVy
-  });
-
-  // Yellow-white hot tongue along the barrel axis.
-  emitParticles({
-    x, y,
-    count: Math.max(3, Math.round(n * 0.7)),
-    speed: 160 * S,
-    speedSpread: 90 * S,
-    direction: angle,
-    spread: 0.32 * cone,
-    size: 2.2 * S,
-    sizeSpread: 1.1 * S,
-    scaleY: 2.6,
-    sizeWiggle: 0.3,
-    sizeWiggleSpeed: 20,
-    lifetime: 0.08,
-    lifetimeSpread: 0.04,
-    color: colHot,
-    drag: 6.5,
-    inheritVx: shipVx,
-    inheritVy: shipVy
-  });
-
-  // Orange flame cone — the readable “blast”.
-  emitParticles({
-    x, y,
-    count: Math.max(5, n),
-    speed: 145 * S,
-    speedSpread: 110 * S,
-    direction: angle,
-    spread: 0.62 * cone,
-    size: 1.8 * S,
-    sizeSpread: 1.2 * S,
-    scaleY: 2.3,
-    sizeWiggle: 0.4,
-    sizeWiggleSpeed: 16,
-    lifetime: 0.12,
-    lifetimeSpread: 0.06,
-    color: colFlame,
-    drag: 5.2,
-    inheritVx: shipVx,
-    inheritVy: shipVy
-  });
-
-  // Fast elongated sparks / embers (weapon-tinted).
-  emitParticles({
-    x, y,
-    count: Math.max(4, Math.round(n * 0.9)),
-    speed: 240 * S,
-    speedSpread: 180 * S,
-    direction: angle,
-    spread: 0.95 * cone,
-    size: 0.85 * S,
-    sizeSpread: 0.55 * S,
-    scaleY: 3.4,
-    sizeWiggle: 0.15,
-    sizeWiggleSpeed: 22,
-    lifetime: 0.18,
-    lifetimeSpread: 0.1,
-    color: mixRgb(colEmber, tint, 0.55),
-    drag: 3.0,
-    inheritVx: shipVx,
-    inheritVy: shipVy
-  });
-
-  // Soft smoke puff — hangs a beat behind the flash.
-  emitParticles({
-    x, y,
-    count: Math.max(2, Math.round(n * 0.4)),
-    speed: 38 * S,
-    speedSpread: 32 * S,
-    direction: angle,
-    spread: 1.15 * cone,
-    size: 2.6 * S,
-    sizeSpread: 1.5 * S,
-    scaleY: 1.15,
-    lifetime: 0.3,
-    lifetimeSpread: 0.14,
-    color: colSmoke,
-    drag: 2.0,
+    spread: 0.35 * cone,
+    // size0±half spread → uniform 0%…230% of bullet diameter
+    size: bulletSize * 1.15,
+    sizeSpread: bulletSize * 2.3,
+    scaleY: 1,
+    lifetime: 0.14,
+    lifetimeSpread: 0.08,
+    color: tint,
+    drag: 2.2,
     inheritVx: shipVx,
     inheritVy: shipVy
   });
