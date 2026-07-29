@@ -2737,91 +2737,6 @@ function stepSynthGrid(dt, now) {
   }
 }
 
-/** Short-lived menu title stretch pops (spawned in the ASTEROIDS text box). */
-const menuTitlePulses = [];
-let menuTitlePulseNextAt = 0;
-
-/**
- * Menu-only: every 0.2s spawn a small stretch pop in a random spot of the title area.
- * Radius & power are half the old full-title breath; lattice + etched text stretch together.
- */
-function applyMenuTitleGridPulse(now) {
-  if (inGame || !GRID_N) {
-    menuTitlePulses.length = 0;
-    menuTitlePulseNextAt = 0;
-    return;
-  }
-  now = now || performance.now();
-
-  const fontPx = Math.max(22, Math.min(W, H) * 0.072);
-  const areaCx = W * 0.5;
-  const areaCy = H * 0.25;
-  const textW = fontPx * 8.2;
-  const textH = fontPx * 1.4;
-  const x0 = areaCx - textW * 0.5;
-  const y0 = areaCy - textH * 0.5;
-
-  if (!menuTitlePulseNextAt) menuTitlePulseNextAt = now;
-  while (now >= menuTitlePulseNextAt) {
-    menuTitlePulseNextAt += 200;
-    menuTitlePulses.push({
-      x: x0 + Math.random() * textW,
-      y: y0 + Math.random() * textH,
-      born: now,
-      life: 380
-    });
-  }
-  for (let i = menuTitlePulses.length - 1; i >= 0; i--) {
-    if (now - menuTitlePulses[i].born >= menuTitlePulses[i].life) {
-      menuTitlePulses.splice(i, 1);
-    }
-  }
-
-  // Rest pose first.
-  for (let k = 0; k < GRID_N; k++) {
-    if (gridStaticPin[k]) continue;
-    gridDefX[k] = gridBaseX[k];
-    gridDefY[k] = gridBaseY[k];
-    gridVelX[k] = 0;
-    gridVelY[k] = 0;
-  }
-  if (!menuTitlePulses.length) return;
-
-  // 2× smaller radius / power vs the old full-title pulse (was R=0.58·min, amp→+1).
-  const R = Math.min(W, H) * 0.29;
-  const invR = 1 / Math.max(1, R);
-  const peakAmp = 0.5;
-
-  for (let k = 0; k < GRID_N; k++) {
-    if (gridStaticPin[k]) continue;
-    const bx = gridBaseX[k];
-    const by = gridBaseY[k];
-    let ox = 0;
-    let oy = 0;
-    for (let pi = 0; pi < menuTitlePulses.length; pi++) {
-      const p = menuTitlePulses[pi];
-      const dx = bx - p.x;
-      const dy = by - p.y;
-      const d = Math.hypot(dx, dy);
-      if (d >= R || d < 1e-4) continue;
-      const uAge = (now - p.born) / p.life;
-      const env = uAge < 0.32 ? (uAge / 0.32) : Math.max(0, 1 - (uAge - 0.32) / 0.68);
-      const ease = env * env * (3 - 2 * env);
-      const amp = peakAmp * ease;
-      let u = 1 - d * invR;
-      u = u * u * (3 - 2 * u);
-      const punch = u * u;
-      const s = 1 + amp * punch;
-      const sx = 1 + (s - 1) * 0.88;
-      const sy = s;
-      ox += dx * sx - dx;
-      oy += dy * sy - dy;
-    }
-    gridDefX[k] = bx + ox;
-    gridDefY[k] = by + oy;
-  }
-}
-
 /** Flat deformable lattice — square / hex / triangle from cl_grid. */
 function drawSynthGrid(now) {
   const frameDtMs = lastGridMs ? Math.min(50, now - lastGridMs) : (1000 / 60);
@@ -2868,7 +2783,6 @@ function drawSynthGrid(now) {
     gridHalfAccumMs = 0;
   }
   if (doGridStep) stepSynthGrid(gridStepDt, now);
-  applyMenuTitleGridPulse(now);
   tickGodmodeSpawnRipples(dt);
   if ((cv('cl_background_bake') | 0) !== 0) {
     drawGridBaked();
