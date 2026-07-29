@@ -620,7 +620,12 @@
     #solo-shop .ss-equipped {
       display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     }
-    #solo-shop .ss-equipped .ss-preview { display: none; }
+    #solo-shop .ss-equipped .ss-preview {
+      width: 72px; height: 72px; flex: 0 0 auto;
+      aspect-ratio: 1 / 1;
+      background: #020810;
+      border: 1px solid #3a90b0;
+    }
     #solo-shop .ss-equipped-info { flex: 1 1 140px; min-width: 0; }
     #solo-shop .ss-equipped-label {
       font-family: "Press Start 2P", Consolas, monospace;
@@ -679,7 +684,10 @@
       font-size: 11px; text-transform: uppercase;
       color: #c8e8f8;
     }
-    #solo-shop .ss-owned-chip canvas { display: none; }
+    #solo-shop .ss-owned-chip canvas {
+      width: 28px; height: 28px; display: block; background: #020810;
+      border: 1px solid #345868;
+    }
     #solo-shop .ss-owned-empty {
       font-size: 12px; color: #486878;
     }
@@ -716,7 +724,17 @@
       opacity: 0.4;
       pointer-events: none;
     }
-    #solo-shop .ss-preview { display: none; }
+    #solo-shop .ss-preview {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      height: auto;
+      display: block;
+      background: #020810;
+      border: 1px solid #234858;
+      image-rendering: auto;
+      pointer-events: none;
+      object-fit: contain;
+    }
     #solo-shop .ss-row .ss-name {
       font-family: "Press Start 2P", Consolas, monospace;
       font-size: 8px; letter-spacing: 0.04em;
@@ -2001,6 +2019,6 @@
 <script src="config.js?v=36"></script>
 <script src="ship-meshes.js?v=1"></script>
 <script src="alien-ship-meshes.js?v=1"></script>
-<script src="game.js?v=594"></script>
+<script src="game.js?v=595"></script>
 </body>
 </html>

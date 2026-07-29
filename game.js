@@ -10859,6 +10859,12 @@ let practiceMode = false;
 let soloOverOpen = false;
 let soloShopOpen = false;
 let soloShopState = null;
+/** Live 3D previews for shop grid cells: { canvas, ctx, kind, name, id }. */
+let shopPreviewSlots = [];
+const SHOP_PREV_LOGIC = 112;
+/** Half of previous shop mesh scale so previews fit inside square cells. */
+const SHOP_PREV_SCALE = 2.6;
+
 const soloShopEl = document.getElementById('solo-shop');
 const ssWaveEl = document.getElementById('ss-wave');
 const ssCoinsEl = document.getElementById('ss-coins');
@@ -10888,6 +10894,70 @@ function shopWeaponCostClient(unlocked, levels, name, current) {
   const lvl = Math.max(1, (levels && levels[name]) | 0 || 1);
   if (lvl >= WEAPON_MAX_LEVEL) return -1;
   return 800 + 200 * (lvl + 1);
+}
+
+function attachShopPreview(row, kind, name, seedId) {
+  const c = document.createElement('canvas');
+  c.className = 'ss-preview';
+  c.width = 96;
+  c.height = 96;
+  const ctx = c.getContext('2d');
+  row.appendChild(c);
+  shopPreviewSlots.push({ canvas: c, ctx, kind, name, id: seedId | 0 });
+  return c;
+}
+
+function attachShopChipPreview(chip, name, seedId) {
+  const c = document.createElement('canvas');
+  c.width = 56;
+  c.height = 56;
+  const ctx = c.getContext('2d');
+  chip.appendChild(c);
+  shopPreviewSlots.push({ canvas: c, ctx, kind: 'powerup', name, id: seedId | 0 });
+  return c;
+}
+
+function clearShopPreviewRegion() {
+  const rs = canvas.width / W;
+  const fb = Math.max(1, Math.round(SHOP_PREV_LOGIC * rs));
+  gl.enable(gl.SCISSOR_TEST);
+  gl.scissor(0, canvas.height - fb, fb, fb);
+  gl.clearColor(0.039, 0.071, 0.094, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.disable(gl.SCISSOR_TEST);
+  return fb;
+}
+
+function blitShopPreview(slot, fb) {
+  if (!slot || !slot.ctx) return;
+  slot.ctx.clearRect(0, 0, slot.canvas.width, slot.canvas.height);
+  try {
+    slot.ctx.drawImage(canvas, 0, 0, fb, fb, 0, 0, slot.canvas.width, slot.canvas.height);
+  } catch (_) {}
+}
+
+function updateShopPreviews() {
+  if (!soloShopOpen || !shopPreviewSlots.length) return;
+  const cx = SHOP_PREV_LOGIC * 0.5;
+  const cy = SHOP_PREV_LOGIC * 0.5;
+  _shopVisScale = SHOP_PREV_SCALE;
+  try {
+    for (let i = 0; i < shopPreviewSlots.length; i++) {
+      const slot = shopPreviewSlots[i];
+      const fb = clearShopPreviewRegion();
+      if (slot.kind === 'powerup') {
+        drawPowerupPickup({ powerup: slot.name, id: slot.id }, cx, cy, 0, 1);
+      } else {
+        const frame = slot.kind === 'health'
+          ? PICKUP_FRAME.health
+          : (PICKUP_FRAME[slot.name] != null ? PICKUP_FRAME[slot.name] : PICKUP_FRAME.default);
+        drawPickupBox3D(cx, cy, 0, frame, slot.id);
+      }
+      blitShopPreview(slot, fb);
+    }
+  } finally {
+    _shopVisScale = 1;
+  }
 }
 
 function applyShopState(st) {
@@ -10923,6 +10993,7 @@ function applyShopState(st) {
 function renderSoloShop() {
   const st = soloShopState;
   if (!st) return;
+  shopPreviewSlots = [];
   if (ssWaveEl) ssWaveEl.textContent = String(st.wave);
   if (ssCoinsEl) ssCoinsEl.textContent = String(st.coins);
   if (ssScoreEl) ssScoreEl.textContent = String(st.score != null ? st.score : localScore);
@@ -10934,6 +11005,7 @@ function renderSoloShop() {
 
   if (ssEquippedEl) {
     ssEquippedEl.innerHTML = '';
+    attachShopPreview(ssEquippedEl, 'weapon', cur, 1001);
     const info = document.createElement('div');
     info.className = 'ss-equipped-info';
     info.innerHTML = '<div class="ss-equipped-label">LOADOUT</div>'
@@ -10967,7 +11039,10 @@ function renderSoloShop() {
       any = true;
       const chip = document.createElement('span');
       chip.className = 'ss-owned-chip';
-      chip.textContent = shopItemLabel(name);
+      attachShopChipPreview(chip, name, 2100 + i);
+      const txt = document.createElement('span');
+      txt.textContent = shopItemLabel(name);
+      chip.appendChild(txt);
       ssOwnedPowerupsEl.appendChild(chip);
     }
     if (!any) {
@@ -10987,6 +11062,7 @@ function renderSoloShop() {
       const cost = 800;
       const row = document.createElement('div');
       row.className = 'ss-row';
+      attachShopPreview(row, 'weapon', name, 1100 + i);
       const left = document.createElement('div');
       left.innerHTML = '<div class="ss-name">' + shopItemLabel(name) + '</div>';
       const btn = document.createElement('button');
@@ -11007,6 +11083,7 @@ function renderSoloShop() {
       const owned = !!(st.powerups && st.powerups[name]);
       const row = document.createElement('div');
       row.className = 'ss-row' + (owned ? ' ss-owned' : '');
+      attachShopPreview(row, 'powerup', name, 2200 + i);
       const left = document.createElement('div');
       left.innerHTML = '<div class="ss-name">' + shopItemLabel(name) + '</div>';
       const btn = document.createElement('button');
@@ -11030,6 +11107,7 @@ function renderSoloShop() {
 
     const hpRow = document.createElement('div');
     hpRow.className = 'ss-row';
+    attachShopPreview(hpRow, 'health', 'health', 3301);
     const hpLeft = document.createElement('div');
     const fullHp = (player.hp | 0) >= MAX_HP;
     hpLeft.innerHTML = '<div class="ss-name">FULL HP</div>';
@@ -11050,6 +11128,7 @@ function renderSoloShop() {
 
     const lifeRow = document.createElement('div');
     lifeRow.className = 'ss-row';
+    attachShopPreview(lifeRow, 'health', 'health', 3302);
     const lifeLeft = document.createElement('div');
     lifeLeft.innerHTML = '<div class="ss-name">+1 LIFE</div>';
     const lifeBtn = document.createElement('button');
@@ -11087,6 +11166,7 @@ function showSoloShop(st) {
 function hideSoloShop() {
   soloShopOpen = false;
   soloShopState = null;
+  shopPreviewSlots = [];
   if (ssContinueBtn) {
     ssContinueBtn.textContent = 'START WAVE';
     ssContinueBtn.disabled = false;
@@ -15784,6 +15864,7 @@ function render() {
   drawParticles();
   drawFxLabels(now);
   drawWaveBanner(now);
+  if (soloShopOpen) updateShopPreviews();
 }
 
 function configuredServer() {
