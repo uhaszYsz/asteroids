@@ -8899,25 +8899,11 @@ let asteroidFaceTexReady = false;
   img.src = 'textures/asteroid.png';
 })();
 
-const shipHullTex = gl.createTexture();
-let shipHullTexReady = false;
-(function loadShipHullTex() {
-  const img = new Image();
-  img.onload = () => {
-    gl.bindTexture(gl.TEXTURE_2D, shipHullTex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-    shipHullTexReady = true;
-  };
-  img.onerror = () => console.error('Failed to load textures/ship.png');
-  img.src = 'textures/ship.png';
-})();
+const shipHullTex = null;
+const shipHullTexReady = false;
+// Ship/enemy hulls are untextured (flat fill + outlines). Only asteroids use rock albedo.
 
-/** Planar UVs from local mesh XY — works for any hull shape. */
+/** Planar UVs from local mesh XY — unused while hull textures are disabled. */
 function shipMeshUvScale(verts) {
   let m = 0;
   for (let i = 0; i < verts.length; i++) {
@@ -8935,75 +8921,31 @@ function shipVertUV(vx, vy, uvScale, id) {
 }
 
 function beginShipHullTex() {
-  if (!shipHullTexReady) return false;
-  gl.useProgram(astTexProg);
-  gl.enableVertexAttribArray(astTAPos);
-  gl.enableVertexAttribArray(astTAUV);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D, shipHullTex);
-  gl.uniform1i(astTUTex, 0);
-  gl.uniform2f(astTURes, W, H);
-  bindSceneLightUniforms(astTexLightU);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  return true;
+  return false;
 }
 
-function endShipHullTex() {
-  gl.disable(gl.BLEND);
-  gl.disableVertexAttribArray(astTAUV);
-}
+function endShipHullTex() {}
 
-function drawShipHullFaceTex(xy, mv, f, uvScale, id, tint, alpha, tintPow, emit) {
-  const m = _astTexMesh;
-  for (let i = 0; i < 3; i++) {
-    const vi = f[i];
-    const uv = shipVertUV(mv[vi][0], mv[vi][1], uvScale, id);
-    const o = i * 4;
-    m[o] = xy[vi * 2];
-    m[o + 1] = xy[vi * 2 + 1];
-    m[o + 2] = uv[0];
-    m[o + 3] = uv[1];
-  }
-  gl.bindBuffer(gl.ARRAY_BUFFER, astTexBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, m.subarray(0, 12), gl.DYNAMIC_DRAW);
-  gl.vertexAttribPointer(astTAPos, 2, gl.FLOAT, false, 16, 0);
-  gl.vertexAttribPointer(astTAUV, 2, gl.FLOAT, false, 16, 8);
-  gl.uniform3f(astTUTint, tint[0], tint[1], tint[2]);
-  gl.uniform1f(astTUTintPow, tintPow != null ? tintPow : 0.55);
-  gl.uniform1f(astTUEmit, emit != null ? emit : 0);
-  gl.uniform1f(astTUAlpha, alpha);
-  gl.drawArrays(gl.TRIANGLES, 0, 3);
-}
+function drawShipHullFaceTex() {}
 
-/** Draw mesh faces with ship.png (fallback: flat fill). */
+/** Draw mesh faces as flat fill (no hull texture). Ships/enemies stay untextured. */
 function drawShipMeshFacesTex(xy, depth, mesh, color, id) {
   const faces = mesh.faces || [];
   if (!faces.length) return;
-  const mv = mesh.verts;
   const order = faces.map((f, i) => {
     const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
     return { i, z };
   });
   order.sort((a, b) => a.z - b.z);
-  const texOn = beginShipHullTex();
-  const uvScale = shipMeshUvScale(mv);
-  const faceA = texOn ? 0.92 : 0.28;
-  const tintPow = 0.58;
-  const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
+  const faceA = 0.28;
   for (const o of order) {
     const f = faces[o.i];
-    if (texOn) {
-      drawShipHullFaceTex(xy, mv, f, uvScale, id, color, faceA, tintPow, emitPow);
-    } else {
-      drawFilledPoly([
-        xy[f[0] * 2], xy[f[0] * 2 + 1],
-        xy[f[1] * 2], xy[f[1] * 2 + 1],
-        xy[f[2] * 2], xy[f[2] * 2 + 1]
-      ], color, faceA);
-    }
+    drawFilledPoly([
+      xy[f[0] * 2], xy[f[0] * 2 + 1],
+      xy[f[1] * 2], xy[f[1] * 2 + 1],
+      xy[f[2] * 2], xy[f[2] * 2 + 1]
+    ], color, faceA);
   }
-  if (texOn) endShipHullTex();
 }
 
 /** Planar UVs from local mesh XY (tiled + per-id offset). */
