@@ -3808,7 +3808,7 @@ function ensureGridBakeTexture() {
   const c0 = spawnPadColorKey(0);
   const c1 = spawnPadColorKey(1);
   const key = [
-    'arena28', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
+    'arena29', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
     practiceMode ? 'p1' : 'p0', inGame ? 'g1' : 'menu', c0, c1
   ].join(':');
   if (!gridBakeDirty && gridBakeTex && gridBakeKey === key) return true;
@@ -3857,9 +3857,8 @@ function ensureGridBakeTexture() {
 }
 
 /**
- * Etch title into the grid bake like arena background markings:
- * lattice recolored inside the glyphs (gaps stay open) + thick outline stroke.
- * No solid fill — grid lines remain visible through the letters.
+ * Etch title fully into the grid bake (fill + outline + shadow = lattice only).
+ * Same idea as spawn-pad recolors: no solid stamps.
  */
 function paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw) {
   const label = 'ASTEROIDS';
@@ -3867,58 +3866,75 @@ function paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw) {
   const cy = th * 0.25;
   const fontPx = Math.max(22, Math.min(tw, th) * 0.072);
   const font = fontPx + 'px "Press Start 2P", Consolas, monospace';
-  const outlineW = Math.max(4, fontPx * 0.11);
+  const outlineW = Math.max(5, fontPx * 0.14);
+  const shx = Math.max(3, fontPx * 0.07);
+  const shy = Math.max(3, fontPx * 0.09);
 
-  // Glyph mask (white text on clear).
-  const mask = document.createElement('canvas');
-  mask.width = tw;
-  mask.height = th;
-  const mctx = mask.getContext('2d');
-  mctx.clearRect(0, 0, tw, th);
-  mctx.font = font;
-  mctx.textAlign = 'center';
-  mctx.textBaseline = 'middle';
-  mctx.fillStyle = '#ffffff';
-  mctx.fillText(label, cx, cy);
+  function makeMask(draw) {
+    const cnv = document.createElement('canvas');
+    cnv.width = tw;
+    cnv.height = th;
+    const m = cnv.getContext('2d');
+    m.clearRect(0, 0, tw, th);
+    m.font = font;
+    m.textAlign = 'center';
+    m.textBaseline = 'middle';
+    m.lineJoin = 'round';
+    m.lineCap = 'round';
+    draw(m);
+    return cnv;
+  }
 
-  function latticeFill(color) {
+  // Solid glyph interior.
+  const fillMask = makeMask((m) => {
+    m.fillStyle = '#fff';
+    m.fillText(label, cx, cy);
+  });
+
+  // Thick outline ring = fat stroke minus interior.
+  const outlineMask = makeMask((m) => {
+    m.strokeStyle = '#fff';
+    m.lineWidth = outlineW;
+    m.strokeText(label, cx, cy);
+    m.globalCompositeOperation = 'destination-out';
+    m.fillStyle = '#fff';
+    m.fillText(label, cx, cy);
+  });
+
+  // Full glyph silhouette (fill ∪ outline) for shadow.
+  const fullMask = makeMask((m) => {
+    m.fillStyle = '#fff';
+    m.fillText(label, cx, cy);
+    m.strokeStyle = '#fff';
+    m.lineWidth = outlineW;
+    m.strokeText(label, cx, cy);
+  });
+
+  function latticeThroughMask(mask, color, lineMul) {
     const layer = document.createElement('canvas');
     layer.width = tw;
     layer.height = th;
     const lctx = layer.getContext('2d');
     lctx.strokeStyle = color;
-    lctx.lineWidth = Math.max(lw, rs * 0.85);
+    lctx.lineWidth = Math.max(lw, rs * 0.85) * (lineMul || 1);
     paintLatticePattern(lctx, tw, th, lineStep, rs, topo, false);
     paintLatticePattern(lctx, tw, th, lineStep, rs, topo, true);
-    // Keep lattice only where the glyph mask is opaque.
     lctx.globalCompositeOperation = 'destination-in';
     lctx.drawImage(mask, 0, 0);
     ctx.drawImage(layer, 0, 0);
   }
 
-  // Offset shadow lattice (dark) — still grid lines, not a solid blob.
+  // Shadow first (offset full silhouette as dark lattice).
   ctx.save();
-  ctx.translate(Math.max(3, fontPx * 0.07), Math.max(3, fontPx * 0.09));
-  latticeFill('rgba(8, 12, 22, 0.92)');
+  ctx.translate(shx, shy);
+  latticeThroughMask(fullMask, 'rgba(6, 10, 18, 0.95)', 1.05);
   ctx.restore();
 
-  // Main title = cyan lattice inside letter shapes.
-  latticeFill('rgba(120, 230, 255, 1)');
+  // Interior cyan lattice.
+  latticeThroughMask(fillMask, 'rgba(120, 230, 255, 1)', 1);
 
-  // Thick outline like sport accents (stroke only).
-  ctx.save();
-  ctx.font = font;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.lineWidth = outlineW;
-  ctx.strokeStyle = 'rgba(255, 90, 180, 1)';
-  ctx.strokeText(label, cx, cy);
-  ctx.lineWidth = outlineW * 0.45;
-  ctx.strokeStyle = 'rgba(20, 8, 28, 0.95)';
-  ctx.strokeText(label, cx, cy);
-  ctx.restore();
+  // Outline magenta lattice (thicker lines so the ring reads).
+  latticeThroughMask(outlineMask, 'rgba(255, 90, 180, 1)', 1.25);
 }
 
 /**
