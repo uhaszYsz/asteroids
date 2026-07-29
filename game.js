@@ -2652,6 +2652,7 @@ function applyGridSprings() {
 }
 
 function stepSynthGrid(dt, now) {
+  if (!GRID_N) return;
   if (dt <= 0) return;
   flushGridImpulses(now);
   applyAsteroidGridIron(dt);
@@ -2736,6 +2737,52 @@ function stepSynthGrid(dt, now) {
   }
 }
 
+/**
+ * Menu-only: radial stretch pulse around the baked ASTEROIDS title.
+ * UVs stay on rest pose, verts scale out → title + lattice stretch together (1×→2×).
+ */
+function applyMenuTitleGridPulse(now) {
+  if (inGame || !GRID_N) return;
+  const t = (now || performance.now()) * 0.001;
+  // Soft elastic breath; ease in/out so it feels stretchy, not linear.
+  const wave = 0.5 + 0.5 * Math.sin(t * 1.45);
+  const ease = wave * wave * (3 - 2 * wave);
+  const scale = 1 + ease; // 1 → 2
+  const cx = W * 0.5;
+  const cy = H * 0.25;
+  const R = Math.min(W, H) * 0.58;
+  const invR = 1 / Math.max(1, R);
+  // Slightly more vertical stretch for a rubbery title pop.
+  const sx = 1 + (scale - 1) * 0.88;
+  const sy = scale;
+
+  for (let k = 0; k < GRID_N; k++) {
+    if (gridStaticPin[k]) continue;
+    const bx = gridBaseX[k];
+    const by = gridBaseY[k];
+    const dx = bx - cx;
+    const dy = by - cy;
+    const d = Math.hypot(dx, dy);
+    if (d >= R) {
+      gridDefX[k] = bx;
+      gridDefY[k] = by;
+      gridVelX[k] = 0;
+      gridVelY[k] = 0;
+      continue;
+    }
+    let u = 1 - d * invR;
+    u = u * u * (3 - 2 * u);
+    // Extra punch near center so the word hits ~2× while edges stay calm.
+    const punch = u * u;
+    const lx = 1 + (sx - 1) * punch;
+    const ly = 1 + (sy - 1) * punch;
+    gridDefX[k] = cx + dx * lx;
+    gridDefY[k] = cy + dy * ly;
+    gridVelX[k] = 0;
+    gridVelY[k] = 0;
+  }
+}
+
 /** Flat deformable lattice — square / hex / triangle from cl_grid. */
 function drawSynthGrid(now) {
   const frameDtMs = lastGridMs ? Math.min(50, now - lastGridMs) : (1000 / 60);
@@ -2782,6 +2829,7 @@ function drawSynthGrid(now) {
     gridHalfAccumMs = 0;
   }
   if (doGridStep) stepSynthGrid(gridStepDt, now);
+  applyMenuTitleGridPulse(now);
   tickGodmodeSpawnRipples(dt);
   if ((cv('cl_background_bake') | 0) !== 0) {
     drawGridBaked();
