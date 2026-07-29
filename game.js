@@ -6912,14 +6912,12 @@ function emitThrustFx(x, y, angle, vx, vy, skipShip, color, meleeActive) {
   const oy = y - Math.sin(angle) * 6 * RES_SCALE;
   const melee = !!meleeActive;
   const baseCol = color || COL.self;
-  // Brake-thrust melee: 2× size + speed, +50% color saturation.
+  // Brake-thrust melee: 2× size + speed, value −20% (darker).
   const sizeMul = melee ? 2 : 1;
   const speedMul = melee ? 2 : 1;
-  let col = baseCol;
-  if (melee) {
-    const [h, s, l] = rgbToHsl(baseCol[0], baseCol[1], baseCol[2]);
-    col = hslToRgb(h, Math.min(1, s * 1.5), l);
-  }
+  const col = melee
+    ? [baseCol[0] * 0.8, baseCol[1] * 0.8, baseCol[2] * 0.8]
+    : baseCol;
   for (let n = 0; n < 4; n++) {
     emitParticles({
       x: ox, y: oy,
