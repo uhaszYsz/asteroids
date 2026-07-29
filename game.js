@@ -9611,11 +9611,25 @@ const _shipMeshRawDefs = (typeof SHIP_MESH_DEFS !== 'undefined' && Array.isArray
       faces: [[0, 1, 2], [0, 2, 3], [0, 3, 1], [2, 1, 3]],
       edges: [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]]
     }]);
-const SHIP_MESHES = SHIP_MESH_KEEP_IDS
-  .map((id) => _shipMeshRawDefs.find((d) => d && d.id === id))
-  .filter(Boolean)
-  .map((d) => (d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d))
-  .map(scaleShipMeshDef);
+const SHIP_MESHES = (() => {
+  const byId = new Map();
+  for (const d of _shipMeshRawDefs) {
+    if (d && d.id) byId.set(d.id, d);
+  }
+  const kept = [];
+  for (const id of SHIP_MESH_KEEP_IDS) {
+    const d = byId.get(id);
+    if (!d) continue;
+    kept.push(d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d);
+  }
+  // Extra OBJ hulls from models/ships2 (source: models).
+  for (const d of _shipMeshRawDefs) {
+    if (!d || d.source !== 'models') continue;
+    if (kept.some((k) => k.id === d.id)) continue;
+    kept.push(d);
+  }
+  return kept.map(scaleShipMeshDef);
+})();
 
 let selectedShipMeshId = 'arrow';
 try {
@@ -17348,6 +17362,7 @@ function shipMeshSourceLabel(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien';
+  if (src === 'models') return 'Models';
   return 'Default';
 }
 
@@ -17356,6 +17371,7 @@ function shipMeshSectionOrder(src) {
   if (src === 'elite') return 1;
   if (src === 'fe2') return 2;
   if (src === 'alien') return 3;
+  if (src === 'models') return 4;
   return 9;
 }
 
@@ -17363,7 +17379,82 @@ function shipMeshSectionTitle(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien ships';
+  if (src === 'models') return 'Models';
   return 'Default';
+}
+
+/** Live 2D canvas previews for ship picker buttons. */
+const shipPreviewSlots = [];
+const SHIP_PREV_SIZE = 88;
+
+function drawShipMeshPreview(ctx, mesh, w, h, t) {
+  if (!ctx || !mesh || !mesh.verts || !mesh.verts.length) return;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#061018';
+  ctx.fillRect(0, 0, w, h);
+
+  const yaw = (t || 0) * 0.85 + (mesh.id ? mesh.id.length * 0.37 : 0);
+  const bank = Math.sin((t || 0) * 1.35 + 0.4) * 0.35;
+  const { xy, depth } = projectMesh3D(mesh.verts, 0, 0, yaw, bank);
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < mesh.verts.length; i++) {
+    const x = xy[i * 2];
+    const y = xy[i * 2 + 1];
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+  }
+  const bw = Math.max(1e-3, maxX - minX);
+  const bh = Math.max(1e-3, maxY - minY);
+  const pad = 8;
+  const sc = Math.min((w - pad * 2) / bw, (h - pad * 2) / bh);
+  const ox = (w - bw * sc) * 0.5 - minX * sc;
+  const oy = (h - bh * sc) * 0.5 - minY * sc;
+
+  const faces = mesh.faces || [];
+  const order = [];
+  for (let i = 0; i < faces.length; i++) {
+    const f = faces[i];
+    if (!f || f.length < 3) continue;
+    let z = 0;
+    for (let k = 0; k < f.length; k++) z += depth[f[k]] || 0;
+    order.push({ i, z: z / f.length });
+  }
+  order.sort((a, b) => a.z - b.z);
+
+  const col = COL.self || [0.35, 0.85, 1];
+  for (let o = 0; o < order.length; o++) {
+    const f = faces[order[o].i];
+    const shade = 0.22 + 0.55 * ((order[o].z - (depth[0] || 0) + 8) / 16);
+    const a = Math.max(0.12, Math.min(0.55, shade));
+    ctx.beginPath();
+    for (let k = 0; k < f.length; k++) {
+      const vi = f[k];
+      const px = xy[vi * 2] * sc + ox;
+      const py = xy[vi * 2 + 1] * sc + oy;
+      if (k === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = `rgba(${(col[0] * 255) | 0},${(col[1] * 255) | 0},${(col[2] * 255) | 0},${a})`;
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = `rgba(${Math.min(255, (col[0] * 255 + 40) | 0)},${Math.min(255, (col[1] * 255 + 40) | 0)},${Math.min(255, (col[2] * 255 + 40) | 0)},0.95)`;
+  ctx.lineWidth = 1.15;
+  ctx.lineJoin = 'round';
+  const edges = mesh.edges || [];
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i];
+    const a = e[0];
+    const b = e[1];
+    ctx.beginPath();
+    ctx.moveTo(xy[a * 2] * sc + ox, xy[a * 2 + 1] * sc + oy);
+    ctx.lineTo(xy[b * 2] * sc + ox, xy[b * 2 + 1] * sc + oy);
+    ctx.stroke();
+  }
 }
 
 function syncShipMeshUi() {
@@ -17383,7 +17474,9 @@ function syncShipMeshUi() {
 function buildShipMeshUi() {
   if (!gridPanelEl) return;
   const wrap = gridPanelEl.querySelector('#ship-meshes');
-  if (!wrap || wrap.childElementCount) return;
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  shipPreviewSlots.length = 0;
 
   const groups = new Map();
   for (const m of SHIP_MESHES) {
@@ -17404,16 +17497,39 @@ function buildShipMeshUi() {
     for (const m of groups.get(src)) {
       const btn = document.createElement('button');
       btn.type = 'button';
+      btn.className = 'gp-ship-card';
       btn.setAttribute('data-ship', m.id);
       btn.title = `${m.name} (${shipMeshSourceLabel(m.source)})`;
-      btn.textContent = m.name;
+      const c = document.createElement('canvas');
+      c.width = SHIP_PREV_SIZE;
+      c.height = SHIP_PREV_SIZE;
+      c.className = 'gp-ship-preview';
+      const label = document.createElement('span');
+      label.className = 'gp-ship-label';
+      label.textContent = m.name;
+      btn.appendChild(c);
+      btn.appendChild(label);
       btn.addEventListener('click', () => setActiveShipMesh(m.id));
       row.appendChild(btn);
+      const ctx = c.getContext('2d');
+      shipPreviewSlots.push({ canvas: c, ctx, mesh: m });
     }
     sec.appendChild(row);
     wrap.appendChild(sec);
   }
   syncShipMeshUi();
+  updateShipMeshPreviews(performance.now() * 0.001);
+}
+
+function updateShipMeshPreviews(tSec) {
+  if (!shipPreviewSlots.length) return;
+  if (!gridPanelEl || !gridPanelEl.classList.contains('open')) return;
+  const t = tSec != null ? tSec : performance.now() * 0.001;
+  for (let i = 0; i < shipPreviewSlots.length; i++) {
+    const slot = shipPreviewSlots[i];
+    if (!slot || !slot.ctx) continue;
+    drawShipMeshPreview(slot.ctx, slot.mesh, slot.canvas.width, slot.canvas.height, t);
+  }
 }
 
 function setGridProbeShape(shape) {
@@ -19137,6 +19253,7 @@ function frame(now) {
   fpsAccumMs -= LOCK_FRAME_MS;
 
   updateFpsHud(now);
+  updateShipMeshPreviews(now * 0.001);
   if (inGame) {
     syncSimTicks();
     updateHud();
