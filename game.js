@@ -868,6 +868,11 @@ const CVARS = {
     def: 1,
     help: 'Draw server NTP path as ghost for own corrected bullets (0/1).'
   },
+  cl_asteroid_tune: {
+    value: 1,
+    def: 1,
+    help: '1 = lead asteroid draw to local ship predict (one-way ping − cmd delay). 0 = raw NTP.'
+  },
   cl_hitbox: {
     value: 0,
     def: 0,
@@ -896,7 +901,7 @@ const CVARS = {
   sv_dynamic_prediction: {
     value: 1,
     def: 1,
-    help: '1 = fire lead from one-way ping (global, all rooms). 0 = fixed sv_predict_shoot_step/angle. Admin only.'
+    help: '1 = fire lead from one-way ping − cmd delay (global). 0 = fixed sv_predict_shoot_step/angle. Admin only.'
   },
   sv_portal: {
     value: 1,
@@ -1220,7 +1225,8 @@ function syncDynamicPredictionCvar() {
 /** Client-side mirror of server fire lead (for aim cone / debug). */
 function shootPredictLeadTicks() {
   if ((cv('sv_dynamic_prediction') | 0) !== 0) {
-    return Math.max(0, Math.min(8, Math.round((pingMs * 0.5) / TICK_MS) | 0));
+    const oneWayTicks = (pingMs * 0.5) / TICK_MS;
+    return Math.max(0, Math.min(8, Math.round(oneWayTicks - adaptiveInputDelay()) | 0));
   }
   return Math.max(0, Math.min(8, cv('sv_predict_shoot_step') | 0));
 }
@@ -1598,6 +1604,13 @@ function nextGridTestShockPos() {
   };
 }
 let lastGridMs = 0;
+/** ms left running grid physics at half rate (30Hz). Reset to 1000 on any fps < 58. */
+let gridHalvedRate = 0;
+/** Accumulator for 30Hz grid steps while halved. */
+let gridHalfAccumMs = 0;
+const GRID_HALVED_HOLD_MS = 1000;
+const GRID_HALVED_FPS = 30;
+const GRID_FULL_FPS_FLOOR = 58;
 /** Active material stamp while an impulse runs. */
 let _gridStampE = null;
 let _gridStampA = null;
@@ -1750,11 +1763,10 @@ function applyGridStaticPins() {
 
 /**
  * Asteroids iron the mesh: nodes under a rock pin while covered.
- * Warp is 2D (XY only — bake shader has no Z). Pin to rest pose (no Y dent):
- * a shared Y offset between two rocks stretches spring corridors into
- * visible diagonal scars across the field.
+ * Warp is 2D (XY only — bake shader has no Z). Small Y dent for visibility;
+ * corridor scars were from shared iron-poly corruption, not this offset.
  */
-const GRID_IRON_Y_OFFSET = 0;
+const GRID_IRON_Y_OFFSET = 3;
 const GRID_IRON_SPD_LO = 1;
 const GRID_IRON_SPD_HI = 5;
 const GRID_IRON_INTERVAL_MAX = 15; // ticks at slow end
@@ -1784,7 +1796,7 @@ function forceAsteroidGridIronRecheck() {
   for (const a of asteroids.values()) clearAsteroidGridIron(a);
 }
 
-/** Pinned asteroid-iron pose: rest (flat). */
+/** Pinned asteroid-iron pose: X at rest, Y dented slightly down. */
 function gridIronPinnedPose(k) {
   gridDefX[k] = gridBaseX[k];
   gridDefY[k] = gridBaseY[k] + GRID_IRON_Y_OFFSET;
@@ -2689,8 +2701,13 @@ function stepSynthGrid(dt, now) {
 
 /** Flat deformable lattice — square / hex / triangle from cl_grid. */
 function drawSynthGrid(now) {
-  const dt = lastGridMs ? Math.min(0.05, (now - lastGridMs) / 1000) : 0.016;
+  const frameDtMs = lastGridMs ? Math.min(50, now - lastGridMs) : (1000 / 60);
+  const dt = frameDtMs / 1000;
   lastGridMs = now;
+  // Instant hitch → half-rate grid. Any fps < 58 restarts the hold timer.
+  const instFps = 1000 / Math.max(1, frameDtMs);
+  if (instFps < GRID_FULL_FPS_FLOOR) gridHalvedRate = GRID_HALVED_HOLD_MS;
+  if (gridHalvedRate > 0) gridHalvedRate = Math.max(0, gridHalvedRate - frameDtMs);
   if (gridTestUntilMs > 0 && now >= gridTestUntilMs) {
     gridTestUntilMs = 0;
     // Reset the cvar so console shows "done".
@@ -2710,7 +2727,21 @@ function drawSynthGrid(now) {
     const p = nextGridTestShockPos();
     pushGridShock(p.x, p.y, GRID_TEST_SHOCK_OPTS);
   }
-  stepSynthGrid(dt, now);
+  let doGridStep = true;
+  let gridStepDt = dt;
+  if (gridHalvedRate > 0) {
+    gridHalfAccumMs += frameDtMs;
+    const interval = 1000 / GRID_HALVED_FPS;
+    if (gridHalfAccumMs < interval) {
+      doGridStep = false;
+    } else {
+      gridStepDt = Math.min(0.05, gridHalfAccumMs / 1000);
+      gridHalfAccumMs = 0;
+    }
+  } else {
+    gridHalfAccumMs = 0;
+  }
+  if (doGridStep) stepSynthGrid(gridStepDt, now);
   tickGodmodeSpawnRipples(dt);
   if ((cv('cl_background_bake') | 0) !== 0) {
     drawGridBaked();
@@ -6919,21 +6950,41 @@ function emitEnemyThrustFx() {
   }
 }
 
-function emitMuzzleFx(x, y, angle, color, count) {
+/** Resolve ship/enemy px/tick velocity for muzzle particle inherit. */
+function resolveMuzzleShipVel(owner) {
+  if (owner === myId) return { vx: player.vx || 0, vy: player.vy || 0 };
+  const r = remotes.get(owner);
+  if (r) return { vx: r.vx || 0, vy: r.vy || 0 };
+  if (owner < 0) {
+    const e = enemies.get(-owner);
+    if (e) return { vx: e.vx || 0, vy: e.vy || 0 };
+  }
+  return { vx: 0, vy: 0 };
+}
+
+function emitMuzzleFx(x, y, angle, color, count, vx, vy) {
+  // Ship vel is px/tick; particle vel is px/s — same base as idle thrust.
+  const shipVx = (vx || 0) * TPS;
+  const shipVy = (vy || 0) * TPS;
   emitParticles({
     x, y,
     count: count == null ? 6 : count,
-    speed: 90 * RES_SCALE,
-    speedSpread: 50 * RES_SCALE,
+    // At RES_SCALE 2: speed 100–350, size 1–2.5 (half of prior 2–5).
+    speed: 112.5 * RES_SCALE,
+    speedSpread: 125 * RES_SCALE,
     direction: angle,
     spread: 0.7,
-    size: 2.2 * RES_SCALE,
+    size: 0.875 * RES_SCALE,
+    sizeSpread: 0.75 * RES_SCALE,
     scaleY: 1.8,
     sizeWiggle: 0.25,
     sizeWiggleSpeed: 12,
-    lifetime: 0.15,
+    lifetime: 0.35,
+    lifetimeSpread: 0,
     color: color || COL.bullet,
-    drag: 4
+    drag: 4,
+    inheritVx: shipVx,
+    inheritVy: shipVy
   });
 }
 
@@ -6942,8 +6993,9 @@ function emitLocalShootFx() {
   const me = localView();
   const m = shipMuzzle(me.x, me.y, me.angle);
   const ang = me.angle;
-  const ivx = me.vx * 0.35;
-  const ivy = me.vy * 0.35;
+  // Same as muzzle / idle thrust: ship px/tick → particle px/s.
+  const ivx = (me.vx || 0) * TPS;
+  const ivy = (me.vy || 0) * TPS;
   const wpn = selectedWeapon;
 
   if (wpn === 3) {
@@ -9887,6 +9939,19 @@ addEventListener('keydown', e => {
     }
     return;
   }
+  if (consoleAdmin && inGame && !e.repeat) {
+    const m = /^Digit([1-8])$/.exec(e.code);
+    if (m) {
+      e.preventDefault();
+      adminGiveWeaponBySlot(m[1] | 0);
+      return;
+    }
+    if (e.code === 'KeyQ') {
+      e.preventDefault();
+      adminOpenShop();
+      return;
+    }
+  }
   if (settingsPanelEl && settingsPanelEl.classList.contains('open')) {
     if (e.code === 'Escape') {
       e.preventDefault();
@@ -10562,23 +10627,37 @@ function showScoreBoard(opts) {
     }
   } else {
     scoreBoardEl.classList.remove('final');
+    const meGot = newMe > oldMe;
+    const foeGot = newFoe > oldFoe;
+    const anyoneScored = meGot || foeGot;
     if (sbTagEl) {
-      sbTagEl.textContent = iScored ? 'YOU SCORE' : 'THEY SCORE';
-      sbTagEl.className = 'bcast-tag' + (iScored ? ' goal' : ' foe-goal');
+      if (!anyoneScored) {
+        sbTagEl.textContent = 'NO POINT';
+        sbTagEl.className = 'bcast-tag';
+      } else {
+        sbTagEl.textContent = iScored ? 'YOU SCORE' : 'THEY SCORE';
+        sbTagEl.className = 'bcast-tag' + (iScored ? ' goal' : ' foe-goal');
+      }
     }
     if (sbHeadlineEl) {
-      sbHeadlineEl.textContent = 'POINT FOR: ' + (iScored ? myCallsign() : foeCallsign());
-      sbHeadlineEl.className = 'sb-headline score';
+      if (!anyoneScored) {
+        sbHeadlineEl.textContent = 'NO FRAG';
+        sbHeadlineEl.className = 'sb-headline score';
+      } else {
+        sbHeadlineEl.textContent = 'POINT FOR: ' + (iScored ? myCallsign() : foeCallsign());
+        sbHeadlineEl.className = 'sb-headline score';
+      }
     }
-    if (iScored && sbMeSide) sbMeSide.classList.add('goal');
-    if (!iScored && sbFoeSide) sbFoeSide.classList.add('goal');
-    animateScoreNum(sbMeScoreEl, oldMe, newMe, newMe > oldMe);
-    animateScoreNum(sbFoeScoreEl, oldFoe, newFoe, newFoe > oldFoe);
-    if (newMe > oldMe && sbMeDeltaEl) {
+    if (sbFinalNoteEl) sbFinalNoteEl.textContent = '';
+    if (meGot && sbMeSide) sbMeSide.classList.add('goal');
+    if (foeGot && sbFoeSide) sbFoeSide.classList.add('goal');
+    animateScoreNum(sbMeScoreEl, oldMe, newMe, meGot);
+    animateScoreNum(sbFoeScoreEl, oldFoe, newFoe, foeGot);
+    if (meGot && sbMeDeltaEl) {
       sbMeDeltaEl.textContent = `+${newMe - oldMe}`;
       sbMeDeltaEl.classList.add('show');
     }
-    if (newFoe > oldFoe && sbFoeDeltaEl) {
+    if (foeGot && sbFoeDeltaEl) {
       sbFoeDeltaEl.textContent = `+${newFoe - oldFoe}`;
       sbFoeDeltaEl.classList.add('show');
     }
@@ -10592,7 +10671,7 @@ function showScoreBoard(opts) {
 
   if (final) {
     startBcastFx(won ? 'win' : 'lose');
-  } else {
+  } else if (newMe > oldMe || newFoe > oldFoe) {
     startBcastFx('score', iScored ? '#6ec8ff' : '#ff5a6e');
   }
 }
@@ -10877,18 +10956,18 @@ function renderSoloShop() {
     attachShopPreview(ssEquippedEl, 'weapon', cur, 1001);
     const info = document.createElement('div');
     info.className = 'ss-equipped-info';
-    info.innerHTML = '<div class="ss-equipped-label">Equipped</div>'
+    info.innerHTML = '<div class="ss-equipped-label">LOADOUT</div>'
       + '<div class="ss-equipped-name">' + shopItemLabel(cur) + '</div>'
-      + '<div class="ss-equipped-lvl">Level ' + curLvl
+      + '<div class="ss-equipped-lvl">LV ' + curLvl
       + (curLvl >= WEAPON_MAX_LEVEL ? ' · MAX' : '') + '</div>';
     ssEquippedEl.appendChild(info);
     const upBtn = document.createElement('button');
     upBtn.type = 'button';
     if (upgradeCost < 0) {
-      upBtn.textContent = 'Maxed';
+      upBtn.textContent = 'MAX';
       upBtn.disabled = true;
     } else {
-      upBtn.textContent = 'Upgrade ' + upgradeCost;
+      upBtn.textContent = 'UP ' + upgradeCost + '¢';
       upBtn.disabled = st.coins < upgradeCost;
       upBtn.addEventListener('click', () => sendShopBuy('weapon', cur));
     }
@@ -10899,7 +10978,7 @@ function renderSoloShop() {
     ssOwnedPowerupsEl.innerHTML = '';
     const label = document.createElement('span');
     label.className = 'ss-owned-pu-label';
-    label.textContent = 'Owned powerups';
+    label.textContent = 'PACK';
     ssOwnedPowerupsEl.appendChild(label);
     let any = false;
     for (let i = 0; i < POWERUP_TYPES.length; i++) {
@@ -10917,7 +10996,7 @@ function renderSoloShop() {
     if (!any) {
       const empty = document.createElement('span');
       empty.className = 'ss-owned-empty';
-      empty.textContent = 'None yet';
+      empty.textContent = 'EMPTY';
       ssOwnedPowerupsEl.appendChild(empty);
     }
   }
@@ -10936,7 +11015,7 @@ function renderSoloShop() {
       left.innerHTML = '<div class="ss-name">' + shopItemLabel(name) + '</div>';
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.textContent = 'Buy ' + cost;
+      btn.textContent = cost + '¢';
       btn.disabled = st.coins < cost;
       btn.addEventListener('click', () => sendShopBuy('weapon', name));
       row.appendChild(left);
@@ -10958,10 +11037,10 @@ function renderSoloShop() {
       const btn = document.createElement('button');
       btn.type = 'button';
       if (owned) {
-        btn.textContent = 'Buy 1000';
+        btn.textContent = 'GOT IT';
         btn.disabled = true;
       } else {
-        btn.textContent = 'Buy 1000';
+        btn.textContent = '1000¢';
         btn.disabled = st.coins < 1000;
         btn.addEventListener('click', () => sendShopBuy('powerup', name));
       }
@@ -10979,15 +11058,15 @@ function renderSoloShop() {
     attachShopPreview(hpRow, 'health', 'health', 3301);
     const hpLeft = document.createElement('div');
     const fullHp = (player.hp | 0) >= MAX_HP;
-    hpLeft.innerHTML = '<div class="ss-name">Full health</div>';
+    hpLeft.innerHTML = '<div class="ss-name">FULL HP</div>';
     const hpBtn = document.createElement('button');
     hpBtn.type = 'button';
     if (fullHp) {
-      hpBtn.textContent = 'Buy 400';
+      hpBtn.textContent = 'MAX HP';
       hpBtn.disabled = true;
       hpRow.classList.add('ss-owned');
     } else {
-      hpBtn.textContent = 'Buy 400';
+      hpBtn.textContent = '400¢';
       hpBtn.disabled = st.coins < 400;
       hpBtn.addEventListener('click', () => sendShopBuy('health', ''));
     }
@@ -10999,10 +11078,10 @@ function renderSoloShop() {
     lifeRow.className = 'ss-row';
     attachShopPreview(lifeRow, 'health', 'health', 3302);
     const lifeLeft = document.createElement('div');
-    lifeLeft.innerHTML = '<div class="ss-name">Extra life</div>';
+    lifeLeft.innerHTML = '<div class="ss-name">+1 LIFE</div>';
     const lifeBtn = document.createElement('button');
     lifeBtn.type = 'button';
-    lifeBtn.textContent = 'Buy 2400';
+    lifeBtn.textContent = '2400¢';
     lifeBtn.disabled = st.coins < 2400;
     lifeBtn.addEventListener('click', () => sendShopBuy('life', ''));
     lifeRow.appendChild(lifeLeft);
@@ -11023,7 +11102,7 @@ function showSoloShop(st) {
   player.av = 0;
   applyShopState(st);
   if (ssContinueBtn) {
-    ssContinueBtn.textContent = 'Continue to wave';
+    ssContinueBtn.textContent = '▶ START WAVE';
     ssContinueBtn.disabled = false;
   }
   if (soloShopEl) {
@@ -11037,7 +11116,7 @@ function hideSoloShop() {
   soloShopState = null;
   shopPreviewSlots = [];
   if (ssContinueBtn) {
-    ssContinueBtn.textContent = 'Continue to wave';
+    ssContinueBtn.textContent = '▶ START WAVE';
     ssContinueBtn.disabled = false;
   }
   if (soloShopEl) {
@@ -11052,7 +11131,7 @@ function closeSoloShopContinue() {
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'shopDone' }));
   // Stay open until server starts the wave (all living players must continue first).
   if (ssContinueBtn) {
-    ssContinueBtn.textContent = coopMode ? 'Waiting for partner…' : 'Waiting…';
+    ssContinueBtn.textContent = coopMode ? 'WAIT P2…' : 'WAIT…';
     ssContinueBtn.disabled = true;
   }
 }
@@ -12667,8 +12746,20 @@ function bulletAgeTicks(b) {
   return Math.max(0, (now - b.spawnSt) / 1000 * TPS);
 }
 
-/** Authoritative NTP pose (server spawn + age). */
+/** Wall-clock travel ticks for own corrected shots (immune to NTP offset jitter). */
+function bulletLocalTravelTicks(b) {
+  return Math.max(0, (performance.now() - b.recvPerf) / TICK_MS);
+}
+
+/** Authoritative pose: NTP for remotes; same wall-clock path as draw for own localOrigin shots. */
 function bulletTrueAt(b) {
+  if (b.localOrigin && b.recvPerf != null) {
+    const age = bulletLocalTravelTicks(b);
+    return {
+      x: b.localOrigin.x + b.vx * age,
+      y: b.localOrigin.y + b.vy * age
+    };
+  }
   const age = bulletAgeTicks(b);
   return {
     x: b.spawnX + b.vx * age,
@@ -12677,20 +12768,21 @@ function bulletTrueAt(b) {
 }
 
 function attachLocalBulletOrigin(b) {
-  const me = localView();
-  const m = shipMuzzle(me.x, me.y, me.angle);
-  b.localOrigin = { x: m.x, y: m.y };
-  b.recvPerf = performance.now();
+  // Stick to server spawn (already ping-led), backdate so first frame matches age.
+  // Old "current muzzle" attach fought dynamic lead and made ghost/client diverge.
+  b.localOrigin = { x: b.spawnX, y: b.spawnY };
+  const ageMs = Math.max(0, serverNow() - b.spawnSt);
+  b.recvPerf = performance.now() - ageMs;
   b.showGhost = true;
 }
 
 /**
- * Drawn pose: own live shots start at local muzzle when the bf arrives, then
- * travel on a wall-clock timer (immune to NTP clock-offset jitter).
+ * Drawn pose: own live shots follow server spawn on a wall-clock timer
+ * (immune to NTP clock-offset jitter after attach).
  */
 function bulletAt(b) {
   if (b.localOrigin && b.recvPerf != null) {
-    const traveled = Math.max(0, (performance.now() - b.recvPerf) / TICK_MS);
+    const traveled = bulletLocalTravelTicks(b);
     return {
       x: b.localOrigin.x + b.vx * traveled,
       y: b.localOrigin.y + b.vy * traveled
@@ -12862,7 +12954,8 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
   const spreadRad = ((w.spread != null ? w.spread : 30) || 0) * Math.PI / 180;
   const rnd = makeShotgunRng(x, y);
   if (withMuzzle) {
-    emitMuzzleFx(x, y, aim, COL.bullet, 2);
+    const sv = resolveMuzzleShipVel(owner);
+    emitMuzzleFx(x, y, aim, COL.bullet, 2, sv.vx, sv.vy);
     playShotgunFireSfx(owner, 0.55);
   }
   for (let i = 0; i < count; i++) {
@@ -12888,32 +12981,33 @@ function addBullet(b, withMuzzle, liveFire) {
   if (withMuzzle) {
     const ang = Math.atan2(b.vy, b.vx);
     const origin = b.localOrigin || { x: b.spawnX, y: b.spawnY };
+    const sv = resolveMuzzleShipVel(b.owner);
     if (b.type === 'rocket') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.rocket, 5);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.rocket, 5, sv.vx, sv.vy);
       // Remote only — local rocket fire plays in emitLocalShootFx.
       if (b.owner !== myId) playSfx(SFX.rocketFire, { vol: 0.55, pool: 6 });
     } else if (b.type === 'enemyRocket') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyUfo, 2);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyUfo, 2, sv.vx, sv.vy);
       playSfx(SFX.rocketFire, { vol: 0.35, pool: 6 });
     } else if (b.type === 'shotgun') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 2);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 2, sv.vx, sv.vy);
       // Remote only — local shotgun SFX is Space press. Debounce whole burst.
       playShotgunFireSfx(b.owner, 0.55);
     } else if (b.type === 'default' || !b.type) {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 3);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 3, sv.vx, sv.vy);
       // Remote only — local default shoot plays in emitLocalShootFx.
       playSfx(SFX.shoot, { vol: 0.5, pool: 8 });
     } else if (b.type === 'plasma') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.plasma, 3);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.plasma, 3, sv.vx, sv.vy);
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.45, pool: 8 });
     } else if (b.type === 'voidcannon') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.voidcannon, 4);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.voidcannon, 4, sv.vx, sv.vy);
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.5, pool: 8 });
     } else if (b.type === 'turret') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.powerTurret, 2);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.powerTurret, 2, sv.vx, sv.vy);
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.35, pool: 8 });
     } else if (b.type === 'enemy') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, 2);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, 2, sv.vx, sv.vy);
     }
   }
 }
@@ -13163,6 +13257,26 @@ function resolveFxShooterPose(owner) {
   return { x: r.x, y: r.y, angle: r.angle };
 }
 
+/**
+ * Rail charge aim line — same pose lead as server predictedFirePose
+ * (pos via vx/vy, aim via av) so telegraph matches the rf beam while spinning.
+ */
+function resolveRailChargePose(owner) {
+  if (owner === myId) {
+    const me = localView();
+    const lead = shootPredictLeadTicks();
+    const aLead = shootPredictAngleLeadTicks();
+    const av = Number.isFinite(player.av) ? player.av : 0;
+    let x = me.x + (player.vx || 0) * lead;
+    let y = me.y + (player.vy || 0) * lead;
+    if (x < 0) x += W; else if (x > W) x -= W;
+    if (y < 0) y += H; else if (y > H) y -= H;
+    // Angle from sim + lead (not softErr nose) — matches server fire / flashlight cone.
+    return { x, y, angle: player.angle + av * aLead };
+  }
+  return resolveFxShooterPose(owner);
+}
+
 function drawRailCharges() {
   if (!railCharges.size) return;
   const now = performance.now();
@@ -13172,7 +13286,7 @@ function drawRailCharges() {
     const start = ch && ch.start != null ? ch.start : until - 500;
     const ms = ch && ch.ms != null ? ch.ms : Math.max(1, until - start);
     if (now >= until) continue;
-    const pose = resolveFxShooterPose(owner);
+    const pose = resolveRailChargePose(owner);
     if (!pose) continue;
     const x = pose.x, y = pose.y, angle = pose.angle;
     const m = shipMuzzle(x, y, angle);
@@ -13295,6 +13409,37 @@ function asteroidAgeTicks(a) {
   return Math.max(0, (now - a.spawnSt) / 1000 * TPS);
 }
 
+/** Smoothed draw lead (ticks) so rocks sit on the local ship timeline. */
+let asteroidTuneLead = 0;
+let asteroidTuneLastMs = 0;
+
+/** Target lead ≈ ship predict amount: one-way latency − cmd delay. */
+function asteroidTuneTargetLead() {
+  if ((cv('cl_asteroid_tune') | 0) === 0) return 0;
+  const oneWayTicks = (Math.max(0, pingMs) * 0.5) / TICK_MS;
+  return Math.max(0, Math.min(8, oneWayTicks - adaptiveInputDelay()));
+}
+
+function tickAsteroidTuneLead(now) {
+  const target = asteroidTuneTargetLead();
+  if (!(now > 0)) now = performance.now();
+  const dt = asteroidTuneLastMs ? Math.min(0.05, (now - asteroidTuneLastMs) / 1000) : 0.016;
+  asteroidTuneLastMs = now;
+  if ((cv('cl_asteroid_tune') | 0) === 0) {
+    asteroidTuneLead = 0;
+    return;
+  }
+  // ~8/s toward target — tracks ping without sliding rocks every sample.
+  const k = 1 - Math.exp(-8 * dt);
+  asteroidTuneLead += (target - asteroidTuneLead) * k;
+  if (Math.abs(asteroidTuneLead - target) < 0.01) asteroidTuneLead = target;
+}
+
+/** NTP age + optional predict lead (cl_asteroid_tune). */
+function asteroidDrawAgeTicks(a) {
+  return asteroidAgeTicks(a) + asteroidTuneLead;
+}
+
 /** Bake live poses into spawn clocks at `now` so freeze/unfreeze doesn't jump rocks. */
 function rebaseAsteroidsToTime(now) {
   for (const a of asteroids.values()) {
@@ -13351,7 +13496,7 @@ function predictAsteroidEdgeTeleports() {
     // PvP smalls never predict-wrap. Waves smalls + player shots share wrap path.
     if (a.size === 'small' && !practiceMode && !a.playerShot) continue;
     if (a.portal) continue;
-    const age = asteroidAgeTicks(a);
+    const age = asteroidDrawAgeTicks(a);
     let x = a.spawnX + a.vx * age;
     let y = a.spawnY + a.vy * age;
     let angle = a.spawnAngle + a.spin * age;
@@ -13404,7 +13549,7 @@ function predictAsteroidEdgeTeleports() {
 }
 
 function asteroidAt(a) {
-  const age = asteroidAgeTicks(a);
+  const age = asteroidDrawAgeTicks(a);
   return {
     x: a.spawnX + a.vx * age,
     y: a.spawnY + a.vy * age,
@@ -14645,7 +14790,12 @@ function applyPickupBounce(row) {
 
 function sendPing() {
   if (!connected || !ws || ws.readyState !== 1) return;
-  ws.send(JSON.stringify({ t: 'ping', ct: Date.now(), rtt: Math.round(pingMs) }));
+  ws.send(JSON.stringify({
+    t: 'ping',
+    ct: Date.now(),
+    rtt: Math.round(pingMs),
+    dly: adaptiveInputDelay() | 0
+  }));
 }
 
 function wrapEntity(o) {
@@ -15552,6 +15702,7 @@ function render() {
   gl.clear(gl.COLOR_BUFFER_BIT);
   try { gl.lineWidth(Math.max(1, getRenderScale())); } catch (_) { gl.lineWidth(1); }
   const nowBg = performance.now();
+  tickAsteroidTuneLead(nowBg);
   applyScreenShakeCss(nowBg);
   drawSynthGrid(nowBg);
   if (!inGame) {
@@ -15960,6 +16111,8 @@ async function connect() {
         const label = msg.item || 'item';
         if (msg.kind === 'admingun') {
           conPrint('gave admingun (turret buffed: 100 ammo / 1 cooldown / 1s reload / 100 dmg)', 'info');
+        } else if (msg.kind === 'weapon' && msg.lvl != null) {
+          conPrint('gave ' + label + ' L' + (msg.lvl | 0), 'info');
         } else {
           conPrint('gave ' + label, 'info');
         }
@@ -16191,7 +16344,7 @@ async function connect() {
     if (msg.t === 'wave' && inGame) {
       hideSoloShop();
       if (ssContinueBtn) {
-        ssContinueBtn.textContent = 'Continue to wave';
+        ssContinueBtn.textContent = '▶ START WAVE';
         ssContinueBtn.disabled = false;
       }
       startWaveBanner(msg.n != null ? msg.n : (soloWave + 1));
@@ -16217,11 +16370,11 @@ async function connect() {
       pushFxRing(player.x, player.y, COL.laser, { r0: 8, r1: 70, life: 500 });
       return;
     }
-    if (msg.t === 'shop' && inGame && practiceMode) {
+    if (msg.t === 'shop' && inGame && (practiceMode || consoleAdmin)) {
       showSoloShop(msg);
       return;
     }
-    if (msg.t === 'shopBuy' && inGame && practiceMode) {
+    if (msg.t === 'shopBuy' && inGame && (practiceMode || consoleAdmin)) {
       if (msg.ok) {
         applyShopState(msg);
         if (msg.weapon) {
@@ -16463,6 +16616,8 @@ async function connect() {
       if (msg.scoreToWin != null) setScoreToWin(msg.scoreToWin);
       if (msg.lives != null) setSoloLives(msg.lives);
       const id = msg.id | 0;
+      const killerId = msg.by != null ? (msg.by | 0) : 0;
+      const iScored = killerId > 0 && killerId === myId;
       const x = msg.x != null ? msg.x : player.x;
       const y = msg.y != null ? msg.y : player.y;
       const shakeMs = msg.shakeMs != null ? msg.shakeMs : 1000;
@@ -16495,7 +16650,8 @@ async function connect() {
           angle = r.angle;
         }
         color = ownerPlayerColor(id);
-        // You scored — pop at your ship.
+      }
+      if (iScored) {
         const me = localView();
         emitScorePopFx(me.x, me.y);
       }
@@ -16515,7 +16671,7 @@ async function connect() {
           oldFoe,
           newMe: myScore(),
           newFoe: foeScore(),
-          iScored: id !== myId,
+          iScored,
           final: false
         });
       }
@@ -18186,6 +18342,26 @@ function conRequireAdmin() {
   return false;
 }
 
+/** Admin hotkeys 1–8: same as `give <weapon>` / world pickup (equip or upgrade). */
+function adminGiveWeaponBySlot(slot) {
+  if (!consoleAdmin || !inGame) return false;
+  const name = WEAPON_NAMES[(slot | 0) - 1];
+  if (!name) return false;
+  if (!ws || ws.readyState !== 1) return false;
+  if (player.hp <= 0 || deathSpectating) return false;
+  ws.send(JSON.stringify({ t: 'adminGive', item: name }));
+  return true;
+}
+
+/** Admin Q: force-open the wave shop for UI / buy debugging. */
+function adminOpenShop() {
+  if (!consoleAdmin || !inGame) return false;
+  if (!ws || ws.readyState !== 1) return false;
+  if (soloShopOpen || deathSpectating || matchPaused) return false;
+  ws.send(JSON.stringify({ t: 'dbgShop' }));
+  return true;
+}
+
 function printAdminStatus(msg) {
   if (!msg || !msg.ok) {
     conPrint((msg && msg.err) || 'status failed', 'err');
@@ -18505,8 +18681,9 @@ function runConsole(line) {
   if (cmdName === 'give') {
     if (!conRequireAdmin()) return;
     if (!args.length) {
-      conPrint('usage: give <item>', 'err');
+      conPrint('usage: give <item>  (or admin keys 1–8 in-game)', 'err');
       conPrint('weapons: default rocket laser shotgun rail plasma void meteor', 'info');
+      conPrint('keys: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
       conPrint('powerups: damage turret shield homing lead emp reload', 'info');
       conPrint('admingun — turret + buff (100 ammo, 1 cooldown, 1s reload, 100 dmg)', 'info');
       return;
@@ -18528,6 +18705,7 @@ function runConsole(line) {
     conPrint('login <password>  — admin auth (shared server password)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
     conPrint('give <weapon|powerup|admingun>  — grant loadout (admin, in-game)', 'info');
+    conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');
     conPrint('cl_allToDefault 1  — reset all cl_ cvars to defaults', 'info');
     conPrint(`admin: ${consoleAdmin ? 'yes' : 'no'}`, 'info');

@@ -202,10 +202,19 @@ function consumeShield(room, p) {
   return true;
 }
 
-/** Apply HP damage; shield consumes instead. Returns true if HP was reduced. */
-function dealDamageToPlayer(room, p, dmg) {
+/** Stamp PvP frag credit (last player who damaged this ship). */
+function notePlayerAttacker(victim, attackerId) {
+  const aid = attackerId | 0;
+  if (!victim || aid <= 0 || aid === (victim.id | 0)) return;
+  victim.lastHitBy = aid;
+}
+
+/** Apply HP damage; shield consumes instead. Returns true if HP was reduced.
+ *  `attackerId` (optional) — player who dealt this hit; credited if it kills. */
+function dealDamageToPlayer(room, p, dmg, attackerId) {
   if (!p || p.hp <= 0 || p.godLeft > 0) return false;
   if (consumeShield(room, p)) return false;
+  notePlayerAttacker(p, attackerId);
   p.hp -= dmg;
   if (p.hp <= 0) handlePlayerDeath(room, p);
   return true;
@@ -2257,6 +2266,8 @@ function closeSoloShopAndStartWave(room) {
   room.shopOpen = false;
   room.shopWave = 0;
   room.shopDoneIds = new Set();
+  // Wave rooms only — admin dbgShop can open in PvP without restarting the match.
+  if (!room.practice) return;
   // Asteroids for this wave spawn only here — after every living player continued.
   beginSoloWave(room, wave, { center: true });
 }
@@ -3032,6 +3043,8 @@ function spawnPlayer(id, name, colors, room) {
     prevX: pose.x, prevY: pose.y,
     av: 0, turnDecelStep: 0, turnDecelLeft: 0, turnDecelRev: 0,
     stunned: false, collideCd: 0, godLeft: GODMODE_TICKS,
+    /** Last opposing player who damaged this ship (frag credit). */
+    lastHitBy: 0,
     score: 0,
     coins: 0,
     /** Lifetime coins picked up (never decreases on spend). */
@@ -3067,6 +3080,7 @@ function respawnPlayer(room, p, keepLoadout, maxHp) {
   p.av = 0; p.turnDecelStep = 0; p.turnDecelLeft = 0; p.turnDecelRev = 0;
   p.stunned = false; p.collideCd = 0;
   p.godLeft = GODMODE_TICKS;
+  p.lastHitBy = 0;
   p.hp = maxHp != null ? maxHp : MAX_HP;
   if (keepLoadout) {
     // Round winner: keep equipped weapon + its level only; wipe other guns.
@@ -3195,9 +3209,16 @@ function handleAdminGive(ws, itemRaw) {
 
   if (item.kind === 'weapon') {
     const slot = WEAPON_SLOTS.indexOf(item.name) + 1;
-    if (!setPlayerWeapon(p, slot, false)) return { ok: 0, err: 'bad weapon' };
+    // Same as world pickup: new gun → L1, same gun again → upgrade (max 3).
+    if (!setPlayerWeapon(p, slot, true)) return { ok: 0, err: 'bad weapon' };
     notifyPlayerWeapon(room, p, false);
-    return { ok: 1, kind: 'weapon', item: item.name };
+    return {
+      ok: 1,
+      kind: 'weapon',
+      item: item.name,
+      lvl: getWeaponLevel(p, item.name),
+      w: slot
+    };
   }
 
   if (item.kind === 'powerup') {
@@ -3739,11 +3760,16 @@ function notifyShipHit(room, p) {
 function handlePlayerDeath(room, victim) {
   if (!room || !victim || room.roundResetting) return;
 
+  const killerId = victim.lastHitBy | 0;
+  victim.lastHitBy = 0;
+  const killer = (!room.practice && killerId > 0 && killerId !== (victim.id | 0))
+    ? room.players.get(killerId)
+    : null;
+  const creditedKillerId = (killer && !killer.bot) ? (killer.id | 0) : 0;
+
   // Perf-test rooms: instant respawn with a new random gun (no freeze / no match end).
   if (room.perfTest) {
-    for (const p of room.players.values()) {
-      if (p.id !== victim.id) p.score = (p.score | 0) + 1;
-    }
+    if (creditedKillerId) killer.score = (killer.score | 0) + 1;
     equipRandomPerfWeapon(victim);
     respawnPlayer(room, victim, true, PERF_BOT_HP);
     victim.godLeft = Math.round(0.35 * TPS);
@@ -3763,9 +3789,10 @@ function handlePlayerDeath(room, victim) {
     victim.lives = Math.max(0, (victim.lives | 0) - 1);
   }
 
+  // PvP: only the last damaging player gets the frag (environment deaths = no score).
+  if (creditedKillerId) killer.score = (killer.score | 0) + 1;
+
   for (const p of room.players.values()) {
-    // Round win goes to living humans only (not the victim, not practice bots).
-    if (!room.practice && p.id !== victim.id && !p.bot) p.score = (p.score | 0) + 1;
     p.vx = 0;
     p.vy = 0;
     p.bursting = false;
@@ -3788,6 +3815,7 @@ function handlePlayerDeath(room, victim) {
   roomBroadcast(room, {
     t: 'die',
     id: victim.id,
+    by: creditedKillerId,
     names: packRosterNames(room),
     x: victim.x,
     y: victim.y,
@@ -4189,6 +4217,7 @@ function hitPlayerAsteroid(room, p, a, hit) {
     const spd = Math.hypot(a.vx || 0, a.vy || 0);
     const frac = Math.max(0, spd / Math.max(1e-6, MAX_SPEED));
     dmg = PLAYER_SHOT_HIT_BASE + PLAYER_SHOT_HIT_SPEED_BONUS * frac;
+    notePlayerAttacker(p, a.ownerId);
   } else {
     dmg = asteroidCollideDamage(p, a, 0.5);
   }
@@ -4484,7 +4513,7 @@ function tryStartBurst(p) {
 }
 
 /** Ship pose N ticks ahead: position via vx/vy, aim via av (separate leads).
- *  With sv_dynamic_prediction: lead = round(one-way ping / tick) from that player's RTT. */
+ *  With sv_dynamic_prediction: lead = round(one-way/tick − cmdDelay) from RTT. */
 function clampPredictLeadTicks(n) {
   n = n | 0;
   if (n < 0) n = 0;
@@ -4494,7 +4523,21 @@ function clampPredictLeadTicks(n) {
 
 function pingBasedPredictLeadTicks(room, p) {
   const rtt = playerRttMs(room, p && p.id) || 0;
-  return clampPredictLeadTicks(Math.round((rtt * 0.5) / TICK_MS));
+  // One-way latency in ticks, minus the client's cmd delay (inputs already
+  // applied locally that many ticks before the server consumes them).
+  const oneWayTicks = (rtt * 0.5) / TICK_MS;
+  const cmdDelay = playerCmdDelayTicks(room, p && p.id);
+  return clampPredictLeadTicks(Math.round(oneWayTicks - cmdDelay));
+}
+
+function playerCmdDelayTicks(room, playerId) {
+  for (const ws of room.clients) {
+    if (ws.playerId === playerId) {
+      const d = ws.cmdDelayTicks | 0;
+      return d < 0 ? 0 : (d > 8 ? 8 : d);
+    }
+  }
+  return 1; // mirrors cl_cmddelay default
 }
 
 function playerPredictShootSteps(room, p) {
@@ -4628,7 +4671,7 @@ function applyRocketBlast(room, ownerId, x, y, preAids) {
     }
     const dist = Math.max(0, best);
     const dmg = rocketBlastDamageAt(dist, R, maxDmg);
-    if (dmg > 0) dealDamageToPlayer(room, p, dmg);
+    if (dmg > 0) dealDamageToPlayer(room, p, dmg, ownerId);
     if (room.roundResetting) return;
   }
 
@@ -4824,7 +4867,7 @@ function fireLaser(room, p, weaponName) {
     w: name
   });
   if (hit.kind === 'player') {
-    dealDamageToPlayer(room, hit.target, dmg);
+    dealDamageToPlayer(room, hit.target, dmg, p.id);
     tryEmpStun(room, p, hit.target, name, null);
   } else if (hit.kind === 'asteroid') {
     damageAsteroid(room, hit.target, dmg, p.id);
@@ -4866,7 +4909,7 @@ function fireThrustRay(room, p) {
     w: 'thrust'
   });
   if (hit.kind === 'player') {
-    dealDamageToPlayer(room, hit.target, dmg);
+    dealDamageToPlayer(room, hit.target, dmg, p.id);
     tryEmpStun(room, p, hit.target, 'thrust', null);
   } else if (hit.kind === 'asteroid') {
     damageAsteroid(room, hit.target, dmg, p.id);
@@ -4989,7 +5032,7 @@ function fireRailgun(room, p) {
       ? Math.max(1, Math.round(dmg * RAIL_THROUGH_ASTEROID_MULT))
       : dmg;
     if (h.kind === 'player') {
-      dealDamageToPlayer(room, h.target, pdmg);
+      dealDamageToPlayer(room, h.target, pdmg, p.id);
       tryEmpStun(room, p, h.target, 'railgun', null);
     } else if (h.kind === 'enemy') {
       damageEnemy(room, h.target, pdmg);
@@ -5676,7 +5719,7 @@ function updateBullets(room) {
           let d = dmg;
           const owner = players.get(b.owner);
           if (owner && playerHasPowerup(owner, 'damage')) d *= DAMAGE_POWERUP_MULT;
-          dealDamageToPlayer(room, p, d);
+          dealDamageToPlayer(room, p, d, b.owner | 0);
           voidScramblePlayerAim(p, 4);
           if (owner) tryEmpStun(room, owner, p, 'voidcannon', b);
           roomBroadcast(room, { t: 'vd', k: 'p', id: p.id | 0, x: p.x, y: p.y });
@@ -5749,7 +5792,7 @@ function updateBullets(room) {
       const p = hitPlayer;
       if (b.type === 'rocket') {
         detonateRocket(room, b, 1, () => {
-          dealDamageToPlayer(room, p, b.dmg);
+          dealDamageToPlayer(room, p, b.dmg, b.owner | 0);
           const owner = players.get(b.owner);
           if (owner) tryEmpStun(room, owner, p, 'rocket', b);
         });
@@ -5768,7 +5811,7 @@ function updateBullets(room) {
         notifyShipHit(room, p);
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 1, x: b.x, y: b.y });
       } else {
-        dealDamageToPlayer(room, p, b.dmg);
+        dealDamageToPlayer(room, p, b.dmg, b.owner | 0);
         const owner = players.get(b.owner);
         if (owner) tryEmpStun(room, owner, p, b.type || 'default', b);
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 1, x: b.x, y: b.y });
@@ -7348,6 +7391,7 @@ wss.on('connection', (ws) => {
   ws.room = null;
   ws.playerId = null;
   ws.rttMs = 0;
+  ws.cmdDelayTicks = 1;
   ws.getAsteroidsEvery = 0;
   ws.isAdmin = false;
   initClientLimits(ws);
@@ -7432,6 +7476,10 @@ wss.on('connection', (ws) => {
       if (msg.rtt != null) {
         const rtt = Number(msg.rtt);
         ws.rttMs = Number.isFinite(rtt) ? Math.max(0, Math.min(2000, rtt)) : 0;
+      }
+      if (msg.dly != null) {
+        const dly = msg.dly | 0;
+        ws.cmdDelayTicks = dly < 0 ? 0 : (dly > 8 ? 8 : dly);
       }
       send(ws, {
         t: 'pong',
@@ -7783,6 +7831,23 @@ wss.on('connection', (ws) => {
       const room = ws.room;
       if (!room || (ws.state !== 'playing' && ws.state !== 'practice')) return;
       spawnDebugPowerup(room, msg.x, msg.y, msg.vx, msg.vy, msg.powerup);
+      return;
+    }
+
+    if (msg.t === 'dbgShop') {
+      if (!ws.isAdmin) return;
+      if (!allowAction(ws, 'dbgShop', 200)) return;
+      const room = ws.room;
+      if (!room || (ws.state !== 'playing' && ws.state !== 'practice')) return;
+      const p = room.players.get(ws.playerId);
+      if (!p || (p.hp | 0) <= 0) return;
+      if (room.shopOpen) {
+        send(ws, packShopState(room, p));
+        return;
+      }
+      // Upcoming wave label (same as natural shop); Continue starts it in wave rooms.
+      const next = Math.max(1, (room.wave | 0) + 1);
+      openSoloShop(room, next);
       return;
     }
 
