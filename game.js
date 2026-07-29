@@ -9570,6 +9570,24 @@ const shipShape = [9 * RES_SCALE, 0, -6 * RES_SCALE, 5 * RES_SCALE, -6 * RES_SCA
 /** Unit-normalized defs from ship-meshes.js → scaled local meshes. */
 const SHIP_MESH_SCALE = 9 * RES_SCALE;
 const SHIP_MESH_LS_KEY = 'asteroids_ship_mesh';
+/** Player-selectable hulls only (Elite + a few alien). */
+const SHIP_MESH_KEEP_IDS = [
+  'arrow', 'transporter', 'python', 'boa', 'krait', 'adder', 'gecko', 'worm',
+  'cobra_mk_3', 'alien_claw', 'alien_saucer', 'alien_crab', 'alien_wraith'
+];
+/** Yaw mesh 90° around +Z: (x,y,z)→(y,-x,z) so a wide hull becomes long/“vertical”. */
+function rotateShipMeshYaw90(def) {
+  const verts = (def.verts || []).map((v) => [v[1], -v[0], v[2]]);
+  let nose = 0;
+  let best = -Infinity;
+  for (let i = 0; i < verts.length; i++) {
+    if (verts[i][0] > best) {
+      best = verts[i][0];
+      nose = i;
+    }
+  }
+  return Object.assign({}, def, { verts, nose });
+}
 function scaleShipMeshDef(def) {
   const s = SHIP_MESH_SCALE;
   return {
@@ -9582,7 +9600,7 @@ function scaleShipMeshDef(def) {
     edges: (def.edges || []).map((e) => e.slice())
   };
 }
-const SHIP_MESHES = (typeof SHIP_MESH_DEFS !== 'undefined' && Array.isArray(SHIP_MESH_DEFS) && SHIP_MESH_DEFS.length
+const _shipMeshRawDefs = (typeof SHIP_MESH_DEFS !== 'undefined' && Array.isArray(SHIP_MESH_DEFS) && SHIP_MESH_DEFS.length
   ? SHIP_MESH_DEFS
   : [{
       id: 'arrow',
@@ -9592,8 +9610,12 @@ const SHIP_MESHES = (typeof SHIP_MESH_DEFS !== 'undefined' && Array.isArray(SHIP
       verts: [[1, 0, 0], [-0.6667, 0.6111, 0], [-0.6667, -0.6111, 0], [-0.1667, 0, 0.5778]],
       faces: [[0, 1, 2], [0, 2, 3], [0, 3, 1], [2, 1, 3]],
       edges: [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]]
-    }]
-).map(scaleShipMeshDef);
+    }]);
+const SHIP_MESHES = SHIP_MESH_KEEP_IDS
+  .map((id) => _shipMeshRawDefs.find((d) => d && d.id === id))
+  .filter(Boolean)
+  .map((d) => (d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d))
+  .map(scaleShipMeshDef);
 
 let selectedShipMeshId = 'arrow';
 try {
