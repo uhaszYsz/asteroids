@@ -4805,6 +4805,8 @@ const pCollide = new Uint8Array(PARTICLE_MAX);
 const pEdgeBounce = new Uint8Array(PARTICLE_MAX);
 /** Ship id to ignore (thrust/smoke vs own hull). 0 = collide with all ships. */
 const pSkipShip = new Int32Array(PARTICLE_MAX);
+/** 1 = alpha = remaining life fraction (linear). 0 = opaque until last 10%. */
+const pFadeLife = new Uint8Array(PARTICLE_MAX);
 const pFree = new Int32Array(PARTICLE_MAX);
 let pFreeTop = 0;
 for (let i = PARTICLE_MAX - 1; i >= 0; i--) pFree[pFreeTop++] = i;
@@ -6404,6 +6406,7 @@ function clearParticles() {
   pCollide.fill(0);
   pEdgeBounce.fill(0);
   pSkipShip.fill(0);
+  pFadeLife.fill(0);
   pFreeTop = 0;
   for (let i = PARTICLE_MAX - 1; i >= 0; i--) pFree[pFreeTop++] = i;
 }
@@ -6418,6 +6421,7 @@ function freeParticle(i) {
   pCollide[i] = 0;
   pEdgeBounce[i] = 0;
   pSkipShip[i] = 0;
+  pFadeLife[i] = 0;
   pFree[pFreeTop++] = i;
 }
 
@@ -6425,7 +6429,8 @@ function freeParticle(i) {
  * Burst emit. Opts: x,y, count, speed, speedSpread, direction, spread,
  * size, sizeSpread, scaleY, sizeWiggle, sizeWiggleSpeed, lifetime, lifetimeSpread,
  * color [r,g,b], drag, inheritVx, inheritVy, collide (one-shot vs asteroids/ships),
- * edgeBounce (reflect off world bounds), skipShip (ship id to ignore — thrust/smoke vs own hull)
+ * edgeBounce (reflect off world bounds), skipShip (ship id to ignore — thrust/smoke vs own hull),
+ * fadeLife (alpha tracks remaining life fraction)
  */
 function emitParticles(o) {
   const count = o.count | 0;
@@ -6448,6 +6453,7 @@ function emitParticles(o) {
   const canCollide = o.collide ? 1 : 0;
   const edgeBounce = o.edgeBounce ? 1 : 0;
   const skipShip = (o.skipShip | 0) || 0;
+  const fadeLife = o.fadeLife ? 1 : 0;
 
   for (let n = 0; n < count; n++) {
     const i = allocParticle();
@@ -6473,6 +6479,7 @@ function emitParticles(o) {
     pCollide[i] = canCollide;
     pEdgeBounce[i] = edgeBounce;
     pSkipShip[i] = skipShip;
+    pFadeLife[i] = fadeLife;
     pAlive[i] = 1;
   }
 }
@@ -6653,8 +6660,8 @@ function drawParticles() {
   for (let i = 0; i < PARTICLE_MAX; i++) {
     if (!pAlive[i]) continue;
     const lifeT = pLife[i] / pMaxLife[i];
-    // Full opacity for first 90% of life; fade only in the last 10%.
-    const fade = lifeT >= 0.1 ? 1 : lifeT / 0.1;
+    // fadeLife: linear alpha from life. Else full opacity until last 10%.
+    const fade = pFadeLife[i] ? lifeT : (lifeT >= 0.1 ? 1 : lifeT / 0.1);
     const wig = 1 + Math.sin(pPhase[i] + t * 0.5) * pWiggle[i];
     let hx = pSize[i] * wig * 0.5;
     let hy = hx * pScaleY[i];
@@ -7022,10 +7029,11 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
     size: bulletSize * 1.15,
     sizeSpread: bulletSize * 2.3,
     scaleY: 1,
-    lifetime: 0.14,
-    lifetimeSpread: 0.08,
+    lifetime: 0.42,
+    lifetimeSpread: 0.24,
     color: tint,
-    drag: 2.2
+    drag: 2.2,
+    fadeLife: true
   };
 
   emitParticles(Object.assign({}, base, { inheritVx: shipVx, inheritVy: shipVy }));
@@ -8551,6 +8559,7 @@ function emitMeteorBurnFx(polyFlat, cx, cy, vx, vy, speedMul) {
     pCollide[pi] = 0;
     pEdgeBounce[pi] = 0;
     pSkipShip[pi] = 0;
+    pFadeLife[pi] = 0;
     pAlive[pi] = 1;
   }
 }
@@ -8773,6 +8782,112 @@ let asteroidFaceTexReady = false;
   img.onerror = () => console.error('Failed to load textures/asteroid.png');
   img.src = 'textures/asteroid.png';
 })();
+
+const shipHullTex = gl.createTexture();
+let shipHullTexReady = false;
+(function loadShipHullTex() {
+  const img = new Image();
+  img.onload = () => {
+    gl.bindTexture(gl.TEXTURE_2D, shipHullTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    shipHullTexReady = true;
+  };
+  img.onerror = () => console.error('Failed to load textures/ship.png');
+  img.src = 'textures/ship.png';
+})();
+
+/** Planar UVs from local mesh XY — works for any hull shape. */
+function shipMeshUvScale(verts) {
+  let m = 0;
+  for (let i = 0; i < verts.length; i++) {
+    const v = verts[i];
+    m = Math.max(m, Math.abs(v[0]), Math.abs(v[1]), Math.abs(v[2]) * 0.55);
+  }
+  return m > 0.01 ? m : 1;
+}
+
+function shipVertUV(vx, vy, uvScale, id) {
+  const tile = 2.35;
+  const ox = ((id | 0) * 0.173) % 2;
+  const oy = ((id | 0) * 0.291) % 2;
+  return [(vx / uvScale) * tile * 0.5 + ox, (vy / uvScale) * tile * 0.5 + oy];
+}
+
+function beginShipHullTex() {
+  if (!shipHullTexReady) return false;
+  gl.useProgram(astTexProg);
+  gl.enableVertexAttribArray(astTAPos);
+  gl.enableVertexAttribArray(astTAUV);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, shipHullTex);
+  gl.uniform1i(astTUTex, 0);
+  gl.uniform2f(astTURes, W, H);
+  bindSceneLightUniforms(astTexLightU);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  return true;
+}
+
+function endShipHullTex() {
+  gl.disable(gl.BLEND);
+  gl.disableVertexAttribArray(astTAUV);
+}
+
+function drawShipHullFaceTex(xy, mv, f, uvScale, id, tint, alpha, tintPow) {
+  const m = _astTexMesh;
+  for (let i = 0; i < 3; i++) {
+    const vi = f[i];
+    const uv = shipVertUV(mv[vi][0], mv[vi][1], uvScale, id);
+    const o = i * 4;
+    m[o] = xy[vi * 2];
+    m[o + 1] = xy[vi * 2 + 1];
+    m[o + 2] = uv[0];
+    m[o + 3] = uv[1];
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, astTexBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, m.subarray(0, 12), gl.DYNAMIC_DRAW);
+  gl.vertexAttribPointer(astTAPos, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(astTAUV, 2, gl.FLOAT, false, 16, 8);
+  gl.uniform3f(astTUTint, tint[0], tint[1], tint[2]);
+  gl.uniform1f(astTUTintPow, tintPow != null ? tintPow : 0.55);
+  gl.uniform1f(astTUEmit, 0);
+  gl.uniform1f(astTUAlpha, alpha);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/** Draw mesh faces with ship.png (fallback: flat fill). */
+function drawShipMeshFacesTex(xy, depth, mesh, color, id) {
+  const faces = mesh.faces || [];
+  if (!faces.length) return;
+  const mv = mesh.verts;
+  const order = faces.map((f, i) => {
+    const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
+    return { i, z };
+  });
+  order.sort((a, b) => a.z - b.z);
+  const texOn = beginShipHullTex();
+  const uvScale = shipMeshUvScale(mv);
+  const faceA = texOn ? 0.92 : 0.28;
+  const tintPow = 0.58;
+  for (const o of order) {
+    const f = faces[o.i];
+    if (texOn) {
+      drawShipHullFaceTex(xy, mv, f, uvScale, id, color, faceA, tintPow);
+    } else {
+      drawFilledPoly([
+        xy[f[0] * 2], xy[f[0] * 2 + 1],
+        xy[f[1] * 2], xy[f[1] * 2 + 1],
+        xy[f[2] * 2], xy[f[2] * 2 + 1]
+      ], color, faceA);
+    }
+  }
+  if (texOn) endShipHullTex();
+}
 
 /** Planar UVs from local mesh XY (tiled + per-id offset). */
 function asteroidVertUV(vx, vy, r, id) {
@@ -9447,26 +9562,9 @@ function drawShip3D(x, y, angle, av, color, id, dt) {
   const bank = shipBankSmoothed(id, av, dt);
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank);
   const nose = mesh.nose | 0;
-  const faces = mesh.faces || [];
   const edges = mesh.edges || [];
 
-  // Painter's algorithm: far faces first (lower avg height ≈ farther under tilt).
-  if (faces.length) {
-    const order = faces.map((f, i) => {
-      const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
-      return { i, z };
-    });
-    order.sort((a, b) => a.z - b.z);
-    for (const o of order) {
-      const f = faces[o.i];
-      const tri = [
-        xy[f[0] * 2], xy[f[0] * 2 + 1],
-        xy[f[1] * 2], xy[f[1] * 2 + 1],
-        xy[f[2] * 2], xy[f[2] * 2 + 1]
-      ];
-      drawFilledPoly(tri, color, 0.28);
-    }
-  }
+  drawShipMeshFacesTex(xy, depth, mesh, color, id);
 
   const tipHeat = (id | 0) === (myId | 0) ? shipCannonTipHeat() : 0;
   const edgeW = 1.125 * RES_SCALE; // 2.25 px at RES_SCALE=2
@@ -13642,24 +13740,9 @@ const ENEMY_UFO_MESH = (() => {
   };
 })();
 
-function drawEnemyShipMesh(mesh, x, y, angle, color, bank) {
+function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id) {
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank || 0);
-  const faces = mesh.faces;
-  if (faces.length) {
-    const order = faces.map((f, i) => {
-      const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
-      return { i, z };
-    });
-    order.sort((a, b) => a.z - b.z);
-    for (const o of order) {
-      const f = faces[o.i];
-      drawFilledPoly([
-        xy[f[0] * 2], xy[f[0] * 2 + 1],
-        xy[f[1] * 2], xy[f[1] * 2 + 1],
-        xy[f[2] * 2], xy[f[2] * 2 + 1]
-      ], color, 0.28);
-    }
-  }
+  drawShipMeshFacesTex(xy, depth, mesh, color, id != null ? id : 0);
   const edgeW = 1.125 * RES_SCALE;
   for (const e of mesh.edges) {
     drawThickSegment(
@@ -13706,7 +13789,7 @@ function clearEnemyBank(id) {
 
 function drawEnemyCommon(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
-  drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank);
+  drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank, id);
   return bank;
 }
 
@@ -13920,7 +14003,7 @@ function drawEnemyCommonCharges() {
 
 function drawEnemyUfo(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
-  drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank);
+  drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id);
 }
 
 function carrierWeaponColor(weapon) {
