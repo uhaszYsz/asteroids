@@ -436,6 +436,8 @@ const SFX = {
     'sounds/impact1.wav',
     'sounds/impact2.wav'
   ],
+  asteroidCollide: 'sounds/explosion1.wav',
+  shieldOff: 'sounds/shield.wav',
   meteorCrash: 'sounds/impactsMetalCrash.wav',
   laserImpact: 'sounds/laserImpact.wav',
   laser: 'sounds/laser2.wav',
@@ -8226,7 +8228,7 @@ function emitAsteroidBurst(x, y, r, size) {
 }
 
 function emitPlayerAsteroidHit(x, y) {
-  playSfx(SFX.collide, { vol: 0.9 });
+  playSfx(SFX.asteroidCollide, { vol: 0.9, pool: 4 });
   triggerScreenShake(400, 11 * RES_SCALE);
   emitParticles({
     x, y,
@@ -17149,7 +17151,11 @@ async function connect() {
     if (msg.t === 'pwr' && inGame) {
       const id = msg.id | 0;
       const hadReload = id === myId && !!(player.powerups && player.powerups.reload);
+      const hadShield = id === myId && !!(player.powerups && player.powerups.shield);
       applyPowerupsState(id, msg.powerups);
+      if (id === myId && hadShield && !(player.powerups && player.powerups.shield)) {
+        playSfx(SFX.shieldOff, { vol: 0.85, pool: 2 });
+      }
       if (id === myId && !hadReload && player.powerups && player.powerups.reload) {
         if (localShoot.reloadLeft > 0) {
           localShoot.reloadLeft = Math.max(1, Math.round(localShoot.reloadLeft * 0.5));
