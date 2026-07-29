@@ -896,7 +896,7 @@ const CVARS = {
   sv_dynamic_prediction: {
     value: 1,
     def: 1,
-    help: 'Scale for ping-based fire lead (global). 0 = fixed sv_predict_shoot_step/angle. 1 = one-way − cmd delay; 2 = 2× that lead. Admin only.'
+    help: 'Scale ping-based fire lead (global). 0 = fixed step/angle. Lead ≈ oneWay×scale − cmdDelay (ticks, max 16). Admin only.'
   },
   sv_portal: {
     value: 1,
@@ -1227,16 +1227,16 @@ function shootPredictLeadTicks() {
   const scale = Number(cv('sv_dynamic_prediction'));
   if (scale > 0) {
     const oneWayTicks = (pingMs * 0.5) / TICK_MS;
-    return Math.max(0, Math.min(8, Math.round((oneWayTicks - adaptiveInputDelay()) * scale) | 0));
+    return Math.max(0, Math.min(16, Math.round(oneWayTicks * scale - adaptiveInputDelay()) | 0));
   }
-  return Math.max(0, Math.min(8, cv('sv_predict_shoot_step') | 0));
+  return Math.max(0, Math.min(16, cv('sv_predict_shoot_step') | 0));
 }
 
 function shootPredictAngleLeadTicks() {
   if (Number(cv('sv_dynamic_prediction')) > 0) {
     return shootPredictLeadTicks();
   }
-  return Math.max(0, Math.min(8, cv('sv_predict_shoot_angle') | 0));
+  return Math.max(0, Math.min(16, cv('sv_predict_shoot_angle') | 0));
 }
 
 /** Tell server whether asteroid edge portals are enabled. */
@@ -12859,6 +12859,16 @@ function unpackBullet(row) {
   };
 }
 
+/**
+ * Live bf packets arrive ~½ RTT late. Age from spawnSt+clockOffset goes sticky/wrong
+ * after hitch; force transit-based age so the bullet pops mid-flight immediately.
+ */
+function applyLiveBulletTransitAge(b) {
+  if (!b) return;
+  const transit = Math.max(0, Number(pingMs) * 0.5);
+  b.spawnSt = serverNow() - transit;
+}
+
 /** Same LCG as server — pellet aim/speed from muzzle x/y. */
 function makeShotgunRng(x, y) {
   let s = (
@@ -12900,7 +12910,7 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
   for (let i = 0; i < count; i++) {
     const ang = aim + (rnd() - 0.5) * spreadRad;
     const spd = spdMin + rnd() * (spdMax - spdMin);
-    addBullet({
+    const pellet = {
       id: baseId + i,
       spawnX: x,
       spawnY: y,
@@ -12909,11 +12919,14 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
       owner,
       spawnSt,
       type: 'shotgun'
-    }, false, liveFire);
+    };
+    if (liveFire) applyLiveBulletTransitAge(pellet);
+    addBullet(pellet, false, false);
   }
 }
 
 function addBullet(b, withMuzzle, liveFire) {
+  if (liveFire) applyLiveBulletTransitAge(b);
   bullets.set(b.id, b);
   if (b.type === 'rocket' || b.type === 'enemyRocket') startRocketTravelSfx(b);
   if (withMuzzle) {

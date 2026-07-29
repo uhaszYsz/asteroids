@@ -4523,19 +4523,18 @@ function tryStartBurst(p) {
 function clampPredictLeadTicks(n) {
   n = n | 0;
   if (n < 0) n = 0;
-  if (n > 8) n = 8;
+  if (n > 16) n = 16;
   return n;
 }
 
 function pingBasedPredictLeadTicks(room, p) {
   const rtt = playerRttMs(room, p && p.id) || 0;
-  // One-way latency in ticks, minus the client's cmd delay (inputs already
-  // applied locally that many ticks before the server consumes them),
-  // then scaled by sv_dynamic_prediction (1 = legacy strength).
+  // Scale the one-way delay, then subtract cmd delay (inputs already applied locally).
+  // Old (oneWay - cmdDelay) * scale stayed 0 whenever oneWay < cmdDelay — scale did nothing.
   const oneWayTicks = (rtt * 0.5) / TICK_MS;
   const cmdDelay = playerCmdDelayTicks(room, p && p.id);
   const scale = svDynamicPrediction > 0 ? svDynamicPrediction : 1;
-  return clampPredictLeadTicks(Math.round((oneWayTicks - cmdDelay) * scale));
+  return clampPredictLeadTicks(Math.round(oneWayTicks * scale - cmdDelay));
 }
 
 function playerCmdDelayTicks(room, playerId) {
