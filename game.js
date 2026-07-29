@@ -9897,17 +9897,14 @@ function tinyShipDesiredState(spec, moving) {
   return spec.states[0] || 'idle';
 }
 
-/** Sprite on a flat local-XY plane; bank/spin like rocket hulls around the nose. */
+/** Sprite on a flat local-XY plane; banks with turn like mesh ships (no continuous spin). */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
   const spec = opt && opt.sprite;
   if (!spec) return;
   const entry = spriteShipTexById.get(spec.id);
   if (!entry || !entry.ready || !entry.tex) return;
 
-  // Same nose-roll pipeline as rockets; keep spin partial so a flat sprite stays readable.
-  const spin = rocketSpinAngle(id != null ? id : 0) * 0.38;
-  const bankTurn = shipBankSmoothed(id, av, dt);
-  const bank = spin + bankTurn;
+  const bank = shipBankSmoothed(id, av, dt);
 
   const halfL = 7.5 * RES_SCALE;
   const halfW = halfL * (spec.fw / Math.max(1, spec.fh));
@@ -9948,6 +9945,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
   gl.uniform1f(ssUAlpha, 1);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+  // Keep crisp pixels even if another pass switched filters.
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.uniform1i(ssUTex, 0);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
