@@ -433,7 +433,9 @@ const ASTEROID_HP = 50;
 const ASTEROID_COIN_GRANT = 32;
 /** Chance a non-start spawn (replacement big / split shard) is a special type. */
 const SPECIAL_ASTEROID_CHANCE = 0.1;
-const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden', 'huge'];
+const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden'];
+/** Extra specials only for wave / match-start rocks (not replacement bigs or shards). */
+const SPECIAL_ASTEROID_KINDS_START = ['meteor', 'golden', 'huge'];
 /** Golden special rocks — tanky ore; coins drip on each damaging hit. */
 const GOLDEN_ASTEROID_HP = 400;
 /** Coins per point of HP damage dealt to a golden asteroid. */
@@ -1057,14 +1059,17 @@ function rollNormalAsteroidVelocity() {
   };
 }
 
-function rollSpecialAsteroid(allowSpecial) {
+function rollSpecialAsteroid(allowSpecial, allowHuge) {
   if (!allowSpecial || Math.random() >= SPECIAL_ASTEROID_CHANCE) return null;
-  return SPECIAL_ASTEROID_KINDS[Math.random() * SPECIAL_ASTEROID_KINDS.length | 0];
+  const kinds = allowHuge ? SPECIAL_ASTEROID_KINDS_START : SPECIAL_ASTEROID_KINDS;
+  return kinds[Math.random() * kinds.length | 0];
 }
 
 function makeAsteroid(opts) {
   const o = opts || {};
-  const special = o.special !== undefined ? o.special : rollSpecialAsteroid(!!o.allowSpecial);
+  const special = o.special !== undefined
+    ? o.special
+    : rollSpecialAsteroid(!!o.allowSpecial, !!o.allowHuge);
   let size = o.size || (o.big === false ? 'medium' : 'big');
   // Huge specials always use the huge tier (2× big radius).
   if (special === 'huge') size = 'huge';
@@ -1371,7 +1376,8 @@ function createSoloWaveAsteroids(wave) {
   const list = [];
   const allowSpecial = wave > 1;
   for (let i = 0; i < c.big; i++) {
-    list.push(makeAsteroid({ size: 'big', offscreen: true, allowSpecial }));
+    // Huge only here (wave start) — not from destroyed-big replacements / shards.
+    list.push(makeAsteroid({ size: 'big', offscreen: true, allowSpecial, allowHuge: allowSpecial }));
   }
   for (let i = 0; i < c.medium; i++) {
     list.push(makeAsteroid({ size: 'medium', offscreen: true, allowSpecial: false }));
