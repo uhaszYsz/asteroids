@@ -3808,7 +3808,7 @@ function ensureGridBakeTexture() {
   const c0 = spawnPadColorKey(0);
   const c1 = spawnPadColorKey(1);
   const key = [
-    'arena26', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
+    'arena27', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
     practiceMode ? 'p1' : 'p0', inGame ? 'g1' : 'menu', c0, c1
   ].join(':');
   if (!gridBakeDirty && gridBakeTex && gridBakeKey === key) return true;
@@ -3857,36 +3857,42 @@ function ensureGridBakeTexture() {
 }
 
 /**
- * Bake title-screen logo onto the grid atlas.
- * Midway between top and center; shadow layer + colored fill (Orbitron).
+ * Bake title-screen logo into the grid atlas (same canvas → WebGL texture as the lattice).
+ * Not HTML — pixels live in gridBakeTex and warp with the mesh.
  */
 function paintMenuTitleBake(ctx, tw, th) {
   const label = 'ASTEROIDS';
   const cx = tw * 0.5;
   // Halfway between top (0) and center (0.5) → ~0.25.
   const cy = th * 0.25;
-  const fontPx = Math.max(28, Math.min(tw, th) * 0.085);
-  const font = '800 ' + fontPx + 'px Orbitron, "Press Start 2P", Consolas, monospace';
+  const fontPx = Math.max(22, Math.min(tw, th) * 0.072);
+  // Pixel arcade face — already loaded; reads as bake, not DOM UI.
+  const font = fontPx + 'px "Press Start 2P", Consolas, monospace';
   ctx.save();
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.font = font;
-  // Soft wide glow under the glyphs so it reads on the grid.
-  ctx.shadowColor = 'rgba(80, 220, 255, 0.55)';
-  ctx.shadowBlur = fontPx * 0.35;
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = 0;
-  // Hard drop-shadow (offset copy).
-  const ox = Math.max(2, fontPx * 0.06);
-  const oy = Math.max(2, fontPx * 0.08);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = 'rgba(4, 8, 18, 0.92)';
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.miterLimit = 2;
+
+  // Hard drop-shadow (offset copy) under everything.
+  const ox = Math.max(3, fontPx * 0.08);
+  const oy = Math.max(3, fontPx * 0.1);
+  ctx.fillStyle = 'rgba(4, 8, 18, 0.95)';
   ctx.fillText(label, cx + ox, cy + oy);
-  // Main fill — cool cyan with a warm edge via stroke.
-  ctx.lineWidth = Math.max(1.5, fontPx * 0.045);
-  ctx.strokeStyle = 'rgba(255, 120, 200, 0.85)';
-  ctx.fillStyle = 'rgba(120, 230, 255, 1)';
+
+  // Outline 2× previous thickness — stroke before fill so it sits in the bake.
+  const outlineW = Math.max(3, fontPx * 0.09);
+  ctx.lineWidth = outlineW;
+  ctx.strokeStyle = 'rgba(255, 90, 180, 1)';
   ctx.strokeText(label, cx, cy);
+  // Second pass slightly thinner / darker for a double-edge read on the grid.
+  ctx.lineWidth = outlineW * 0.55;
+  ctx.strokeStyle = 'rgba(20, 10, 30, 0.9)';
+  ctx.strokeText(label, cx, cy);
+
+  ctx.fillStyle = 'rgba(120, 230, 255, 1)';
   ctx.fillText(label, cx, cy);
   ctx.restore();
 }
@@ -18982,7 +18988,7 @@ connect();
 requestAnimationFrame(frame);
 // Rebuild menu title bake once Orbitron is ready (first paint may use fallback).
 if (document.fonts && document.fonts.load) {
-  document.fonts.load('800 64px Orbitron').then(() => {
+  document.fonts.load('64px "Press Start 2P"').then(() => {
     gridBakeDirty = true;
   }).catch(() => {});
 }
