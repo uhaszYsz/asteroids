@@ -9862,16 +9862,25 @@ const spriteShipVS = `
 const spriteShipFS = `
   precision mediump float;
   uniform sampler2D uTex;
+  uniform vec3 uTint;
+  uniform float uTintPow;
+  uniform float uEmit;
   uniform float uAlpha;
   varying vec2 vUV;
   varying vec2 vWorld;
 ` + SCENE_LIGHT_GLSL + `
   void main() {
-    vec4 c = texture2D(uTex, vUV);
-    if (c.a < 0.08) discard;
+    vec4 t = texture2D(uTex, vUV);
+    if (t.a < 0.08) discard;
     // Near-black sheet leftovers.
-    if (max(c.r, max(c.g, c.b)) < 0.03 && c.a < 0.2) discard;
-    gl_FragColor = applyNightLit(c.rgb, c.a * uAlpha, vWorld);
+    if (max(t.r, max(t.g, t.b)) < 0.03 && t.a < 0.2) discard;
+    // Same Godot-style emission as asteroid faces: tint × bright albedo × energy.
+    vec3 tint = mix(vec3(1.0), uTint, clamp(uTintPow, 0.0, 1.0));
+    vec3 albedo = t.rgb * tint;
+    float lum = dot(t.rgb, vec3(0.299, 0.587, 0.114));
+    float emitMask = smoothstep(0.12, 0.72, lum);
+    vec3 rgb = albedo + uTint * emitMask * max(0.0, uEmit);
+    gl_FragColor = applyNightLit(rgb, t.a * uAlpha, vWorld);
   }
 `;
 const spriteShipProg = gl.createProgram();
@@ -9882,6 +9891,9 @@ gl.attachShader(spriteShipProg, shader(gl.FRAGMENT_SHADER, spriteShipFS));
 linkProgram(spriteShipProg);
 const ssURes = gl.getUniformLocation(spriteShipProg, 'uRes');
 const ssUTex = gl.getUniformLocation(spriteShipProg, 'uTex');
+const ssUTint = gl.getUniformLocation(spriteShipProg, 'uTint');
+const ssUTintPow = gl.getUniformLocation(spriteShipProg, 'uTintPow');
+const ssUEmit = gl.getUniformLocation(spriteShipProg, 'uEmit');
 const ssUAlpha = gl.getUniformLocation(spriteShipProg, 'uAlpha');
 const spriteShipLightU = {
   night: gl.getUniformLocation(spriteShipProg, 'uFlashNight'),
@@ -9925,7 +9937,7 @@ function tinyShipDesiredState(spec, moving, attacking) {
 }
 
 /** Sprite cut vertically onto a pitched roof (two faces meeting at the keel ridge). */
-function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
+function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
   const spec = opt && opt.sprite;
   if (!spec) return;
   const entry = spriteShipTexById.get(spec.id);
@@ -9977,6 +9989,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
     }
   ];
 
+  const tint = color || COL.self || [0.35, 0.85, 1];
+  const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
+
   gl.useProgram(spriteShipProg);
   gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
   gl.enableVertexAttribArray(ssAPos);
@@ -9985,6 +10000,10 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
   gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, 16, 8);
   gl.uniform2f(ssURes, W, H);
   bindSceneLightUniforms(spriteShipLightU);
+  gl.uniform3f(ssUTint, tint[0], tint[1], tint[2]);
+  // Keep sprite palette; emission still uses player tint on bright texels (like rocks).
+  gl.uniform1f(ssUTintPow, 0);
+  gl.uniform1f(ssUEmit, emitPow);
   gl.uniform1f(ssUAlpha, 1);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
@@ -10021,7 +10040,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
 function drawShip3D(x, y, angle, av, color, id, dt, moving) {
   const opt = getActiveShipOption();
   if (opt && opt.kind === 'sprite') {
-    drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving);
+    drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color);
     return;
   }
   const mesh = getActiveShipMesh();
