@@ -6520,7 +6520,8 @@ function freeParticle(i) {
  * Burst emit. Opts: x,y, count, speed, speedSpread, direction, spread,
  * size, sizeSpread, scaleY, sizeWiggle, sizeWiggleSpeed, lifetime, lifetimeSpread,
  * color [r,g,b], drag, inheritVx, inheritVy, collide (one-shot vs asteroids/ships),
- * edgeBounce (reflect off world bounds), skipShip (ship id to ignore — thrust/smoke vs own hull),
+ * edgeBounce (ignored — particles wrap on the torus, no Euclidean wall bounce),
+ * skipShip (ship id to ignore — thrust/smoke vs own hull),
  * fadeLife (alpha tracks remaining life fraction)
  */
 function emitParticles(o) {
@@ -6697,22 +6698,10 @@ function collideParticleOnce(i) {
   }
 }
 
-function bounceParticleWorldEdge(i) {
-  const e = PARTICLE_EDGE_BOUNCE;
-  if (pX[i] < 0) {
-    pX[i] = 0;
-    if (pVx[i] < 0) pVx[i] = -pVx[i] * e;
-  } else if (pX[i] > W) {
-    pX[i] = W;
-    if (pVx[i] > 0) pVx[i] = -pVx[i] * e;
-  }
-  if (pY[i] < 0) {
-    pY[i] = 0;
-    if (pVy[i] < 0) pVy[i] = -pVy[i] * e;
-  } else if (pY[i] > H) {
-    pY[i] = H;
-    if (pVy[i] > 0) pVy[i] = -pVy[i] * e;
-  }
+/** Particles live on the torus — never bounce off Euclidean world walls. */
+function wrapParticlePos(i) {
+  pX[i] = wrapCoord(pX[i], W);
+  pY[i] = wrapCoord(pY[i], H);
 }
 
 function updateParticles(dt) {
@@ -6738,8 +6727,8 @@ function updateParticles(dt) {
     pVy[i] *= damp;
     pX[i] += pVx[i] * dt;
     pY[i] += pVy[i] * dt;
+    wrapParticlePos(i);
     pPhase[i] += pWiggleSpd[i] * dt;
-    if (pEdgeBounce[i]) bounceParticleWorldEdge(i);
     if (pCollide[i] === 1 && pColCount > 0) collideParticleOnce(i);
   }
 }
