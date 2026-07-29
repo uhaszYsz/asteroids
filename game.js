@@ -3217,12 +3217,11 @@ const gbAPos = gl.getAttribLocation(gridBakeProg, 'aPos');
 const gbAUV = gl.getAttribLocation(gridBakeProg, 'aUV');
 const gridBakeBuf = gl.createBuffer();
 
-/* ========== Menu title neon pulses (normal blend, fill + outline masks) ========== */
+/* ========== Menu title neon pulses (brightness boost on fill + outline) ========== */
 const menuNeonFS = `
   precision mediump float;
   uniform sampler2D uMask;
   uniform vec4 uPulses[8]; // xy = world center, z = radius, w = strength
-  uniform vec3 uNeon;
   uniform vec2 uWorldOrigin;
   uniform vec2 uWorldSize;
   varying vec2 vUV;
@@ -3253,9 +3252,11 @@ const menuNeonFS = `
         glow += str * cover * cover;
       }
     }
+    glow = clamp(glow, 0.0, 1.0);
     if (glow < 0.02) discard;
-    float a = min(0.95, mask * glow * 1.55);
-    vec3 col = uNeon;
+    // Same hue as lattice; blend toward 2x brightness with the blast gradient.
+    float a = min(1.0, mask * glow);
+    vec3 col = o.rgb * 2.0;
     gl_FragColor = vec4(col, a);
   }
 `;
@@ -3266,7 +3267,6 @@ linkProgram(menuNeonProg);
 const mnURes = gl.getUniformLocation(menuNeonProg, 'uRes');
 const mnUMask = gl.getUniformLocation(menuNeonProg, 'uMask');
 const mnUPulses = gl.getUniformLocation(menuNeonProg, 'uPulses[0]');
-const mnUNeon = gl.getUniformLocation(menuNeonProg, 'uNeon');
 const mnUWorldOrigin = gl.getUniformLocation(menuNeonProg, 'uWorldOrigin');
 const mnUWorldSize = gl.getUniformLocation(menuNeonProg, 'uWorldSize');
 const mnAPos = gl.getAttribLocation(menuNeonProg, 'aPos');
@@ -3281,9 +3281,6 @@ const menuTitleFillPulses = [];
 let menuTitleNeonNextAt = 0;
 const MENU_NEON_LIFE_MS = 900;
 const MENU_NEON_MAX = 8;
-// Light tints — separate from bake lattice colors (cyan fill / magenta outline).
-const MENU_NEON_OUTLINE_RGB = [1.0, 0.72, 0.92];
-const MENU_NEON_FILL_RGB = [1.0, 0.95, 0.78];
 let gridBakeTex = null;
 let gridBakeKey = '';
 let gridBakeVerts = null;
@@ -4133,7 +4130,7 @@ function packMenuNeonPulses(list, now) {
   return n;
 }
 
-/** Normal-blend explosion lights on fill + outline lattice (separate light tints). */
+/** Normal-blend brightness pulses on fill + outline lattice (up to 2×, no recolor). */
 function drawMenuTitleNeonGlow(now) {
   if (inGame) return;
   if (!menuTitleFillReady && !menuTitleOutlineReady) return;
@@ -4154,17 +4151,15 @@ function drawMenuTitleNeonGlow(now) {
   gl.activeTexture(gl.TEXTURE0);
   gl.uniform1i(mnUMask, 0);
 
-  const drawLayer = (ready, tex, pulses, rgb) => {
+  const drawLayer = (ready, tex, pulses) => {
     if (!ready || !tex) return;
     if (!packMenuNeonPulses(pulses, now)) return;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform4fv(mnUPulses, _menuNeonPulses);
-    gl.uniform3f(mnUNeon, rgb[0], rgb[1], rgb[2]);
     gl.drawArrays(gl.TRIANGLES, 0, gridBakeVertCount);
   };
-  // Fill first (glyph interior), then outline ring — each its own light color.
-  drawLayer(menuTitleFillReady, menuTitleFillTex, menuTitleFillPulses, MENU_NEON_FILL_RGB);
-  drawLayer(menuTitleOutlineReady, menuTitleOutlineTex, menuTitleOutlinePulses, MENU_NEON_OUTLINE_RGB);
+  drawLayer(menuTitleFillReady, menuTitleFillTex, menuTitleFillPulses);
+  drawLayer(menuTitleOutlineReady, menuTitleOutlineTex, menuTitleOutlinePulses);
 
   gl.disableVertexAttribArray(mnAPos);
   gl.disableVertexAttribArray(mnAUV);
