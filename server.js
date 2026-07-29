@@ -396,6 +396,8 @@ const ASTEROID_R = {
   medium: 15 * RES_SCALE * 1.3 * 1.35,
   small: 9 * RES_SCALE * 1.35
 };
+/** Huge specials are 2× big. */
+ASTEROID_R.huge = ASTEROID_R.big * 2;
 /** Collision shape is this fraction of visual radius / polygon (visual unchanged). */
 const ASTEROID_HIT_SCALE = 0.9;
 const PICKUP_R = 7 * RES_SCALE;
@@ -431,11 +433,13 @@ const ASTEROID_HP = 50;
 const ASTEROID_COIN_GRANT = 32;
 /** Chance a non-start spawn (replacement big / split shard) is a special type. */
 const SPECIAL_ASTEROID_CHANCE = 0.1;
-const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden'];
+const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden', 'huge'];
 /** Golden special rocks — tanky ore; coins drip on each damaging hit. */
 const GOLDEN_ASTEROID_HP = 400;
 /** Coins per point of HP damage dealt to a golden asteroid. */
 const GOLDEN_ASTEROID_COIN_PER_DMG = 0.4;
+/** Huge special rocks — slow, massive, split into many mediums. */
+const HUGE_ASTEROID_HP = 600;
 /** Base random speed spread used by normal asteroids (±half of this per axis). */
 const ASTEROID_SPEED_SPREAD = 2.4 * RES_SCALE;
 /** Normal speed magnitude band (px/tick). Min matches offscreen inward floor. */
@@ -447,15 +451,17 @@ const ASTEROID_INBOUND_STUCK_MS = 20000;
 const ASTEROID_LIFE_MS = 20000;
 /** Rail damage vs players/enemies when an asteroid is closer on the beam. */
 const RAIL_THROUGH_ASTEROID_MULT = 0.2;
-/** Network special codes: 0 normal, 1 meteor, 2 golden. */
+/** Network special codes: 0 normal, 1 meteor, 2 golden, 3 huge. */
 function specialAsteroidCode(a) {
   if (a.special === 'meteor') return 1;
   if (a.special === 'golden') return 2;
+  if (a.special === 'huge') return 3;
   return 0;
 }
 function specialAsteroidFromCode(code) {
   if (code === 1) return 'meteor';
   if (code === 2) return 'golden';
+  if (code === 3) return 'huge';
   return null;
 }
 /** Keep this many ticks of poses for lag compensation (~1s). */
@@ -752,7 +758,8 @@ function packBullet(b) {
 }
 
 function asteroidSizeCode(a) {
-  // 2 = big, 1 = medium, 0 = small (legacy clients treated non-zero as big).
+  // 3 = huge, 2 = big, 1 = medium, 0 = small (legacy clients treated non-zero as big).
+  if (a.size === 'huge') return 3;
   if (a.size === 'big' || a.big) return 2;
   if (a.size === 'medium') return 1;
   return 0;
@@ -952,6 +959,7 @@ function asteroidRng(id) {
 
 function asteroidOutlineCount(id, size) {
   const h = asteroidHash01(id);
+  if (size === 'huge') return 16 + ((h * 4) | 0);
   if (size === 'big') return 12 + ((h * 3) | 0);
   if (size === 'medium') return 10 + ((h * 3) | 0);
   return 8 + ((h * 3) | 0);
@@ -1019,6 +1027,10 @@ function asteroidSpeedBand(special) {
   if (special === 'meteor') {
     return { min: 4, max: 6 };
   }
+  if (special === 'huge') {
+    // Cap at half of the normal random-speed max.
+    return { min: ASTEROID_SPEED_MIN, max: ASTEROID_SPEED_MAX * 0.5 };
+  }
   return { min: ASTEROID_SPEED_MIN, max: ASTEROID_SPEED_MAX };
 }
 
@@ -1052,13 +1064,16 @@ function rollSpecialAsteroid(allowSpecial) {
 
 function makeAsteroid(opts) {
   const o = opts || {};
-  const size = o.size || (o.big === false ? 'medium' : 'big');
-  const big = size === 'big';
+  const special = o.special !== undefined ? o.special : rollSpecialAsteroid(!!o.allowSpecial);
+  let size = o.size || (o.big === false ? 'medium' : 'big');
+  // Huge specials always use the huge tier (2× big radius).
+  if (special === 'huge') size = 'huge';
+  const big = size === 'big' || size === 'huge';
   const baseR = ASTEROID_R[size] || ASTEROID_R.big;
   const r = o.r != null ? o.r : baseR * (0.92 + Math.random() * 0.16);
-  const special = o.special !== undefined ? o.special : rollSpecialAsteroid(!!o.allowSpecial);
   let hp = ASTEROID_HP;
   if (special === 'golden') hp = GOLDEN_ASTEROID_HP;
+  if (special === 'huge') hp = HUGE_ASTEROID_HP;
   if (o.hp != null) hp = o.hp;
   const angle = Math.random() * Math.PI * 2;
   const now = Date.now();
@@ -1075,8 +1090,8 @@ function makeAsteroid(opts) {
       vx = rolled.vx;
       vy = rolled.vy;
     }
-    if (special === 'meteor') {
-      const fitted = fitAsteroidSpeed(vx, vy, 'meteor');
+    if (special === 'meteor' || special === 'huge') {
+      const fitted = fitAsteroidSpeed(vx, vy, special);
       vx = fitted.vx;
       vy = fitted.vy;
     }
@@ -1088,8 +1103,8 @@ function makeAsteroid(opts) {
     y = pose.y;
     vx = o.vx != null ? o.vx : pose.vx;
     vy = o.vy != null ? o.vy : pose.vy;
-    if (special === 'meteor') {
-      const fitted = fitAsteroidSpeed(vx, vy, 'meteor');
+    if (special === 'meteor' || special === 'huge') {
+      const fitted = fitAsteroidSpeed(vx, vy, special);
       vx = fitted.vx;
       vy = fitted.vy;
     }
@@ -2446,6 +2461,34 @@ function splitAsteroid(room, parent) {
   if (!parent.centerRock && Math.random() < PICKUP_DROP_CHANCE) {
     spawnPickup(room, parent);
   }
+
+  // Huge: 4–7 medium shards, no further cascade size logic.
+  if (parent.special === 'huge' || parent.size === 'huge') {
+    if (!parent.centerRock) scheduleBigAsteroidSpawn(room);
+    const count = 4 + (Math.random() * 4 | 0); // 4–7
+    for (let i = 0; i < count; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
+      const parentHue = parent.hue != null
+        ? wrapHue01(parent.hue)
+        : asteroidHueFromShape(parent.shapeId != null ? parent.shapeId : parent.aid);
+      const child = makeAsteroid({
+        size: 'medium',
+        allowSpecial: true,
+        x: parent.x + Math.cos(ang) * parent.r * 0.25,
+        y: parent.y + Math.sin(ang) * parent.r * 0.25,
+        vx: parent.vx * 0.4 + Math.cos(ang) * kick,
+        vy: parent.vy * 0.4 + Math.sin(ang) * kick,
+        edgeWrapMax: 1,
+        hue: shardHueFromParent(parentHue)
+      });
+      clampSpeed(child);
+      pushAsteroid(room, child);
+      emitAsteroidFire(room, child);
+    }
+    return;
+  }
+
   if (parent.size === 'small') return;
 
   // Non-center big destroyed → replacement enters from off-screen after a delay.
@@ -3485,7 +3528,7 @@ function asteroidCosSin(a) {
  * overlap the playfield; query with circle → dedup via per-query id.
  */
 const AST_HASH_CELL = 64;
-const AST_HASH_PAD_CELLS = Math.ceil(ASTEROID_R.big / AST_HASH_CELL) + 1;
+const AST_HASH_PAD_CELLS = Math.ceil(ASTEROID_R.huge / AST_HASH_CELL) + 1;
 const AST_HASH_COLS = Math.ceil(W / AST_HASH_CELL) + AST_HASH_PAD_CELLS * 2;
 const AST_HASH_ROWS = Math.ceil(H / AST_HASH_CELL) + AST_HASH_PAD_CELLS * 2;
 const AST_HASH_OX = -AST_HASH_PAD_CELLS * AST_HASH_CELL;

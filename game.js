@@ -8123,13 +8123,16 @@ function emitDeathPreGridFx(x, y) {
 }
 
 /** Epic multi-wave ship death blast. */
-function emitPlayerDeathFx(x, y, color) {
+function emitPlayerDeathFx(x, y, color, opts) {
   const col = color || COL.self;
-  // Dedicated held clip — more reliable than pool seek on a long wav.
-  playSfxLoop('death', SFX.death, { vol: 0.95, loop: false });
-  playAmbientExplosionEcho({ vol: 0.7 });
-  syncThrustSfx(false);
-  syncLaserSfx(false);
+  opts = opts || {};
+  if (!opts.quiet) {
+    // Dedicated held clip — more reliable than pool seek on a long wav.
+    playSfxLoop('death', SFX.death, { vol: 0.95, loop: false });
+    playAmbientExplosionEcho({ vol: 0.7 });
+    syncThrustSfx(false);
+    syncLaserSfx(false);
+  }
   pushBoomLight(x, y, 96 * RES_SCALE);
   pushGridShock(x, y, { amp: 36 * RES_SCALE, width: 60, ripple: 1, inward: false });
   pushGridShock(x, y, { amp: 18 * RES_SCALE, width: 36, ripple: 1, inward: false });
@@ -8179,6 +8182,21 @@ function emitPlayerDeathFx(x, y, color) {
   deathRings.push({ x, y, born: now, life: 900, color: COL_WHITE, r0: 4, r1: 50 });
   deathRings.push({ x, y, born: now + 40, life: 1400, color: col, r0: 6, r1: 110 });
   deathRings.push({ x, y, born: now + 90, life: 2000, color: [1.0, 0.55, 0.15], r0: 10, r1: 160 });
+}
+
+/** Huge special: player-death blast, then big rock burst 0.1s later. */
+function emitHugeAsteroidDeathFx(x, y, r) {
+  emitPlayerDeathFx(x, y, COL.asteroid);
+  const br = r || 26 * RES_SCALE;
+  setTimeout(() => {
+    emitAsteroidBurst(x, y, br, 'big');
+    pushFxRing(x, y, COL.asteroid, {
+      r0: 6,
+      r1: Math.min(80, 18 + br * 0.7),
+      life: 420
+    });
+    pushGridShock(x, y, gridBlastAsteroidOpts(br));
+  }, 100);
 }
 
 function updateDeathRings(now) {
@@ -8798,6 +8816,7 @@ function asteroidRng(id) {
 
 function asteroidOutlineCount(id, size) {
   const h = asteroidHash01(id);
+  if (size === 'huge') return 16 + ((h * 4) | 0);
   if (size === 'big') return 12 + ((h * 3) | 0);
   if (size === 'medium') return 10 + ((h * 3) | 0);
   return 8 + ((h * 3) | 0);
@@ -13207,14 +13226,18 @@ function removeAsteroid(id, silent) {
   const a = asteroids.get(id);
   if (a && !silent) {
     const p = asteroidAt(a);
-    const burstCol = a.special === 'golden' ? COL.golden : COL.asteroid;
-    emitAsteroidBurst(p.x, p.y, a.r || 10 * RES_SCALE, a.size);
-    pushFxRing(p.x, p.y, burstCol, {
-      r0: 4,
-      r1: Math.min(50, 12 + (a.r || 10) * 0.6),
-      life: 360
-    });
-    pushGridShock(p.x, p.y, gridBlastAsteroidOpts(a.r || 10 * RES_SCALE));
+    if (a.special === 'huge' || a.size === 'huge') {
+      emitHugeAsteroidDeathFx(p.x, p.y, a.r || 52 * RES_SCALE);
+    } else {
+      const burstCol = a.special === 'golden' ? COL.golden : COL.asteroid;
+      emitAsteroidBurst(p.x, p.y, a.r || 10 * RES_SCALE, a.size);
+      pushFxRing(p.x, p.y, burstCol, {
+        r0: 4,
+        r1: Math.min(50, 12 + (a.r || 10) * 0.6),
+        life: 360
+      });
+      pushGridShock(p.x, p.y, gridBlastAsteroidOpts(a.r || 10 * RES_SCALE));
+    }
   }
   asteroids.delete(id);
 }
@@ -14781,12 +14804,16 @@ function updateAttractedCoins(dt) {
 
 function unpackAsteroid(row) {
   const sizeCode = row[9] | 0;
-  // 2 = big, 1 = medium, 0 = small (legacy true/1 treated as big).
-  const size = sizeCode >= 2 || sizeCode === true ? 'big'
+  // 3 = huge, 2 = big, 1 = medium, 0 = small (legacy true/1 treated as big).
+  const size = sizeCode >= 3 ? 'huge'
+    : sizeCode >= 2 || sizeCode === true ? 'big'
     : sizeCode === 1 ? 'medium'
     : 'small';
   const specialCode = row[11] | 0;
-  const special = specialCode === 1 ? 'meteor' : specialCode === 2 ? 'golden' : null;
+  const special = specialCode === 1 ? 'meteor'
+    : specialCode === 2 ? 'golden'
+    : specialCode === 3 ? 'huge'
+    : null;
   const shapeId = row[14] != null ? (row[14] | 0)
     : shapeIdFromPos(row[1], row[2]);
   const hueDeg = row[19];
@@ -14805,7 +14832,7 @@ function unpackAsteroid(row) {
     // Network no longer sends pts — rebuild from shapeId (portal twin keeps parent id).
     pts: buildAsteroidSilhouettePts(shapeId, row[7], size),
     size,
-    big: size === 'big',
+    big: size === 'big' || size === 'huge',
     spawnSt: row[10],
     special,
     centerRock: !!(row[12] | 0),
@@ -18007,9 +18034,9 @@ function demoCollectAsteroids() {
     out.push([
       a.id, a.spawnX, a.spawnY, a.vx, a.vy, a.spawnAngle, a.spin, a.r,
       0,
-      a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0),
+      a.size === 'huge' ? 3 : (a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0)),
       a.spawnSt,
-      a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : 0,
+      a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : a.special === 'huge' ? 3 : 0,
       a.centerRock ? 1 : 0,
       a.portal ? 1 : 0,
       a.shapeId != null ? (a.shapeId | 0) : 0,
@@ -18371,8 +18398,8 @@ function normalizeDemoAsteroidRow(a) {
   if (Array.isArray(a)) return a;
   if (!a || typeof a !== 'object') return null;
   // Legacy server object format (pre-playback packing).
-  const size = a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0);
-  const special = a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : 0;
+  const size = a.size === 'huge' ? 3 : (a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0));
+  const special = a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : a.special === 'huge' ? 3 : 0;
   return [
     a.aid | a.id | 0,
     a.spawnX != null ? a.spawnX : a.x,
