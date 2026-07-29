@@ -5,7 +5,7 @@
   <title>Asteroids</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&family=Press+Start+2P&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; box-sizing: border-box; }
     body {
@@ -90,9 +90,10 @@
     }
     #menu {
       position: fixed; inset: 0; z-index: 3;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background: transparent; gap: 18px;
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+      background: transparent; gap: 14px;
       pointer-events: none;
+      padding-bottom: max(28px, 7vh);
     }
     #menu.hidden { display: none; }
     #play-btn, #cancel-btn, #settings-btn, #account-btn, #leaderboard-btn, #rejoin-btn {
@@ -2000,6 +2001,6 @@
 <script src="config.js?v=36"></script>
 <script src="ship-meshes.js?v=1"></script>
 <script src="alien-ship-meshes.js?v=1"></script>
-<script src="game.js?v=568"></script>
+<script src="game.js?v=569"></script>
 </body>
 </html>

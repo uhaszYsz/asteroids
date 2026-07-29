@@ -3808,8 +3808,8 @@ function ensureGridBakeTexture() {
   const c0 = spawnPadColorKey(0);
   const c1 = spawnPadColorKey(1);
   const key = [
-    'arena25', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
-    practiceMode ? 'p1' : 'p0', c0, c1
+    'arena26', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
+    practiceMode ? 'p1' : 'p0', inGame ? 'g1' : 'menu', c0, c1
   ].join(':');
   if (!gridBakeDirty && gridBakeTex && gridBakeKey === key) return true;
 
@@ -3857,7 +3857,43 @@ function ensureGridBakeTexture() {
 }
 
 /**
+ * Bake title-screen logo onto the grid atlas.
+ * Midway between top and center; shadow layer + colored fill (Orbitron).
+ */
+function paintMenuTitleBake(ctx, tw, th) {
+  const label = 'ASTEROIDS';
+  const cx = tw * 0.5;
+  // Halfway between top (0) and center (0.5) → ~0.25.
+  const cy = th * 0.25;
+  const fontPx = Math.max(28, Math.min(tw, th) * 0.085);
+  const font = '800 ' + fontPx + 'px Orbitron, "Press Start 2P", Consolas, monospace';
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = font;
+  // Soft wide glow under the glyphs so it reads on the grid.
+  ctx.shadowColor = 'rgba(80, 220, 255, 0.55)';
+  ctx.shadowBlur = fontPx * 0.35;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 0;
+  // Hard drop-shadow (offset copy).
+  const ox = Math.max(2, fontPx * 0.06);
+  const oy = Math.max(2, fontPx * 0.08);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(4, 8, 18, 0.92)';
+  ctx.fillText(label, cx + ox, cy + oy);
+  // Main fill — cool cyan with a warm edge via stroke.
+  ctx.lineWidth = Math.max(1.5, fontPx * 0.045);
+  ctx.strokeStyle = 'rgba(255, 120, 200, 0.85)';
+  ctx.fillStyle = 'rgba(120, 230, 255, 1)';
+  ctx.strokeText(label, cx, cy);
+  ctx.fillText(label, cx, cy);
+  ctx.restore();
+}
+
+/**
  * Esports / rink playfield markings.
+ * Menu: plain white lattice + baked ASTEROIDS title (no sport paint).
  * Match: blue lattice + player-colored spawn pads + thick sport accents.
  * Practice/solo/waves: nebula (or white) lattice only — no sport paint.
  */
@@ -3869,12 +3905,13 @@ function paintSportArenaGrid(ctx, tw, th, lineStep, rs, ox, oy, worldW, worldH, 
   const toTexX = (wx) => ((wx - ox) / worldW) * tw;
   const toTexY = (wy) => ((wy - oy) / worldH) * th;
   const toTexR = (wr) => wr * (tw / Math.max(1, worldW));
+  const menuTitle = !inGame;
 
   // Full opacity strokes (same as live grid useDraw(..., 1)); fill stays softer.
   const BLUE = 'rgba(56, 140, 220, 1)';
   const WHITE = 'rgba(255, 255, 255, 1)';
-  // Practice bake is white alpha mask; nebula color is sampled in the shader (scrolls).
-  const lattice = practiceMode ? WHITE : BLUE;
+  // Practice / menu bake is white alpha mask; nebula color is sampled in the shader (scrolls).
+  const lattice = (practiceMode || menuTitle) ? WHITE : BLUE;
   // Bake texels per world pixel (≈ rs; lower if max-tex clamp shrinks the atlas).
   const px = tw / Math.max(1, worldW);
   // Framebuffer pixels → bake stroke width. (tw ≈ worldW*rs ⇒ factor 1; shrinks if atlas clamped.)
@@ -3892,6 +3929,12 @@ function paintSportArenaGrid(ctx, tw, th, lineStep, rs, ox, oy, worldW, worldH, 
   ctx.strokeStyle = lattice;
   ctx.lineWidth = lw;
   paintLatticePattern(ctx, tw, th, lineStep, rs, topo, true);
+
+  // Title screen: plain grid + logo only.
+  if (menuTitle) {
+    paintMenuTitleBake(ctx, tw, th);
+    return;
+  }
 
   // Solo/practice: stop here — lattice only (nebula or white).
   if (practiceMode) return;
@@ -12696,6 +12739,7 @@ function leaveFromPause() {
 
 function resetMatchState() {
   inGame = false;
+  gridBakeDirty = true;
   deathSpectating = false;
   deathSeq = null;
   deathFreezeAt = 0;
@@ -15848,6 +15892,7 @@ function enterGameFromWelcome(msg) {
   myId = msg.id;
   roomId = msg.room != null ? msg.room : null;
   inGame = true;
+  gridBakeDirty = true;
   deathSpectating = false;
   deathSeq = null;
   deathFreezeAt = 0;
@@ -16291,6 +16336,7 @@ async function connect() {
       clearMatchPause();
       setRejoinOffer(null);
       inGame = false;
+      gridBakeDirty = true;
       refreshGridStaticPins();
       updateHud();
       if (waitBannerEl) waitBannerEl.classList.add('hidden');
@@ -18294,6 +18340,7 @@ function demoBeginPlayData(data, displayName) {
   };
   myId = demoPlay.myId;
   inGame = true;
+  gridBakeDirty = true;
   predReady = true;
   matchLive = true;
   syncTick = demoPlay.syncTick;
@@ -18933,3 +18980,9 @@ function frame(now) {
 
 connect();
 requestAnimationFrame(frame);
+// Rebuild menu title bake once Orbitron is ready (first paint may use fallback).
+if (document.fonts && document.fonts.load) {
+  document.fonts.load('800 64px Orbitron').then(() => {
+    gridBakeDirty = true;
+  }).catch(() => {});
+}
