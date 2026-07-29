@@ -6280,7 +6280,7 @@ const POWERUP_SPHERE_R = 6.2 * RES_SCALE * POWERUP_VIS_SCALE;
 /** Invisible letter orbit — 20% smaller than original 9.4, then × VIS_SCALE. */
 const POWERUP_LETTER_R = 7.52 * RES_SCALE * POWERUP_VIS_SCALE;
 const POWERUP_SPHERE_LIFT = 0.72;
-const POWERUP_LETTER_SCALE = 0.95 * POWERUP_VIS_SCALE;
+const POWERUP_LETTER_SCALE = 0.95 * POWERUP_VIS_SCALE * 0.7;
 
 function tumbleRotateLocal(x, y, z, cyaw, syaw, cp, sp, cr, sr) {
   // roll X → pitch Y → yaw Z
@@ -7609,19 +7609,19 @@ function emitWeaponPickupFx(x, y, weaponName, level) {
     emitHitFx(x, y, col);
   }
 
-  // Shiny floating label: weapon name on first pick, LEVEL N + arrow on upgrades.
+  // Shiny floating label: weapon name on first pick, LEVEL N on upgrades (no arrow).
   if (lvl <= 1) {
     spawnFxLabel(x, y - 8 * RES_SCALE, String(weaponName || 'WEAPON').toUpperCase(), col, {
       life: 1.35,
-      scale: 1,
+      scale: 0.7,
       arrow: false,
       pop: 1.2
     });
   } else {
     spawnFxLabel(x, y - 6 * RES_SCALE, 'LEVEL ' + lvl, col, {
       life: 1.45 + (lvl - 2) * 0.2,
-      scale: 1 + (lvl - 2) * 0.12,
-      arrow: true,
+      scale: 0.7 * (1 + (lvl - 2) * 0.12),
+      arrow: false,
       pop: 1.25
     });
   }
@@ -7671,6 +7671,12 @@ function emitPickupCollectFx(x, y, kind, weapon, level, powerupName) {
       lifetime: 0.3,
       color: col,
       drag: 3
+    });
+    spawnFxLabel(x, y - 8 * RES_SCALE, String(powerupName || 'POWER').toUpperCase(), col, {
+      life: 1.35,
+      scale: 0.7,
+      arrow: false,
+      pop: 1.2
     });
     return;
   }
