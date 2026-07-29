@@ -9557,36 +9557,79 @@ function projectShip3D(cx, cy, yaw, bank) {
   return projectMesh3D(getActiveShipMesh().verts, cx, cy, yaw, bank);
 }
 
-function drawShip3D(x, y, angle, av, color, id, dt) {
-  const mesh = getActiveShipMesh();
-  const bank = shipBankSmoothed(id, av, dt);
-  const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank);
-  const nose = mesh.nose | 0;
-  const edges = mesh.edges || [];
+/** Silhouette / outline edges only (front↔back or boundary) — like asteroid outlines. */
+const _shipSilEdgeMap = new Map();
+const _shipSilEdges = [];
 
-  drawShipMeshFacesTex(xy, depth, mesh, color, id);
+function collectShipSilhouetteEdges(xy, faces) {
+  const map = _shipSilEdgeMap;
+  map.clear();
+  for (let fi = 0; fi < faces.length; fi++) {
+    const f = faces[fi];
+    const front = astFaceScreenArea(xy, f) > 1e-6;
+    for (let e = 0; e < 3; e++) {
+      const a = f[e];
+      const b = f[(e + 1) % 3];
+      const lo = a < b ? a : b;
+      const hi = a < b ? b : a;
+      const key = lo * 100000 + hi;
+      let info = map.get(key);
+      if (!info) {
+        info = { lo, hi, fronts: 0, backs: 0 };
+        map.set(key, info);
+      }
+      if (front) info.fronts++;
+      else info.backs++;
+    }
+  }
+  const out = _shipSilEdges;
+  out.length = 0;
+  for (const info of map.values()) {
+    const n = info.fronts + info.backs;
+    // Outer contour: shared by front+back, or open boundary edge.
+    if ((info.fronts > 0 && info.backs > 0) || n === 1) {
+      out.push(info.lo, info.hi);
+    }
+  }
+  return out;
+}
 
-  const tipHeat = (id | 0) === (myId | 0) ? shipCannonTipHeat() : 0;
-  const edgeW = 1.125 * RES_SCALE; // 2.25 px at RES_SCALE=2
-  for (const e of edges) {
-    const x0 = xy[e[0] * 2], y0 = xy[e[0] * 2 + 1];
-    const x1 = xy[e[1] * 2], y1 = xy[e[1] * 2 + 1];
-    // Nose edges: ship color at base → hot red at tip (gun / nose vertex).
-    if (tipHeat > 0 && (e[0] === nose || e[1] === nose)) {
-      const tipIs0 = e[0] === nose;
+function drawShipOutlineEdges(xy, mesh, color, nose, tipHeat) {
+  const faces = mesh.faces || [];
+  const sil = collectShipSilhouetteEdges(xy, faces);
+  const edgeW = 1.125 * RES_SCALE;
+  const nNose = nose | 0;
+  for (let i = 0; i < sil.length; i += 2) {
+    const a = sil[i];
+    const b = sil[i + 1];
+    const x0 = xy[a * 2], y0 = xy[a * 2 + 1];
+    const x1 = xy[b * 2], y1 = xy[b * 2 + 1];
+    if (tipHeat > 0 && (a === nNose || b === nNose)) {
+      const tipIsA = a === nNose;
       const tipCol = _tipHotScratch;
       tipCol[0] = color[0] + (COL.cannonHot[0] - color[0]) * tipHeat;
       tipCol[1] = color[1] + (COL.cannonHot[1] - color[1]) * tipHeat;
       tipCol[2] = color[2] + (COL.cannonHot[2] - color[2]) * tipHeat;
       drawThickGradientSegment(
-        tipIs0 ? x1 : x0, tipIs0 ? y1 : y0,
-        tipIs0 ? x0 : x1, tipIs0 ? y0 : y1,
+        tipIsA ? x1 : x0, tipIsA ? y1 : y0,
+        tipIsA ? x0 : x1, tipIsA ? y0 : y1,
         edgeW, color, tipCol, 8
       );
     } else {
       drawThickSegment(x0, y0, x1, y1, edgeW, color);
     }
   }
+}
+
+function drawShip3D(x, y, angle, av, color, id, dt) {
+  const mesh = getActiveShipMesh();
+  const bank = shipBankSmoothed(id, av, dt);
+  const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank);
+
+  drawShipMeshFacesTex(xy, depth, mesh, color, id);
+
+  const tipHeat = (id | 0) === (myId | 0) ? shipCannonTipHeat() : 0;
+  drawShipOutlineEdges(xy, mesh, color, mesh.nose | 0, tipHeat);
 }
 
 /** Rocket = 0.7× player 3D tetrahedron, continuous roll spin. */
@@ -13743,14 +13786,7 @@ const ENEMY_UFO_MESH = (() => {
 function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id) {
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank || 0);
   drawShipMeshFacesTex(xy, depth, mesh, color, id != null ? id : 0);
-  const edgeW = 1.125 * RES_SCALE;
-  for (const e of mesh.edges) {
-    drawThickSegment(
-      xy[e[0] * 2], xy[e[0] * 2 + 1],
-      xy[e[1] * 2], xy[e[1] * 2 + 1],
-      edgeW, color
-    );
-  }
+  drawShipOutlineEdges(xy, mesh, color, -1, 0);
 }
 
 /** Bank from heading change rate (enemies have no av). */
