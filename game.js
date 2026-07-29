@@ -295,12 +295,13 @@ const gl = canvas.getContext('webgl', { antialias: false, alpha: false });
 /** Internal framebuffer scale vs fixed world size (W×H). Physics unchanged. */
 const RENDER_SCALE_KEY = 'asteroids_render_scale';
 const RENDER_SCALE_OPTS = [
+  { scale: 0.5, label: '420 × 240' },
   { scale: 1, label: '840 × 480' },
   { scale: 2, label: '1680 × 960' },
   { scale: 3, label: '2520 × 1440' }
 ];
 let renderScale = 2;
-/** 'auto' | 1 | 2 | 3 — auto picks framebuffer from screen size; CSS stays 2×. */
+/** 'auto' | 0.5 | 1 | 2 | 3 — auto picks framebuffer from screen size; CSS stays 2×. */
 let renderScaleMode = 'auto';
 /** Set true when baked grid texture must be rebuilt (size/color/res). */
 let gridBakeDirty = true;
@@ -332,12 +333,14 @@ function applyRenderResolution(scale) {
     renderScaleMode = 'auto';
     renderScale = pickAutoRenderScale();
   } else {
-    const s = Math.max(1, Math.min(3, scale | 0));
-    renderScaleMode = s;
-    renderScale = s;
+    const s = Number(scale);
+    const opt = RENDER_SCALE_OPTS.find((o) => o.scale === s);
+    const use = opt ? opt.scale : 2;
+    renderScaleMode = use;
+    renderScale = use;
   }
-  canvas.width = W * renderScale;
-  canvas.height = H * renderScale;
+  canvas.width = Math.round(W * renderScale);
+  canvas.height = Math.round(H * renderScale);
   try {
     localStorage.setItem(
       RENDER_SCALE_KEY,
@@ -352,8 +355,11 @@ function loadRenderResolution() {
   let mode = 'auto';
   try {
     const raw = localStorage.getItem(RENDER_SCALE_KEY);
-    if (raw === '1' || raw === '2' || raw === '3') mode = raw | 0;
-    else if (raw === 'auto' || raw === '0') mode = 'auto';
+    if (raw === 'auto' || raw === '0') mode = 'auto';
+    else if (raw != null && raw !== '') {
+      const n = Number(raw);
+      if (RENDER_SCALE_OPTS.some((o) => o.scale === n)) mode = n;
+    }
   } catch (_) {}
   applyRenderResolution(mode);
 }
@@ -11161,8 +11167,9 @@ if (settingsPanelEl) {
 }
 if (settingsResEl) {
   settingsResEl.addEventListener('change', () => {
-    const v = settingsResEl.value | 0;
-    applyRenderResolution(v === 0 ? 'auto' : v);
+    const raw = String(settingsResEl.value);
+    if (raw === '0') applyRenderResolution('auto');
+    else applyRenderResolution(Number(raw));
     fitCanvasIntegerScale();
   });
 }
@@ -13527,6 +13534,14 @@ const ENEMY_R = {
   carrier: 12 * RES_SCALE
 };
 
+function enemyWanderSpeedOf(e) {
+  const s = e && +e.speed;
+  if (Number.isFinite(s) && s > 0) return s;
+  const sp = Math.hypot((e && e.vx) || 0, (e && e.vy) || 0);
+  if (sp > 0.05) return sp;
+  return ENEMY_WANDER_SPEED;
+}
+
 function enemyHitR(e) {
   if (!e) return ENEMY_R.common;
   return ENEMY_R[e.kind] || ENEMY_R.common;
@@ -13573,6 +13588,10 @@ function unpackEnemy(row) {
   const dist = Math.hypot(dx, dy);
   const inv = dist > 1e-6 ? 1 / dist : 0;
   const useSnapVel = move === ENEMY_MOVE_DESTINATION_SMOOTH || (row[11] != null && row[12] != null);
+  const packedSpeed = row[16] != null ? +row[16] : 0;
+  const spd = packedSpeed > 0
+    ? packedSpeed
+    : (useSnapVel && Math.hypot(vx, vy) > 0.05 ? Math.hypot(vx, vy) : ENEMY_WANDER_SPEED);
   return {
     id: row[0] | 0,
     kind,
@@ -13586,11 +13605,12 @@ function unpackEnemy(row) {
     ty,
     spawnSt,
     travelDist: dist,
-    vx: useSnapVel ? vx : dx * inv * ENEMY_WANDER_SPEED,
-    vy: useSnapVel ? vy : dy * inv * ENEMY_WANDER_SPEED,
+    vx: useSnapVel ? vx : dx * inv * spd,
+    vy: useSnapVel ? vy : dy * inv * spd,
     angle: ang,
     dir,
     hp,
+    speed: spd,
     enteredPlay: true
   };
 }
@@ -13640,6 +13660,9 @@ function applyEnemySnapList(list, st) {
     e.spawnY = e.y;
     e.spawnSt = snapSt;
     e.travelDist = Math.hypot(e.tx - e.spawnX, e.ty - e.spawnY);
+    const packedSpeed = row[14] != null ? +row[14] : 0;
+    if (packedSpeed > 0) e.speed = packedSpeed;
+    else if (Math.hypot(e.vx, e.vy) > 0.05) e.speed = Math.hypot(e.vx, e.vy);
   }
 }
 
@@ -13700,8 +13723,9 @@ function stepEnemyDestinationSmoothLocal(state) {
   }
   const desired = Math.atan2(dy, dx);
   state.dir = enemyTurnAngleToward(state.dir, desired, ENEMY_TURN_MAX);
-  state.vx = Math.cos(state.dir) * ENEMY_WANDER_SPEED;
-  state.vy = Math.sin(state.dir) * ENEMY_WANDER_SPEED;
+  const spd = enemyWanderSpeedOf(state);
+  state.vx = Math.cos(state.dir) * spd;
+  state.vy = Math.sin(state.dir) * spd;
   state.x += state.vx;
   state.y += state.vy;
   state.angle = state.dir;
@@ -13727,6 +13751,7 @@ function enemyAt(e) {
       ty: e.ty,
       vx: e.vx || 0,
       vy: e.vy || 0,
+      speed: enemyWanderSpeedOf(e),
       enteredPlay: e.enteredPlay !== false
     };
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));
@@ -13742,7 +13767,7 @@ function enemyAt(e) {
     };
   }
   const age = enemyAgeTicks(e);
-  const traveled = ENEMY_WANDER_SPEED * age;
+  const traveled = enemyWanderSpeedOf(e) * age;
   if (traveled >= (e.travelDist || 0)) {
     return {
       x: e.tx,

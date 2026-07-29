@@ -346,6 +346,9 @@ const ENEMY_UFO_RELOAD = Math.round(3.5 * TPS);
 /** After spawn, wait this long before the first shot (all enemy kinds). */
 const ENEMY_FIRST_SHOT_MIN_S = 4;
 const ENEMY_FIRST_SHOT_MAX_S = 6;
+const ENEMY_WANDER_SPEED_MIN = 1 * RES_SCALE;
+const ENEMY_WANDER_SPEED_MAX = 2.2 * RES_SCALE;
+/** Fallback if an enemy is missing speed (old snaps / demos). */
 const ENEMY_WANDER_SPEED = 1.35 * RES_SCALE;
 const ENEMY_ARRIVE_R = 10 * RES_SCALE;
 /** Max turn toward wander target per sim tick (destinationSmooth). */
@@ -891,7 +894,7 @@ function resyncEnemySpawn(e) {
   }
   // Destination dead-reckon: bake travel so pause doesn't age on the client.
   const age = Math.max(0, (now - (e.spawnSt || now)) / 1000 * TPS);
-  const traveled = ENEMY_WANDER_SPEED * age;
+  const traveled = enemySpeed(e) * age;
   const travelDist = Math.hypot((e.tx - (e.spawnX || 0)), (e.ty - (e.spawnY || 0)));
   if (traveled >= travelDist) {
     e.spawnX = e.tx;
@@ -1355,6 +1358,17 @@ function stampEnemyNet(e) {
   e.spawnSt = Date.now();
 }
 
+function randomEnemyWanderSpeed() {
+  return ENEMY_WANDER_SPEED_MIN
+    + Math.random() * (ENEMY_WANDER_SPEED_MAX - ENEMY_WANDER_SPEED_MIN);
+}
+
+function enemySpeed(e) {
+  const s = e && +e.speed;
+  if (Number.isFinite(s) && s > 0) return s;
+  return ENEMY_WANDER_SPEED;
+}
+
 function enemyMoveType(e) {
   return e && e.move === ENEMY_MOVE_DESTINATION_SMOOTH
     ? ENEMY_MOVE_DESTINATION_SMOOTH
@@ -1378,7 +1392,7 @@ function turnAngleToward(from, to, maxTurn) {
 
 /**
  * Pack for ef/eu (spawn / retarget).
- * [id, kind, spawnX, spawnY, tx, ty, spawnSt, hp, weapon, angle, move, vx, vy, x, y, dir]
+ * [id, kind, spawnX, spawnY, tx, ty, spawnSt, hp, weapon, angle, move, vx, vy, x, y, dir, speed]
  */
 function packEnemy(e) {
   const move = enemyMoveType(e);
@@ -1398,11 +1412,12 @@ function packEnemy(e) {
     e.vy || 0,
     e.x,
     e.y,
-    dir
+    dir,
+    enemySpeed(e)
   ];
 }
 
-/** Compact pose snap: [id, kind, x, y, vx, vy, angle, tx, ty, hp, weapon, move, dir, entered] */
+/** Compact pose snap: [id, kind, x, y, vx, vy, angle, tx, ty, hp, weapon, move, dir, entered, speed] */
 function packEnemySnap(e) {
   const move = enemyMoveType(e);
   const dir = e.dir != null && Number.isFinite(e.dir) ? e.dir : e.angle;
@@ -1417,7 +1432,8 @@ function packEnemySnap(e) {
     e.weapon || '',
     move,
     dir,
-    e.enteredPlay ? 1 : 0
+    e.enteredPlay ? 1 : 0,
+    enemySpeed(e)
   ];
 }
 
@@ -1499,8 +1515,8 @@ function placeEnemyOffscreenEntry(e) {
   const ang = Math.atan2(target.y - spawn.y, target.x - spawn.x);
   e.angle = ang;
   e.dir = ang;
-  e.vx = Math.cos(ang) * ENEMY_WANDER_SPEED;
-  e.vy = Math.sin(ang) * ENEMY_WANDER_SPEED;
+  e.vx = Math.cos(ang) * enemySpeed(e);
+  e.vy = Math.sin(ang) * enemySpeed(e);
   e.enteredPlay = false;
 }
 
@@ -1538,7 +1554,8 @@ function makeEnemy(kind, wave, weapon) {
     bursting: false,
     railChargeLeft: 0,
     lastLaserAng: null,
-    enteredPlay: false
+    enteredPlay: false,
+    speed: randomEnemyWanderSpeed()
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -1928,14 +1945,14 @@ function pickEnemyWanderTarget(e) {
   e.ty = t.y;
   if (enemyMoveType(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
     if (e.dir == null || !Number.isFinite(e.dir)) e.dir = e.angle || 0;
-    e.vx = Math.cos(e.dir) * ENEMY_WANDER_SPEED;
-    e.vy = Math.sin(e.dir) * ENEMY_WANDER_SPEED;
+    e.vx = Math.cos(e.dir) * enemySpeed(e);
+    e.vy = Math.sin(e.dir) * enemySpeed(e);
   } else {
     const ang = Math.atan2(e.ty - e.y, e.tx - e.x);
     e.angle = ang;
     e.dir = ang;
-    e.vx = Math.cos(ang) * ENEMY_WANDER_SPEED;
-    e.vy = Math.sin(ang) * ENEMY_WANDER_SPEED;
+    e.vx = Math.cos(ang) * enemySpeed(e);
+    e.vy = Math.sin(ang) * enemySpeed(e);
   }
   stampEnemyNet(e);
 }
@@ -1966,8 +1983,8 @@ function stepEnemyMovement(e) {
   if (enemyMoveType(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
     if (e.dir == null || !Number.isFinite(e.dir)) e.dir = e.angle || 0;
     e.dir = turnAngleToward(e.dir, desired, ENEMY_TURN_MAX);
-    e.vx = Math.cos(e.dir) * ENEMY_WANDER_SPEED;
-    e.vy = Math.sin(e.dir) * ENEMY_WANDER_SPEED;
+    e.vx = Math.cos(e.dir) * enemySpeed(e);
+    e.vy = Math.sin(e.dir) * enemySpeed(e);
     e.x += e.vx;
     e.y += e.vy;
     if (!carrierLocked) e.angle = e.dir;
@@ -1976,8 +1993,8 @@ function stepEnemyMovement(e) {
       e.angle = desired;
       e.dir = desired;
     }
-    e.vx = Math.cos(desired) * ENEMY_WANDER_SPEED;
-    e.vy = Math.sin(desired) * ENEMY_WANDER_SPEED;
+    e.vx = Math.cos(desired) * enemySpeed(e);
+    e.vy = Math.sin(desired) * enemySpeed(e);
     e.x += e.vx;
     e.y += e.vy;
   }
@@ -6845,7 +6862,8 @@ function captureWaitingSnapshot(ws) {
       queued: !!e.queued, appearLeft: e.appearLeft | 0,
       fireCd: e.fireCd | 0, shootAmmo: e.shootAmmo | 0,
       shootCd: e.shootCd | 0, reloadLeft: e.reloadLeft | 0,
-      bursting: !!e.bursting, railChargeLeft: e.railChargeLeft | 0
+      bursting: !!e.bursting, railChargeLeft: e.railChargeLeft | 0,
+      speed: enemySpeed(e)
     })),
     pickups: room.pickups.map((u) => ({
       id: u.id, x: u.x, y: u.y, vx: u.vx, vy: u.vy, r: u.r,
@@ -6940,6 +6958,7 @@ function applySnapshotToRoom(room, p, snap) {
     e.move = row.move === ENEMY_MOVE_DESTINATION ? ENEMY_MOVE_DESTINATION : ENEMY_MOVE_DESTINATION_SMOOTH;
     e.dir = row.dir != null ? +row.dir : e.angle;
     e.enteredPlay = row.enteredPlay != null ? !!row.enteredPlay : true;
+    if (row.speed != null && Number(row.speed) > 0) e.speed = +row.speed;
     e.queued = !!row.queued;
     e.appearLeft = row.appearLeft | 0;
     e.fireCd = row.fireCd | 0;
