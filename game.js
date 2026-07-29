@@ -7857,6 +7857,8 @@ function emitAsteroidBurst(x, y, r, size) {
   const n = Math.max(15, Math.min(30, 8 + ((r / RES_SCALE) | 0)));
   playSfxOverlap(SFX.explosion, { vol: 0.8, pool: 4 });
   playAmbientExplosionEcho();
+  // 30% of ship–asteroid collision shake (emitPlayerAsteroidHit).
+  triggerScreenShake(400, 11 * RES_SCALE * 0.3);
   let boomR = Math.max(28 * RES_SCALE, (r || 10 * RES_SCALE) * 2.8);
   // Yellow/red grid paint: big 50% smaller, medium 20% smaller.
   if (size === 'big') boomR *= 0.5;
