@@ -87,12 +87,14 @@ const PLAYER_SHOT_HIT_SPEED_BONUS = 30;
 const PLAYER_SHOT_ENEMY_DMG = 100;
 /** Hitting an enemy rocket nudges its heading away from the shooter. */
 const ROCKET_DEFLECT_RAD = 10 * Math.PI / 180;
-/** Player rocket explosion blast (world px). Falloff 60 → 0 by distance. */
-const ROCKET_BLAST_RADIUS = 32;
-const ROCKET_BLAST_DMG = 60;
+/** Player rocket explosion blast (world px). Falloff maxDmg → 0 by surface distance. */
+const ROCKET_BLAST_RADIUS = 32 * RES_SCALE;
+/** Enough to one-shot common enemies (95 HP) even on a grazing contact detonation. */
+const ROCKET_BLAST_DMG = 125;
 const BULLET_TYPES = {
   default: { dmg: 35, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
-  rocket: { dmg: 50, col: 'circle', size: 7 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
+  /** Direct dmg unused — rockets only deal ROCKET_BLAST_* circle damage on detonate. */
+  rocket: { dmg: 0, col: 'circle', size: 7 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   laser: { dmg: 7, col: 'ray', size: 0, scaleY: 1, length: 0, width: 2 * RES_SCALE },
   shotgun: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   railgun: { dmg: 95, col: 'ray', size: 0, scaleY: 1, length: 0, width: 3 * RES_SCALE },
@@ -4760,8 +4762,9 @@ function applyRocketBlast(room, ownerId, x, y, preAids) {
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (!enemyIsSpawned(e) || e.hp <= 0) continue;
-      const cd = Math.hypot(e.x - x, e.y - y);
-      const dist = Math.max(0, cd - (e.r || 0));
+      const er = e.r || 0;
+      const cd = Math.sqrt(torusDistSq(x, y, e.x, e.y));
+      const dist = Math.max(0, cd - er);
       const dmg = rocketBlastDamageAt(dist, R, maxDmg);
       if (dmg > 0) damageEnemy(room, e, dmg);
     }
@@ -4769,16 +4772,15 @@ function applyRocketBlast(room, ownerId, x, y, preAids) {
 }
 
 /**
- * Remove rocket on impact: broadcast, optional direct hit, then blast using
- * pre-impact asteroid set so split shards are not damaged this frame.
+ * Remove rocket on impact: broadcast, then circle blast only (no separate direct hit dmg).
+ * `preAids` = asteroid ids before this frame so split shards are not damaged this blast.
  */
-function detonateRocket(room, b, hitKind, applyDirect) {
+function detonateRocket(room, b, hitKind, _applyDirectIgnored) {
   const x = b.x;
   const y = b.y;
   const preAids = new Set();
   for (const a of room.asteroids) preAids.add(a.aid);
   roomBroadcast(room, { t: 'bd', id: b.id, hit: hitKind, x, y });
-  if (applyDirect) applyDirect();
   if (room.roundResetting) return;
   applyRocketBlast(room, b.owner | 0, x, y, preAids);
 }
@@ -5858,11 +5860,9 @@ function updateBullets(room) {
     if (hit) {
       const p = hitPlayer;
       if (b.type === 'rocket') {
-        detonateRocket(room, b, 1, () => {
-          dealDamageToPlayer(room, p, b.dmg, b.owner | 0);
-          const owner = players.get(b.owner);
-          if (owner) tryEmpStun(room, owner, p, 'rocket', b);
-        });
+        detonateRocket(room, b, 1);
+        const owner = players.get(b.owner);
+        if (owner) tryEmpStun(room, owner, p, 'rocket', b);
       } else if (b.type === 'enemyRocket') {
         // UFO micro-rocket: damage + asteroid-style stun / bounce.
         let nx = b.vx || 0, ny = b.vy || 0;
@@ -5896,9 +5896,7 @@ function updateBullets(room) {
         if (!enemyIsSpawned(e)) continue;
         if (!hitBulletEnemy(b, e)) continue;
         if (b.type === 'rocket') {
-          detonateRocket(room, b, 3, () => {
-            damageEnemy(room, e, b.dmg);
-          });
+          detonateRocket(room, b, 3);
         } else {
           damageEnemy(room, e, b.dmg);
           roomBroadcast(room, { t: 'bd', id: b.id, hit: 3, x: b.x, y: b.y });
@@ -5923,7 +5921,7 @@ function updateBullets(room) {
         if ((b.owner | 0) > 0) deflectRocketFromShooter(room, r, b.owner);
         else deflectRocketAwayFrom(room, r, b.x, b.y);
         if (b.type === 'rocket') {
-          detonateRocket(room, b, 1, null);
+          detonateRocket(room, b, 1);
         } else {
           roomBroadcast(room, { t: 'bd', id: b.id, hit: 1, x: b.x, y: b.y });
         }
@@ -5940,9 +5938,7 @@ function updateBullets(room) {
     forEachAsteroidNear(room, b.x, b.y, bulletBroadR(b), (a) => {
       if (!hitBulletAsteroid(b, a)) return false;
       if (b.type === 'rocket') {
-        detonateRocket(room, b, 2, () => {
-          damageAsteroid(room, a, b.dmg, b.owner | 0);
-        });
+        detonateRocket(room, b, 2);
       } else {
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 2, x: b.x, y: b.y });
         damageAsteroid(room, a, b.dmg, b.owner | 0);
