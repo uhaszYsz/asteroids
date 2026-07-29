@@ -7138,6 +7138,7 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
 
 /** Instant local muzzle flash (bullets still come from the server). */
 function emitLocalShootFx() {
+  pulseSpriteShipAttack(myId);
   const me = localView();
   const m = shipMuzzle(me.x, me.y, me.angle);
   const ang = me.angle;
@@ -9890,8 +9891,28 @@ const ssAPos = gl.getAttribLocation(spriteShipProg, 'aPos');
 const ssAUV = gl.getAttribLocation(spriteShipProg, 'aUV');
 const spriteShipBuf = gl.createBuffer();
 const spriteShipMesh = new Float32Array(6 * 4);
+/** Attack row hold (ms) after each shot — covers a short anim cycle. */
+const SPRITE_SHIP_ATTACK_MS = 420;
+const spriteShipAttackUntil = new Map(); // ownerId -> performance.now deadline
 
-function tinyShipDesiredState(spec, moving) {
+function pulseSpriteShipAttack(id) {
+  if (id == null) return;
+  const until = performance.now() + SPRITE_SHIP_ATTACK_MS;
+  const prev = spriteShipAttackUntil.get(id) || 0;
+  if (until > prev) spriteShipAttackUntil.set(id, until);
+}
+
+function spriteShipAttacking(id) {
+  if (id == null) return false;
+  const now = performance.now();
+  if ((id | 0) === (myId | 0) && now < (localLaserUntil || 0)) return true;
+  const remoteBeam = remoteLasers.get(id);
+  if (remoteBeam && now < (remoteBeam.until || 0)) return true;
+  return now < (spriteShipAttackUntil.get(id) || 0);
+}
+
+function tinyShipDesiredState(spec, moving, attacking) {
+  if (attacking && spec.states.indexOf('attack') >= 0) return 'attack';
   if (moving && spec.states.indexOf('move') >= 0) return 'move';
   if (spec.states.indexOf('idle') >= 0) return 'idle';
   return spec.states[0] || 'idle';
@@ -9916,7 +9937,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
     [-halfL, -halfW, 0]
   ];
   const { xy } = projectMesh3D(verts, x, y, angle, bank);
-  const state = tinyShipDesiredState(spec, !!moving);
+  const state = tinyShipDesiredState(spec, !!moving, spriteShipAttacking(id));
   const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
   // verts: 0 nose-left, 1 nose-right, 2 tail-right, 3 tail-left
   const corners = [
@@ -10254,6 +10275,7 @@ function laserKeyHeld() {
 /** Arm local laser for exactly `ms` from now (one press → one clip). */
 function startLocalLaserClip(ms, range, color, hum) {
   localLaserUntil = performance.now() + Math.max(0, ms | 0);
+  pulseSpriteShipAttack(myId);
   localLaserClip = {
     range: range != null ? range : LASER_RANGE,
     color: color || COL.laser,
@@ -13419,6 +13441,7 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
   const spreadRad = ((w.spread != null ? w.spread : 30) || 0) * Math.PI / 180;
   const rnd = makeShotgunRng(x, y);
   if (withMuzzle) {
+    pulseSpriteShipAttack(owner);
     const sv = resolveMuzzleShipVel(owner);
     emitMuzzleFx(x, y, aim, COL.bullet, 10, sv.vx, sv.vy, { cone: 1.35 });
     playShotgunFireSfx(owner, 0.55);
@@ -13447,6 +13470,9 @@ function addBullet(b, withMuzzle, liveFire) {
   if (b.type === 'rocket' || b.type === 'enemyRocket') startRocketTravelSfx(b);
   if (b.type === 'voidcannon') startVoidTravelSfx(b);
   if (withMuzzle) {
+    if (b.owner != null && b.type !== 'enemy' && b.type !== 'enemyRocket' && b.type !== 'turret') {
+      pulseSpriteShipAttack(b.owner);
+    }
     const ang = Math.atan2(b.vy, b.vx);
     const origin = { x: b.spawnX, y: b.spawnY };
     const sv = resolveMuzzleShipVel(b.owner);
@@ -17020,6 +17046,7 @@ async function connect() {
       stopSfxLoop('railCharge:' + ownerId);
       playSfx(SFX.railFire, { vol: ownerId === myId ? 0.85 : 0.55 });
       railCharges.delete(ownerId);
+      pulseSpriteShipAttack(ownerId);
       railBeams.push({
         x0, y0, x1, y1, width,
         owner: ownerId,
