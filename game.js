@@ -3216,15 +3216,17 @@ const gbAPos = gl.getAttribLocation(gridBakeProg, 'aPos');
 const gbAUV = gl.getAttribLocation(gridBakeProg, 'aUV');
 const gridBakeBuf = gl.createBuffer();
 
-/* ========== Menu title boom ripples (fill + outline masks, no baked text color) ========== */
+/* ========== Menu title brightness ripples (letter masks, nebula colors only) ========== */
 const menuNeonFS = `
   precision mediump float;
   uniform sampler2D uBake;
   uniform sampler2D uMask;
+  uniform sampler2D uNebula;
+  uniform float uNebulaOn;
+  uniform vec2 uNebulaScroll;
+  uniform float uNebulaScale;
   uniform vec4 uPulses[8]; // xy = world center, z = radius, w = strength
-  uniform float uAges[8];  // seconds since birth
-  uniform vec2 uSats[8];   // x = core sat, y = rim sat
-  uniform float uPower;    // 2.0 = twice explosion boom power
+  uniform float uPower;    // brightness add = existing color × glow × power
   uniform vec2 uWorldOrigin;
   uniform vec2 uWorldSize;
   varying vec2 vUV;
@@ -3234,8 +3236,13 @@ const menuNeonFS = `
     float mask = texture2D(uMask, vUV).a;
     if (mask < 0.05) discard;
     vec2 world = uWorldOrigin + vUV * uWorldSize;
-    vec3 rgb = vec3(0.0);
-    float lit = 0.0;
+    // Same colors as the space grid (nebula on strokes) — never invent new hues.
+    vec3 base = bake.rgb;
+    if (uNebulaOn > 0.5) {
+      vec2 nuv = (world + uNebulaScroll) * uNebulaScale;
+      base = texture2D(uNebula, nuv).rgb;
+    }
+    float glow = 0.0;
     for (int i = 0; i < 8; i++) {
       float str = uPulses[i].w;
       if (str > 0.001) {
@@ -3252,28 +3259,16 @@ const menuNeonFS = `
         float stretch = 1.0 + 0.14 * sin(ang * 2.0 + seed * 0.7);
         float R = max(1.0, uPulses[i].z) * stretch * (1.0 + wobble);
         float t = clamp(d / max(R, 1.0), 0.0, 1.0);
+        // Same soft blast cover as arena explosion lights.
         float cover = 1.0 - smoothstep(0.78, 1.0, t);
-        if (cover > 0.001) {
-          float age = uAges[i];
-          vec3 redTarget = vec3(1.0, 0.12, 0.04);
-          vec3 yellowTarget = vec3(1.0, 0.92, 0.18);
-          vec3 coreCol = mix(vec3(1.0), redTarget, clamp(age / 0.7, 0.0, 1.0));
-          vec3 rimCol = mix(redTarget, yellowTarget, clamp(age / 0.4, 0.0, 1.0));
-          float lumC = dot(coreCol, vec3(0.299, 0.587, 0.114));
-          float lumR = dot(rimCol, vec3(0.299, 0.587, 0.114));
-          coreCol = mix(vec3(lumC), coreCol, clamp(uSats[i].x, 0.7, 1.0));
-          rimCol = mix(vec3(lumR), rimCol, clamp(uSats[i].y, 0.7, 1.0));
-          vec3 boomCol = mix(coreCol, rimCol, t);
-          float amt = clamp(str * cover * uPower, 0.0, 1.0);
-          // Same energy stack as arena boom lights (mix + additive), ×uPower.
-          rgb += boomCol * (amt + amt * 0.55);
-          lit += amt;
-        }
+        glow += str * cover * cover;
       }
     }
-    if (lit < 0.02) discard;
+    glow = clamp(glow * uPower, 0.0, 2.0);
+    if (glow < 0.02) discard;
     float a = min(1.0, bake.a * mask);
-    gl_FragColor = vec4(rgb * a, a);
+    // Additive: only boost existing background color (no yellow/red tint).
+    gl_FragColor = vec4(base * glow * a, a);
   }
 `;
 const menuNeonProg = gl.createProgram();
@@ -3283,17 +3278,17 @@ linkProgram(menuNeonProg);
 const mnURes = gl.getUniformLocation(menuNeonProg, 'uRes');
 const mnUBake = gl.getUniformLocation(menuNeonProg, 'uBake');
 const mnUMask = gl.getUniformLocation(menuNeonProg, 'uMask');
+const mnUNebula = gl.getUniformLocation(menuNeonProg, 'uNebula');
+const mnUNebulaOn = gl.getUniformLocation(menuNeonProg, 'uNebulaOn');
+const mnUNebulaScroll = gl.getUniformLocation(menuNeonProg, 'uNebulaScroll');
+const mnUNebulaScale = gl.getUniformLocation(menuNeonProg, 'uNebulaScale');
 const mnUPulses = gl.getUniformLocation(menuNeonProg, 'uPulses[0]');
-const mnUAges = gl.getUniformLocation(menuNeonProg, 'uAges[0]');
-const mnUSats = gl.getUniformLocation(menuNeonProg, 'uSats[0]');
 const mnUPower = gl.getUniformLocation(menuNeonProg, 'uPower');
 const mnUWorldOrigin = gl.getUniformLocation(menuNeonProg, 'uWorldOrigin');
 const mnUWorldSize = gl.getUniformLocation(menuNeonProg, 'uWorldSize');
 const mnAPos = gl.getAttribLocation(menuNeonProg, 'aPos');
 const mnAUV = gl.getAttribLocation(menuNeonProg, 'aUV');
 const _menuNeonPulses = new Float32Array(8 * 4);
-const _menuNeonAges = new Float32Array(8);
-const _menuNeonSats = new Float32Array(8 * 2);
 let menuTitleOutlineTex = null;
 let menuTitleOutlineReady = false;
 let menuTitleFillTex = null;
@@ -3301,9 +3296,9 @@ let menuTitleFillReady = false;
 const menuTitleOutlinePulses = [];
 const menuTitleFillPulses = [];
 let menuTitleNeonNextAt = 0;
-const MENU_NEON_LIFE_MS = 2000; // same life as arena boom lights
+const MENU_NEON_LIFE_MS = 2000;
 const MENU_NEON_MAX = 8;
-const MENU_NEON_POWER = 2.0; // 2× explosion boom light power
+const MENU_NEON_POWER = 2.0; // up to +2× existing background brightness
 const MENU_NEON_INTERVAL_MS = 200;
 let gridBakeTex = null;
 let gridBakeKey = '';
@@ -4047,7 +4042,6 @@ function tickMenuTitleNeonPulses(now) {
   const oyFill = areaCy - fillH * 0.5;
   const oxOut = areaCx - textW * 0.5;
   const oyOut = areaCy - textH * 0.5;
-  // Boom radius ~same as arena explosions, slightly larger for title read.
   const boomR = minSide * 0.18;
   while (now >= menuTitleNeonNextAt) {
     menuTitleNeonNextAt += MENU_NEON_INTERVAL_MS;
@@ -4055,17 +4049,13 @@ function tickMenuTitleNeonPulses(now) {
       x: oxFill + Math.random() * fillW,
       y: oyFill + Math.random() * fillH,
       r: boomR,
-      born: now,
-      satC: 0.7 + Math.random() * 0.3,
-      satR: 0.7 + Math.random() * 0.3
+      born: now
     });
     menuTitleOutlinePulses.push({
       x: oxOut + Math.random() * textW,
       y: oyOut + Math.random() * textH,
       r: boomR * 1.05,
-      born: now,
-      satC: 0.7 + Math.random() * 0.3,
-      satR: 0.7 + Math.random() * 0.3
+      born: now
     });
   }
   pruneMenuNeonPulses(menuTitleFillPulses, now);
@@ -4078,7 +4068,6 @@ function packMenuNeonPulses(list, now) {
     const p = list[i];
     const ageMs = now - p.born;
     if (ageMs >= MENU_NEON_LIFE_MS) continue;
-    // Same linear fade as arena boom lights.
     const a = 1 - ageMs / MENU_NEON_LIFE_MS;
     if (a < 0.01) continue;
     const o = n * 4;
@@ -4086,9 +4075,6 @@ function packMenuNeonPulses(list, now) {
     _menuNeonPulses[o + 1] = p.y;
     _menuNeonPulses[o + 2] = p.r;
     _menuNeonPulses[o + 3] = a;
-    _menuNeonAges[n] = ageMs * 0.001;
-    _menuNeonSats[n * 2] = p.satC != null ? p.satC : 1;
-    _menuNeonSats[n * 2 + 1] = p.satR != null ? p.satR : 1;
     n++;
   }
   for (let k = n; k < MENU_NEON_MAX; k++) {
@@ -4097,28 +4083,29 @@ function packMenuNeonPulses(list, now) {
     _menuNeonPulses[o + 1] = 0;
     _menuNeonPulses[o + 2] = 0;
     _menuNeonPulses[o + 3] = 0;
-    _menuNeonAges[k] = 0;
-    _menuNeonSats[k * 2] = 1;
-    _menuNeonSats[k * 2 + 1] = 1;
   }
   return n;
 }
 
-/** Explosion boom-light ripples on grid lines, clipped to title fill / outline shapes. */
+/** Jagged explosion-shaped brightness ripples on space grid, clipped to letter masks. */
 function drawMenuTitleNeonGlow(now) {
   if (inGame) return;
   if (!gridBakeTex || !gridBakeVertCount) return;
   if (!menuTitleFillReady && !menuTitleOutlineReady) return;
   tickMenuTitleNeonPulses(now);
 
+  const useNebula = ensureNebulaGLTexture();
+
   gl.enable(gl.BLEND);
-  // Premultiplied-ish energy over existing grid (same energy stack feel as boom lights).
   gl.blendFunc(gl.ONE, gl.ONE);
   gl.useProgram(menuNeonProg);
   gl.uniform2f(mnURes, W, H);
   if (mnUWorldOrigin) gl.uniform2f(mnUWorldOrigin, gridBakeOriginX, gridBakeOriginY);
   if (mnUWorldSize) gl.uniform2f(mnUWorldSize, gridBakeWorldW, gridBakeWorldH);
   if (mnUPower) gl.uniform1f(mnUPower, MENU_NEON_POWER);
+  if (mnUNebulaOn) gl.uniform1f(mnUNebulaOn, useNebula ? 1 : 0);
+  if (mnUNebulaScroll) gl.uniform2f(mnUNebulaScroll, gridNebulaScrollX, gridNebulaScrollY);
+  if (mnUNebulaScale) gl.uniform1f(mnUNebulaScale, 1 / GRID_NEBULA_TILE);
   gl.bindBuffer(gl.ARRAY_BUFFER, gridBakeBuf);
   gl.enableVertexAttribArray(mnAPos);
   gl.enableVertexAttribArray(mnAUV);
@@ -4134,9 +4121,10 @@ function drawMenuTitleNeonGlow(now) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(mnUMask, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, useNebula ? gridNebulaGL : gridBakeTex);
+    if (mnUNebula) gl.uniform1i(mnUNebula, 2);
     gl.uniform4fv(mnUPulses, _menuNeonPulses);
-    if (mnUAges) gl.uniform1fv(mnUAges, _menuNeonAges);
-    if (mnUSats) gl.uniform2fv(mnUSats, _menuNeonSats);
     gl.drawArrays(gl.TRIANGLES, 0, gridBakeVertCount);
   };
   drawLayer(menuTitleFillReady, menuTitleFillTex, menuTitleFillPulses);
