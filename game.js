@@ -12769,11 +12769,13 @@ function localBulletVelocity(ang, speed, relative) {
   return { vx, vy };
 }
 
-/** Negative ids for permanent local-sim shots (never rebound to server ids). */
+/** Negative ids for local-sim shots (kept until linked server ghost dies). */
 let nextPredBulletId = -1;
+/** FIFO of unbound localSim ids awaiting matching own bf. */
+const pendingLocalSimIds = [];
 
 function clearPendingPredShots() {
-  /* no-op: local sims are never queued/bound; kept for snap/reset call sites */
+  pendingLocalSimIds.length = 0;
 }
 
 function wrapPredBulletId() {
@@ -12790,9 +12792,47 @@ function shotgunPelletMotionLocal(aimAngle, spreadDeg, spdMin, spdMax, rnd) {
   return { ang, spd };
 }
 
+function queueLocalSim(id, type) {
+  pendingLocalSimIds.push({ id, type: type || 'default' });
+}
+
+/** Oldest unbound localSim of this type still alive. */
+function takePendingLocalSim(type) {
+  const want = type || 'default';
+  for (let i = 0; i < pendingLocalSimIds.length; i++) {
+    const e = pendingLocalSimIds[i];
+    const b = bullets.get(e.id);
+    if (!b || !b.localSim) {
+      pendingLocalSimIds.splice(i, 1);
+      i--;
+      continue;
+    }
+    if (e.type !== want) continue;
+    pendingLocalSimIds.splice(i, 1);
+    return e.id;
+  }
+  return null;
+}
+
+/** Attach local predict to server ghost; paths stay independent until ghost bd. */
+function linkGhostToLocalSim(ghost) {
+  const localId = takePendingLocalSim(ghost.type || 'default');
+  if (localId == null) return;
+  const local = bullets.get(localId);
+  if (!local || !local.localSim) return;
+  ghost.localChildId = localId;
+  local.serverParentId = ghost.id;
+}
+
+function removeLocalSimChild(localId) {
+  const local = bullets.get(localId);
+  if (!local || !local.localSim) return;
+  if (local.type === 'rocket' || local.type === 'enemyRocket') stopRocketTravelSfx(localId);
+  bullets.delete(localId);
+}
+
 /**
- * Instant local projectile(s). Live until offscreen prune — never deleted/teleported
- * when server bf arrives. Server path is a separate ghostOnly bullet.
+ * Instant local projectile(s). Coexist with server ghost; removed when ghost bd arrives.
  */
 function spawnLocalPredictedShot(typeName) {
   if (myId == null || deathSpectating || matchPaused) return;
@@ -12827,6 +12867,7 @@ function spawnLocalPredictedShot(typeName) {
         recvPerf: firePerf,
         localSim: true
       });
+      queueLocalSim(id, 'shotgun');
     }
   } else {
     if (!(w.speed > 0)) return;
@@ -12845,17 +12886,19 @@ function spawnLocalPredictedShot(typeName) {
       recvPerf: firePerf,
       localSim: true
     });
+    queueLocalSim(id, type);
     if (type === 'rocket') startRocketTravelSfx(bullets.get(id));
   }
 }
 
-/** Own live bf → ghost-only overlay; does not touch localSim bullets. */
+/** Own live bf → ghost-only overlay; link to matching localSim for joint lifetime. */
 function markOwnServerBulletGhost(b) {
   b.ghostOnly = true;
   b.showGhost = true;
   delete b.localOrigin;
   delete b.recvPerf;
   delete b.localSim;
+  linkGhostToLocalSim(b);
 }
 
 /**
@@ -13091,6 +13134,8 @@ function removeBullet(id, hitKind, hx, hy) {
     const p = (hx != null && hy != null) ? { x: hx, y: hy } : bulletAt(b);
     emitBulletImpactFx(p.x, p.y, b.type || 'default', kind, b.vx, b.vy);
     if (b.type === 'rocket' || b.type === 'enemyRocket') stopRocketTravelSfx(b.id);
+    // Ghost died → kill its linked local predict (no second impact FX).
+    if (b.localChildId != null) removeLocalSimChild(b.localChildId);
   } else if (hx != null && hy != null) {
     emitBulletImpactFx(hx, hy, 'default', kind);
   }
@@ -13470,6 +13515,10 @@ function pruneBullets() {
     const p = b.localSim ? bulletAt(b) : bulletTrueAt(b);
     if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) {
       if (b.type === 'rocket' || b.type === 'enemyRocket') stopRocketTravelSfx(id);
+      if (b.serverParentId != null) {
+        const g = bullets.get(b.serverParentId);
+        if (g && g.localChildId === id) delete g.localChildId;
+      }
       bullets.delete(id);
     }
   }
