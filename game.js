@@ -1406,6 +1406,7 @@ const COL = {
   remote: [1.0, 0.28, 0.55],
   asteroid: [1.0, 0.45, 0.2],
   meteor: [0.95, 0.2, 0.35],
+  golden: [1.0, 0.84, 0.28],
   bullet: [0.85, 0.95, 1.0],
   rocket: [1.0, 0.45, 0.2],
   laser: [0.35, 0.95, 1.0],
@@ -8366,6 +8367,11 @@ function drawSceneLines(dt) {
         asteroidSilhouetteWorldPoly(ax, ay, p.angle, sid, a.r || 16, size),
         ax, ay, a.vx, a.vy, boost
       );
+    } else if (a.special === 'golden' && !deathSpectating) {
+      emitGoldenShineFx(
+        asteroidSilhouetteWorldPoly(ax, ay, p.angle, sid, a.r || 16, size),
+        ax, ay, a.vx, a.vy
+      );
     }
   }
   drawPortalDangerIndicators();
@@ -8380,6 +8386,7 @@ function drawSceneLines(dt) {
 
 function asteroidColor(a) {
   if (a && (a.playerShot || a.special === 'meteor')) return COL.meteor;
+  if (a && a.special === 'golden') return COL.golden;
   // Server hue (0–1) when present — shards inherit parent ±20°.
   if (a && a.hue != null && Number.isFinite(a.hue)) {
     return hsvToRgb(a.hue, 1, 1);
@@ -8603,6 +8610,60 @@ function samplePointInPolyFlat(verts) {
   };
 }
 const _meteorPolyAreaScratch = [];
+
+const GOLDEN_SHINE_HOT = [1.0, 0.98, 0.85];
+const GOLDEN_SHINE_CORE = [1.0, 0.88, 0.35];
+
+/**
+ * Soft golden sparkles across the silhouette (lighter than meteor burn).
+ */
+function emitGoldenShineFx(polyFlat, cx, cy, vx, vy) {
+  if (!polyFlat || polyFlat.length < 6) return;
+  let budget = 28;
+  while (budget-- > 0) {
+    const pt = samplePointInPolyFlat(polyFlat);
+    if (!pt) return;
+    const pi = allocParticle();
+    if (pi < 0) return;
+    let ox = pt.x - cx, oy = pt.y - cy;
+    let ol = Math.hypot(ox, oy);
+    if (ol < 1e-6) {
+      ox = 1;
+      oy = 0;
+      ol = 1;
+    }
+    ox /= ol;
+    oy /= ol;
+    const jitter = (Math.random() - 0.5) * 0.55 * RES_SCALE;
+    const ang = Math.atan2(oy, ox) + (Math.random() - 0.5) * 0.9;
+    const spd = (4 + Math.random() * 14) * RES_SCALE;
+    const life = (0.12 + Math.random() * 0.22);
+    const roll = Math.random();
+    const col = roll > 0.82 ? GOLDEN_SHINE_HOT
+      : roll > 0.4 ? GOLDEN_SHINE_CORE
+      : COL.golden;
+    pX[pi] = pt.x + -oy * jitter;
+    pY[pi] = pt.y + ox * jitter;
+    pVx[pi] = Math.cos(ang) * spd + (vx || 0) * 0.55;
+    pVy[pi] = Math.sin(ang) * spd + (vy || 0) * 0.55;
+    pLife[pi] = life;
+    pMaxLife[pi] = life;
+    pSize[pi] = (0.7 + Math.random() * 1.6) * RES_SCALE;
+    pScaleY[pi] = 1.1 + Math.random() * 0.6;
+    pWiggle[pi] = 0.45;
+    pWiggleSpd[pi] = 22;
+    pPhase[pi] = Math.random() * Math.PI * 2;
+    pDrag[pi] = 3.2;
+    pR[pi] = col[0];
+    pG[pi] = col[1];
+    pB[pi] = col[2];
+    pCollide[pi] = 0;
+    pEdgeBounce[pi] = 0;
+    pSkipShip[pi] = 0;
+    pFadeLife[pi] = 0;
+    pAlive[pi] = 1;
+  }
+}
 
 /**
  * Dense fire across the full 2D silhouette (not rim-only).
@@ -13146,8 +13207,9 @@ function removeAsteroid(id, silent) {
   const a = asteroids.get(id);
   if (a && !silent) {
     const p = asteroidAt(a);
+    const burstCol = a.special === 'golden' ? COL.golden : COL.asteroid;
     emitAsteroidBurst(p.x, p.y, a.r || 10 * RES_SCALE, a.size);
-    pushFxRing(p.x, p.y, COL.asteroid, {
+    pushFxRing(p.x, p.y, burstCol, {
       r0: 4,
       r1: Math.min(50, 12 + (a.r || 10) * 0.6),
       life: 360
@@ -14724,7 +14786,7 @@ function unpackAsteroid(row) {
     : sizeCode === 1 ? 'medium'
     : 'small';
   const specialCode = row[11] | 0;
-  const special = specialCode === 1 ? 'meteor' : null;
+  const special = specialCode === 1 ? 'meteor' : specialCode === 2 ? 'golden' : null;
   const shapeId = row[14] != null ? (row[14] | 0)
     : shapeIdFromPos(row[1], row[2]);
   const hueDeg = row[19];
@@ -16944,6 +17006,15 @@ async function connect() {
       removeAsteroid(msg.id, silent);
       return;
     }
+    if (msg.t === 'gc' && inGame) {
+      if (deathSpectating) return;
+      const n = msg.n != null ? (msg.n | 0) : 0;
+      const by = msg.by != null ? (msg.by | 0) : 0;
+      if (n > 0 && by > 0 && msg.x != null && msg.y != null) {
+        spawnCoinBurstToPlayer(msg.x, msg.y, n, by);
+      }
+      return;
+    }
     if (msg.t === 'aw' && inGame) {
       if (deathSpectating) return;
       applyAsteroidWrap(msg.a);
@@ -17938,7 +18009,7 @@ function demoCollectAsteroids() {
       0,
       a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0),
       a.spawnSt,
-      a.special === 'meteor' ? 1 : 0,
+      a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : 0,
       a.centerRock ? 1 : 0,
       a.portal ? 1 : 0,
       a.shapeId != null ? (a.shapeId | 0) : 0,
@@ -18301,7 +18372,7 @@ function normalizeDemoAsteroidRow(a) {
   if (!a || typeof a !== 'object') return null;
   // Legacy server object format (pre-playback packing).
   const size = a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0);
-  const special = a.special === 'meteor' ? 1 : 0;
+  const special = a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : 0;
   return [
     a.aid | a.id | 0,
     a.spawnX != null ? a.spawnX : a.x,

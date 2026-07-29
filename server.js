@@ -431,7 +431,11 @@ const ASTEROID_HP = 50;
 const ASTEROID_COIN_GRANT = 32;
 /** Chance a non-start spawn (replacement big / split shard) is a special type. */
 const SPECIAL_ASTEROID_CHANCE = 0.1;
-const SPECIAL_ASTEROID_KINDS = ['meteor'];
+const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden'];
+/** Golden special rocks — tanky ore; coins drip on each damaging hit. */
+const GOLDEN_ASTEROID_HP = 400;
+/** Coins per point of HP damage dealt to a golden asteroid. */
+const GOLDEN_ASTEROID_COIN_PER_DMG = 0.4;
 /** Base random speed spread used by normal asteroids (±half of this per axis). */
 const ASTEROID_SPEED_SPREAD = 2.4 * RES_SCALE;
 /** Normal speed magnitude band (px/tick). Min matches offscreen inward floor. */
@@ -443,13 +447,15 @@ const ASTEROID_INBOUND_STUCK_MS = 20000;
 const ASTEROID_LIFE_MS = 20000;
 /** Rail damage vs players/enemies when an asteroid is closer on the beam. */
 const RAIL_THROUGH_ASTEROID_MULT = 0.2;
-/** Network special codes: 0 normal, 1 meteor (2 legacy/unused). */
+/** Network special codes: 0 normal, 1 meteor, 2 golden. */
 function specialAsteroidCode(a) {
   if (a.special === 'meteor') return 1;
+  if (a.special === 'golden') return 2;
   return 0;
 }
 function specialAsteroidFromCode(code) {
   if (code === 1) return 'meteor';
+  if (code === 2) return 'golden';
   return null;
 }
 /** Keep this many ticks of poses for lag compensation (~1s). */
@@ -823,6 +829,14 @@ function emitAsteroidDead(room, id, silent, x, y, coins, by) {
   roomBroadcast(room, msg);
 }
 
+/** Visual coin burst for golden-asteroid hit rewards (authoritative grant is separate). */
+function emitGoldAsteroidCoins(room, x, y, coins, by) {
+  const n = coins | 0;
+  const pid = by | 0;
+  if (n <= 0 || pid <= 0) return;
+  roomBroadcast(room, { t: 'gc', x, y, n, by: pid });
+}
+
 function emitAsteroidWrap(room, a) {
   const packed = packAsteroidWrap(a);
   demoRecorder.recordAsteroidWrap(room, packed);
@@ -1044,6 +1058,7 @@ function makeAsteroid(opts) {
   const r = o.r != null ? o.r : baseR * (0.92 + Math.random() * 0.16);
   const special = o.special !== undefined ? o.special : rollSpecialAsteroid(!!o.allowSpecial);
   let hp = ASTEROID_HP;
+  if (special === 'golden') hp = GOLDEN_ASTEROID_HP;
   if (o.hp != null) hp = o.hp;
   const angle = Math.random() * Math.PI * 2;
   const now = Date.now();
@@ -1127,7 +1142,7 @@ function makeAsteroid(opts) {
     // 0–1 hue (S=V=1). Splits inherit parent ±20°; portals copy parent.
     hue: o.hue != null
       ? wrapHue01(o.hue)
-      : asteroidHueFromShape(o.shapeId != null ? (o.shapeId | 0) : shapeIdFromPos(x, y))
+      : (special === 'golden' ? 0.13 : asteroidHueFromShape(o.shapeId != null ? (o.shapeId | 0) : shapeIdFromPos(x, y)))
   };
   refreshAsteroidCollisionPts(a);
   return a;
@@ -1201,7 +1216,21 @@ function resetCenterAsteroid(room) {
 function damageAsteroid(room, a, dmg, ownerId) {
   const oid = ownerId | 0;
   if (oid > 0) a.lastHitBy = oid;
-  a.hp -= dmg;
+  const raw = +dmg;
+  const hpBefore = a.hp;
+  if (a.special === 'golden' && oid > 0 && raw > 0 && hpBefore > 0) {
+    const applied = Math.min(raw, hpBefore);
+    const coinN = Math.floor(applied * GOLDEN_ASTEROID_COIN_PER_DMG);
+    if (coinN > 0) {
+      const p = room.players.get(oid);
+      if (p && !p.bot) {
+        grantCoins(p, coinN);
+        notifyPlayerCoins(room, p);
+        emitGoldAsteroidCoins(room, a.x, a.y, coinN, oid);
+      }
+    }
+  }
+  a.hp -= raw;
   if (a.hp > 0) {
     // Keep linked portal pair HP in sync while both exist.
     if (a.portalTwinAid != null) {
@@ -2395,6 +2424,17 @@ function splitAsteroid(room, parent) {
   const deathY = parent.y;
   const killerId = parent.lastHitBy | 0;
   const killer = killerId > 0 ? room.players.get(killerId) : null;
+
+  // Golden ore: no shards / no flat kill bonus (coins already paid per hit).
+  if (parent.special === 'golden') {
+    emitAsteroidDead(room, parent.aid, false, deathX, deathY, 0, killerId > 0 ? killerId : null);
+    if (!parent.centerRock && Math.random() < PICKUP_DROP_CHANCE) {
+      spawnPickup(room, parent);
+    }
+    if (parent.big && !parent.centerRock) scheduleBigAsteroidSpawn(room);
+    return;
+  }
+
   let coinN = 0;
   if (killer && !killer.bot) {
     coinN = ASTEROID_COIN_GRANT;
