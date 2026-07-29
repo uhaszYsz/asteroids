@@ -14559,7 +14559,11 @@ function clearEnemyBank(id) {
 
 function drawEnemyCommon(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
-  drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank, id);
+  drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank, id, {
+    silhouetteOnly: true,
+    noTint: true,
+    strongEmit: true
+  });
   return bank;
 }
 
