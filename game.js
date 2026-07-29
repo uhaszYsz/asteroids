@@ -8345,7 +8345,7 @@ function drawSceneLines(dt) {
     const vs = voidShakeOffset('p', myId);
     const ox = (dyingId === myId ? shake.x : 0) + vs.x;
     const oy = (dyingId === myId ? shake.y : 0) + vs.y;
-    drawShip3D(me.x + ox, me.y + oy, me.angle, me.av || 0, ownerPlayerColor(myId), myId, dt);
+    drawShip3D(me.x + ox, me.y + oy, me.angle, me.av || 0, ownerPlayerColor(myId), myId, dt, thrustUp());
     drawShipPowerupFx(me.x + ox, me.y + oy, myId, me.angle, dt);
     if (showHit) drawCollisionRing(me.x + ox, me.y + oy, me.angle, COL.debug);
   }
@@ -8358,7 +8358,8 @@ function drawSceneLines(dt) {
     const vs = voidShakeOffset('p', r.id);
     const ox = (isDying ? shake.x : 0) + vs.x;
     const oy = (isDying ? shake.y : 0) + vs.y;
-    drawShip3D(v.x + ox, v.y + oy, v.angle, v.av || 0, ownerPlayerColor(r.id), r.id, dt);
+    const remoteThrust = v.vx * Math.cos(v.angle) + v.vy * Math.sin(v.angle) > 0.4 * RES_SCALE;
+    drawShip3D(v.x + ox, v.y + oy, v.angle, v.av || 0, ownerPlayerColor(r.id), r.id, dt, remoteThrust);
     drawShipPowerupFx(v.x + ox, v.y + oy, r.id, v.angle, dt);
     if (showHit) drawCollisionRing(v.x + ox, v.y + oy, v.angle, COL.debug);
   }
@@ -9628,17 +9629,128 @@ const SHIP_MESHES = (() => {
 let selectedShipMeshId = 'arrow';
 try {
   const saved = localStorage.getItem(SHIP_MESH_LS_KEY);
-  if (saved && SHIP_MESHES.some((m) => m.id === saved)) selectedShipMeshId = saved;
+  if (saved) selectedShipMeshId = saved;
 } catch (_) { /* ignore */ }
 
+/**
+ * Tiny Ships pack (Disruptor Art) — PDF slice rules:
+ * frame size per ship, 1px padding between frames (right), rows = states top→bottom.
+ */
+const TINY_SHIP_SPECS = [
+  { id: 'tiny_1', name: 'Tiny 1', file: 'tinyShip1.png', fw: 24, fh: 27, states: ['idle', 'attack', 'move'] },
+  { id: 'tiny_2', name: 'Tiny 2', file: 'tinyShip2.png', fw: 34, fh: 36, states: ['attack', 'idle', 'move'] },
+  { id: 'tiny_3', name: 'Tiny 3', file: 'tinyShip3.png', fw: 26, fh: 27, states: ['move', 'idle'] },
+  { id: 'tiny_4', name: 'Tiny 4', file: 'tinyShip4.png', fw: 28, fh: 23, states: ['idle', 'attack', 'move'] },
+  { id: 'tiny_5', name: 'Tiny 5', file: 'tinyShip5.png', fw: 34, fh: 38, states: ['move', 'idle'] },
+  { id: 'tiny_6', name: 'Tiny 6', file: 'tinyShip6.png', fw: 40, fh: 22, states: ['idle'] },
+  { id: 'tiny_7', name: 'Tiny 7', file: 'tinyShip7.png', fw: 46, fh: 36, states: ['move', 'attack', 'idle'] },
+  { id: 'tiny_8', name: 'Tiny 8', file: 'tinyShip8.png', fw: 32, fh: 30, states: ['idle'] },
+  { id: 'tiny_9', name: 'Tiny 9', file: 'tinyShip9.png', fw: 34, fh: 31, states: ['idle', 'attack'] },
+  { id: 'tiny_10', name: 'Tiny 10', file: 'tinyShip10.png', fw: 40, fh: 29, states: ['idle'] },
+  { id: 'tiny_11', name: 'Tiny 11', file: 'tinyShip11.png', fw: 36, fh: 28, states: ['idle', 'move'] },
+  { id: 'tiny_12', name: 'Tiny 12', file: 'tinyShip12.png', fw: 26, fh: 27, states: ['move', 'attack', 'idle'] },
+  { id: 'tiny_13', name: 'Tiny 13', file: 'tinyShip13.png', fw: 36, fh: 41, states: ['move', 'idle'] },
+  { id: 'tiny_14', name: 'Tiny 14', file: 'tinyShip14.png', fw: 52, fh: 32, states: ['attack', 'idle'] },
+  { id: 'tiny_15', name: 'Tiny 15', file: 'tinyShip15.png', fw: 38, fh: 26, states: ['idle', 'attack'] },
+  { id: 'tiny_16', name: 'Tiny 16', file: 'tinyShip16.png', fw: 28, fh: 28, states: ['attack', 'move', 'idle'] },
+  { id: 'tiny_17', name: 'Tiny 17', file: 'tinyShip17.png', fw: 34, fh: 25, states: ['idle', 'attack'] },
+  { id: 'tiny_18', name: 'Tiny 18', file: 'tinyShip18.png', fw: 32, fh: 30, states: ['attack', 'idle'] },
+  { id: 'tiny_19', name: 'Tiny 19', file: 'tinyShip19.png', fw: 42, fh: 28, states: ['attack', 'idle'] },
+  { id: 'tiny_20', name: 'Tiny 20', file: 'tinyShip20.png', fw: 44, fh: 44, states: ['move', 'idle', 'attack'] }
+];
+const TINY_SHIP_DIR = 'sprites/tiny-spaceships/';
+const TINY_SHIP_FPS = 10;
+
+const spriteShipTexById = new Map(); // id -> { tex, img, w, h, ready }
+const SPRITE_SHIP_OPTIONS = TINY_SHIP_SPECS.map((s) => ({
+  id: s.id,
+  name: s.name,
+  source: 'tiny',
+  kind: 'sprite',
+  sprite: s,
+  nose: 0,
+  verts: [],
+  faces: [],
+  edges: []
+}));
+const SHIP_OPTIONS = SHIP_MESHES.concat(SPRITE_SHIP_OPTIONS);
+
+function loadSpriteShipTexture(spec) {
+  if (spriteShipTexById.has(spec.id)) return spriteShipTexById.get(spec.id);
+  const entry = { tex: null, img: null, w: 0, h: 0, ready: false };
+  spriteShipTexById.set(spec.id, entry);
+  const img = new Image();
+  img.onload = () => {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    entry.tex = tex;
+    entry.img = img;
+    entry.w = img.naturalWidth | 0;
+    entry.h = img.naturalHeight | 0;
+    entry.ready = true;
+  };
+  img.onerror = () => console.error('Failed to load tiny ship', spec.file);
+  img.src = TINY_SHIP_DIR + spec.file;
+  return entry;
+}
+for (let i = 0; i < TINY_SHIP_SPECS.length; i++) loadSpriteShipTexture(TINY_SHIP_SPECS[i]);
+
+function tinyShipCols(spec, sheetW) {
+  return Math.max(1, Math.round((sheetW + 1) / (spec.fw + 1)));
+}
+function tinyShipStateRow(spec, stateName) {
+  const i = spec.states.indexOf(stateName);
+  if (i >= 0) return i;
+  const idle = spec.states.indexOf('idle');
+  return idle >= 0 ? idle : 0;
+}
+function tinyShipAnimCol(spec, sheetW, tSec) {
+  const cols = tinyShipCols(spec, sheetW);
+  const frame = Math.floor((tSec || 0) * TINY_SHIP_FPS) % cols;
+  return frame;
+}
+function tinyShipFrameUV(spec, sheetW, sheetH, stateName, tSec) {
+  const cols = tinyShipCols(spec, sheetW);
+  const col = tinyShipAnimCol(spec, sheetW, tSec) % cols;
+  const row = tinyShipStateRow(spec, stateName);
+  const cellW = spec.fw + 1;
+  const u0 = (col * cellW) / sheetW;
+  const u1 = (col * cellW + spec.fw) / sheetW;
+  // Rows stack with frame height only (sheetH ≈ states * fh).
+  // FLIP_Y upload: image top → v=1, so invert row offsets.
+  const v0 = 1 - (row * spec.fh) / sheetH;
+  const v1 = 1 - (row * spec.fh + spec.fh) / sheetH;
+  return { u0, v0, u1, v1 };
+}
+
+try {
+  if (selectedShipMeshId && !SHIP_OPTIONS.some((m) => m.id === selectedShipMeshId)) {
+    selectedShipMeshId = 'arrow';
+  }
+} catch (_) { /* ignore */ }
+
+function getShipOptionById(id) {
+  return SHIP_OPTIONS.find((m) => m.id === id) || SHIP_OPTIONS[0];
+}
+function getActiveShipOption() {
+  return getShipOptionById(selectedShipMeshId);
+}
 function getShipMeshById(id) {
-  return SHIP_MESHES.find((m) => m.id === id) || SHIP_MESHES[0];
+  const o = getShipOptionById(id);
+  if (o && o.kind === 'sprite') return SHIP_MESHES[0];
+  return o || SHIP_MESHES[0];
 }
 function getActiveShipMesh() {
   return getShipMeshById(selectedShipMeshId);
 }
 function setActiveShipMesh(id) {
-  const m = getShipMeshById(id);
+  const m = getShipOptionById(id);
   if (!m) return;
   selectedShipMeshId = m.id;
   try { localStorage.setItem(SHIP_MESH_LS_KEY, m.id); } catch (_) { /* ignore */ }
@@ -9731,7 +9843,136 @@ function drawShipOutlineEdges(xy, mesh, color, nose, tipHeat) {
   }
 }
 
-function drawShip3D(x, y, angle, av, color, id, dt) {
+/* ========== Tiny sprite ships on invisible banking 3D plane ========== */
+const spriteShipVS = `
+  attribute vec2 aPos;
+  attribute vec2 aUV;
+  uniform vec2 uRes;
+  varying vec2 vUV;
+  varying vec2 vWorld;
+  void main() {
+    vec2 p = floor(aPos + 0.5) / uRes * 2.0 - 1.0;
+    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);
+    vUV = aUV;
+    vWorld = aPos;
+  }
+`;
+const spriteShipFS = `
+  precision mediump float;
+  uniform sampler2D uTex;
+  uniform float uAlpha;
+  varying vec2 vUV;
+  varying vec2 vWorld;
+` + SCENE_LIGHT_GLSL + `
+  void main() {
+    vec4 c = texture2D(uTex, vUV);
+    if (c.a < 0.08) discard;
+    // Near-black sheet leftovers.
+    if (max(c.r, max(c.g, c.b)) < 0.03 && c.a < 0.2) discard;
+    gl_FragColor = applyNightLit(c.rgb, c.a * uAlpha, vWorld);
+  }
+`;
+const spriteShipProg = gl.createProgram();
+gl.bindAttribLocation(spriteShipProg, 0, 'aPos');
+gl.bindAttribLocation(spriteShipProg, 1, 'aUV');
+gl.attachShader(spriteShipProg, shader(gl.VERTEX_SHADER, spriteShipVS));
+gl.attachShader(spriteShipProg, shader(gl.FRAGMENT_SHADER, spriteShipFS));
+linkProgram(spriteShipProg);
+const ssURes = gl.getUniformLocation(spriteShipProg, 'uRes');
+const ssUTex = gl.getUniformLocation(spriteShipProg, 'uTex');
+const ssUAlpha = gl.getUniformLocation(spriteShipProg, 'uAlpha');
+const spriteShipLightU = {
+  night: gl.getUniformLocation(spriteShipProg, 'uFlashNight'),
+  ships: gl.getUniformLocation(spriteShipProg, 'uShipLight[0]'),
+  wrap: gl.getUniformLocation(spriteShipProg, 'uLightWrap')
+};
+const ssAPos = gl.getAttribLocation(spriteShipProg, 'aPos');
+const ssAUV = gl.getAttribLocation(spriteShipProg, 'aUV');
+const spriteShipBuf = gl.createBuffer();
+const spriteShipMesh = new Float32Array(6 * 4);
+
+function tinyShipDesiredState(spec, moving) {
+  if (moving && spec.states.indexOf('move') >= 0) return 'move';
+  if (spec.states.indexOf('idle') >= 0) return 'idle';
+  return spec.states[0] || 'idle';
+}
+
+/** Sprite on a flat local-XY plane; bank/spin like rocket hulls around the nose. */
+function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
+  const spec = opt && opt.sprite;
+  if (!spec) return;
+  const entry = spriteShipTexById.get(spec.id);
+  if (!entry || !entry.ready || !entry.tex) return;
+
+  // Same nose-roll pipeline as rockets; keep spin partial so a flat sprite stays readable.
+  const spin = rocketSpinAngle(id != null ? id : 0) * 0.38;
+  const bankTurn = shipBankSmoothed(id, av, dt);
+  const bank = spin + bankTurn;
+
+  const halfL = 7.5 * RES_SCALE;
+  const halfW = halfL * (spec.fw / Math.max(1, spec.fh));
+  // Flat local-XY plane (invisible carrier); nose +X, sprite top = nose.
+  const verts = [
+    [halfL, -halfW, 0],
+    [halfL, halfW, 0],
+    [-halfL, halfW, 0],
+    [-halfL, -halfW, 0]
+  ];
+  const { xy } = projectMesh3D(verts, x, y, angle, bank);
+  const state = tinyShipDesiredState(spec, !!moving);
+  const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
+  // verts: 0 nose-left, 1 nose-right, 2 tail-right, 3 tail-left
+  const corners = [
+    [xy[0], xy[1], uv.u0, uv.v0],
+    [xy[2], xy[3], uv.u1, uv.v0],
+    [xy[4], xy[5], uv.u1, uv.v1],
+    [xy[6], xy[7], uv.u0, uv.v1]
+  ];
+  const idx = [0, 1, 2, 0, 2, 3];
+  for (let v = 0; v < 6; v++) {
+    const c = corners[idx[v]];
+    spriteShipMesh[v * 4] = c[0];
+    spriteShipMesh[v * 4 + 1] = c[1];
+    spriteShipMesh[v * 4 + 2] = c[2];
+    spriteShipMesh[v * 4 + 3] = c[3];
+  }
+  gl.useProgram(spriteShipProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(ssAPos);
+  gl.enableVertexAttribArray(ssAUV);
+  gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, 16, 8);
+  gl.uniform2f(ssURes, W, H);
+  bindSceneLightUniforms(spriteShipLightU);
+  gl.uniform1f(ssUAlpha, 1);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+  gl.uniform1i(ssUTex, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  // Flip winding so the plane stays visible when banked past edge-on.
+  const idx2 = [0, 2, 1, 0, 3, 2];
+  for (let v = 0; v < 6; v++) {
+    const c = corners[idx2[v]];
+    spriteShipMesh[v * 4] = c[0];
+    spriteShipMesh[v * 4 + 1] = c[1];
+    spriteShipMesh[v * 4 + 2] = c[2];
+    spriteShipMesh[v * 4 + 3] = c[3];
+  }
+  gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  gl.disable(gl.BLEND);
+  gl.disableVertexAttribArray(ssAUV);
+}
+
+function drawShip3D(x, y, angle, av, color, id, dt, moving) {
+  const opt = getActiveShipOption();
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving);
+    return;
+  }
   const mesh = getActiveShipMesh();
   const bank = shipBankSmoothed(id, av, dt);
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank);
@@ -17356,6 +17597,7 @@ function shipMeshSourceLabel(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien';
+  if (src === 'tiny') return 'Tiny sprites';
   return 'Default';
 }
 
@@ -17364,6 +17606,7 @@ function shipMeshSectionOrder(src) {
   if (src === 'elite') return 1;
   if (src === 'fe2') return 2;
   if (src === 'alien') return 3;
+  if (src === 'tiny') return 4;
   return 9;
 }
 
@@ -17371,6 +17614,7 @@ function shipMeshSectionTitle(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien ships';
+  if (src === 'tiny') return 'Tiny sprite ships';
   return 'Default';
 }
 
@@ -17378,8 +17622,49 @@ function shipMeshSectionTitle(src) {
 const shipPreviewSlots = [];
 const SHIP_PREV_SIZE = 88;
 
+function drawSpriteShipPreview(ctx, opt, w, h, t) {
+  if (!ctx || !opt || !opt.sprite) return;
+  const spec = opt.sprite;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#061018';
+  ctx.fillRect(0, 0, w, h);
+  const entry = spriteShipTexById.get(spec.id);
+  if (!entry || !entry.ready || !entry.img) {
+    ctx.fillStyle = '#3a5566';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('…', w * 0.5, h * 0.52);
+    return;
+  }
+  const state = tinyShipDesiredState(spec, true);
+  const cols = tinyShipCols(spec, entry.w);
+  const col = tinyShipAnimCol(spec, entry.w, t) % cols;
+  const row = tinyShipStateRow(spec, state);
+  const sx = col * (spec.fw + 1);
+  const sy = row * spec.fh;
+  const pad = 10;
+  const sc = Math.min((w - pad * 2) / spec.fw, (h - pad * 2) / spec.fh);
+  const dw = spec.fw * sc;
+  const dh = spec.fh * sc;
+  const dx = (w - dw) * 0.5;
+  const dy = (h - dh) * 0.5;
+  ctx.save();
+  ctx.translate(w * 0.5, h * 0.5);
+  ctx.rotate(Math.sin((t || 0) * 1.25) * 0.28);
+  ctx.scale(1, Math.cos((t || 0) * 1.1) * 0.18 + 0.82); // fake plane bank
+  ctx.translate(-w * 0.5, -h * 0.5);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(entry.img, sx, sy, spec.fw, spec.fh, dx, dy, dw, dh);
+  ctx.restore();
+}
+
 function drawShipMeshPreview(ctx, mesh, w, h, t) {
-  if (!ctx || !mesh || !mesh.verts || !mesh.verts.length) return;
+  if (!ctx || !mesh) return;
+  if (mesh.kind === 'sprite') {
+    drawSpriteShipPreview(ctx, mesh, w, h, t);
+    return;
+  }
+  if (!mesh.verts || !mesh.verts.length) return;
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = '#061018';
   ctx.fillRect(0, 0, w, h);
@@ -17452,9 +17737,14 @@ function syncShipMeshUi() {
   if (!gridPanelEl) return;
   const wrap = gridPanelEl.querySelector('#ship-meshes');
   const meta = gridPanelEl.querySelector('#ship-mesh-meta');
-  const mesh = getActiveShipMesh();
-  if (meta && mesh) {
-    meta.textContent = `${mesh.name} · ${shipMeshSourceLabel(mesh.source)} · ${mesh.verts.length}v / ${mesh.edges.length}e`;
+  const opt = getActiveShipOption();
+  if (meta && opt) {
+    if (opt.kind === 'sprite' && opt.sprite) {
+      const s = opt.sprite;
+      meta.textContent = `${opt.name} · Tiny sprites · ${s.fw}×${s.fh} · ${s.states.join('/')}`;
+    } else {
+      meta.textContent = `${opt.name} · ${shipMeshSourceLabel(opt.source)} · ${opt.verts.length}v / ${opt.edges.length}e`;
+    }
   }
   if (!wrap) return;
   wrap.querySelectorAll('button[data-ship]').forEach((btn) => {
@@ -17470,7 +17760,7 @@ function buildShipMeshUi() {
   shipPreviewSlots.length = 0;
 
   const groups = new Map();
-  for (const m of SHIP_MESHES) {
+  for (const m of SHIP_OPTIONS) {
     const src = m.source || 'local';
     if (!groups.has(src)) groups.set(src, []);
     groups.get(src).push(m);
