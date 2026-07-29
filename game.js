@@ -14448,11 +14448,47 @@ const ENEMY_UFO_MESH = (() => {
   };
 })();
 
-/** Textured enemy hull (ship.png) with asteroid-style emission on each face. */
-function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id) {
+/** Silhouette edges only (front-facing boundary) — not full wireframe. */
+function drawMeshSilhouetteEdges(xy, mesh, color) {
+  const faces = mesh.faces || [];
+  if (!faces.length) return;
+  const edgeCount = new Map();
+  for (let fi = 0; fi < faces.length; fi++) {
+    const f = faces[fi];
+    if (!f || f.length < 3) continue;
+    if (astFaceScreenArea(xy, f) <= 1e-6) continue;
+    for (let i = 0; i < f.length; i++) {
+      const a = f[i];
+      const b = f[(i + 1) % f.length];
+      const lo = a < b ? a : b;
+      const hi = a < b ? b : a;
+      const key = lo * 100000 + hi;
+      edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+    }
+  }
+  const edgeW = 2;
+  const col = color || COL.enemyUfo;
+  for (const [key, n] of edgeCount) {
+    if (n !== 1) continue;
+    const lo = (key / 100000) | 0;
+    const hi = key - lo * 100000;
+    drawThickSegment(
+      xy[lo * 2], xy[lo * 2 + 1],
+      xy[hi * 2], xy[hi * 2 + 1],
+      edgeW, col
+    );
+  }
+}
+
+/**
+ * Textured enemy hull (ship.png).
+ * opts: silhouetteOnly, noTint, strongEmit
+ */
+function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank || 0);
   const faces = mesh.faces || [];
   const mv = mesh.verts || [];
+  const o = opts || {};
   if (shipHullTexReady && faces.length && mv.length) {
     const order = faces.map((f, i) => {
       const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
@@ -14460,10 +14496,12 @@ function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id) {
     });
     order.sort((a, b) => a.z - b.z);
     const uvScale = shipMeshUvScale(mv);
-    const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
-    const tintPow = 0.7;
+    const baseEmit = Math.max(0, Number(cv('cl_ship_emit')) || 0);
+    const emitPow = o.strongEmit ? Math.max(1.55, baseEmit * 3) : baseEmit;
+    // noTint: keep albedo as texture; emission uses white so it doesn't recolor the hull.
+    const tintPow = o.noTint ? 0 : 0.7;
+    const tint = o.noTint ? [1, 1, 1] : (color || COL.enemy);
     const faceA = 1;
-    const tint = color || COL.enemy;
     gl.useProgram(astTexProg);
     gl.enableVertexAttribArray(astTAPos);
     gl.enableVertexAttribArray(astTAUV);
@@ -14474,14 +14512,15 @@ function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id) {
     bindSceneLightUniforms(astTexLightU);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    for (let o = 0; o < order.length; o++) {
-      drawEnemyHullFaceTex(xy, mv, faces[order[o].i], uvScale, id | 0, tint, faceA, tintPow, emitPow);
+    for (let oi = 0; oi < order.length; oi++) {
+      drawEnemyHullFaceTex(xy, mv, faces[order[oi].i], uvScale, id | 0, tint, faceA, tintPow, emitPow);
     }
     gl.disableVertexAttribArray(astTAUV);
   } else {
     drawShipMeshFacesTex(xy, depth, mesh, color, id != null ? id : 0);
   }
-  drawShipOutlineEdges(xy, mesh, color, -1, 0);
+  if (o.silhouetteOnly) drawMeshSilhouetteEdges(xy, mesh, color);
+  else drawShipOutlineEdges(xy, mesh, color, -1, 0);
 }
 
 /** Bank from heading change rate (enemies have no av). */
@@ -14734,7 +14773,11 @@ function drawEnemyCommonCharges() {
 
 function drawEnemyUfo(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
-  drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id);
+  drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
+    silhouetteOnly: true,
+    noTint: true,
+    strongEmit: true
+  });
 }
 
 function carrierWeaponColor(weapon) {
