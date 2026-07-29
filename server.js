@@ -1620,7 +1620,7 @@ function makeEnemy(kind, wave, weapon) {
 }
 
 /**
- * Commons only on even waves: wave 2→1, 4→2, 6→3… (odd waves: 0).
+ * Commons only on even waves: wave 2→2, 4→4, 6→6… (odd waves: 0).
  * UFO is not planned here — rolled at spawn time (15% UFO-only wave).
  */
 const MAX_COMMON_ON_FIELD = 4;
@@ -1630,7 +1630,7 @@ const UFO_WAVE_CHANCE = 0.25;
 function soloEnemyCounts(wave) {
   const n = Math.max(1, wave | 0);
   return {
-    common: n % 2 === 0 ? (n / 2) : 0,
+    common: n % 2 === 0 ? n : 0,
     ufo: 0,
     carrier: 0
   };
