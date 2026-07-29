@@ -2737,49 +2737,88 @@ function stepSynthGrid(dt, now) {
   }
 }
 
+/** Short-lived menu title stretch pops (spawned in the ASTEROIDS text box). */
+const menuTitlePulses = [];
+let menuTitlePulseNextAt = 0;
+
 /**
- * Menu-only: radial stretch pulse around the baked ASTEROIDS title.
- * UVs stay on rest pose, verts scale out → title + lattice stretch together (1×→2×).
+ * Menu-only: every 0.2s spawn a small stretch pop in a random spot of the title area.
+ * Radius & power are half the old full-title breath; lattice + etched text stretch together.
  */
 function applyMenuTitleGridPulse(now) {
-  if (inGame || !GRID_N) return;
-  const t = (now || performance.now()) * 0.001;
-  // Soft elastic breath; ease in/out so it feels stretchy, not linear.
-  const wave = 0.5 + 0.5 * Math.sin(t * 1.45);
-  const ease = wave * wave * (3 - 2 * wave);
-  const scale = 1 + ease; // 1 → 2
-  const cx = W * 0.5;
-  const cy = H * 0.25;
-  const R = Math.min(W, H) * 0.58;
+  if (inGame || !GRID_N) {
+    menuTitlePulses.length = 0;
+    menuTitlePulseNextAt = 0;
+    return;
+  }
+  now = now || performance.now();
+
+  const fontPx = Math.max(22, Math.min(W, H) * 0.072);
+  const areaCx = W * 0.5;
+  const areaCy = H * 0.25;
+  const textW = fontPx * 8.2;
+  const textH = fontPx * 1.4;
+  const x0 = areaCx - textW * 0.5;
+  const y0 = areaCy - textH * 0.5;
+
+  if (!menuTitlePulseNextAt) menuTitlePulseNextAt = now;
+  while (now >= menuTitlePulseNextAt) {
+    menuTitlePulseNextAt += 200;
+    menuTitlePulses.push({
+      x: x0 + Math.random() * textW,
+      y: y0 + Math.random() * textH,
+      born: now,
+      life: 380
+    });
+  }
+  for (let i = menuTitlePulses.length - 1; i >= 0; i--) {
+    if (now - menuTitlePulses[i].born >= menuTitlePulses[i].life) {
+      menuTitlePulses.splice(i, 1);
+    }
+  }
+
+  // Rest pose first.
+  for (let k = 0; k < GRID_N; k++) {
+    if (gridStaticPin[k]) continue;
+    gridDefX[k] = gridBaseX[k];
+    gridDefY[k] = gridBaseY[k];
+    gridVelX[k] = 0;
+    gridVelY[k] = 0;
+  }
+  if (!menuTitlePulses.length) return;
+
+  // 2× smaller radius / power vs the old full-title pulse (was R=0.58·min, amp→+1).
+  const R = Math.min(W, H) * 0.29;
   const invR = 1 / Math.max(1, R);
-  // Slightly more vertical stretch for a rubbery title pop.
-  const sx = 1 + (scale - 1) * 0.88;
-  const sy = scale;
+  const peakAmp = 0.5;
 
   for (let k = 0; k < GRID_N; k++) {
     if (gridStaticPin[k]) continue;
     const bx = gridBaseX[k];
     const by = gridBaseY[k];
-    const dx = bx - cx;
-    const dy = by - cy;
-    const d = Math.hypot(dx, dy);
-    if (d >= R) {
-      gridDefX[k] = bx;
-      gridDefY[k] = by;
-      gridVelX[k] = 0;
-      gridVelY[k] = 0;
-      continue;
+    let ox = 0;
+    let oy = 0;
+    for (let pi = 0; pi < menuTitlePulses.length; pi++) {
+      const p = menuTitlePulses[pi];
+      const dx = bx - p.x;
+      const dy = by - p.y;
+      const d = Math.hypot(dx, dy);
+      if (d >= R || d < 1e-4) continue;
+      const uAge = (now - p.born) / p.life;
+      const env = uAge < 0.32 ? (uAge / 0.32) : Math.max(0, 1 - (uAge - 0.32) / 0.68);
+      const ease = env * env * (3 - 2 * env);
+      const amp = peakAmp * ease;
+      let u = 1 - d * invR;
+      u = u * u * (3 - 2 * u);
+      const punch = u * u;
+      const s = 1 + amp * punch;
+      const sx = 1 + (s - 1) * 0.88;
+      const sy = s;
+      ox += dx * sx - dx;
+      oy += dy * sy - dy;
     }
-    let u = 1 - d * invR;
-    u = u * u * (3 - 2 * u);
-    // Extra punch near center so the word hits ~2× while edges stay calm.
-    const punch = u * u;
-    const lx = 1 + (sx - 1) * punch;
-    const ly = 1 + (sy - 1) * punch;
-    gridDefX[k] = cx + dx * lx;
-    gridDefY[k] = cy + dy * ly;
-    gridVelX[k] = 0;
-    gridVelY[k] = 0;
+    gridDefX[k] = bx + ox;
+    gridDefY[k] = by + oy;
   }
 }
 
