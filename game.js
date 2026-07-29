@@ -2758,7 +2758,7 @@ function drawSynthGrid(now) {
   tickNebulaScroll(dt);
   const night = nightModeActive();
   // Undistorted nebula underlay (same scroll as stroke nebula). Under the warp grid.
-  if (!night && (cv('cl_bg_layer') | 0) !== 0) drawNebulaUnderlay();
+  if (!night && ((cv('cl_bg_layer') | 0) !== 0 || !inGame)) drawNebulaUnderlay();
   if (!gridTopoMode()) {
     if (!night && arenaLightShow) drawArenaLightShow(now);
     return;
@@ -3348,7 +3348,7 @@ function ensureNebulaGLTexture() {
 function tickNebulaScroll(dt) {
   if (!gridNebulaReady) return;
   // Scroll for practice stroke nebula and/or optional underlay layer.
-  if (!practiceMode && !(cv('cl_bg_layer') | 0)) return;
+  if (!practiceMode && inGame && !(cv('cl_bg_layer') | 0)) return;
   const d = dt > 0 ? dt : 0.016;
   // Shared scroll drives grid stroke nebula; underlay may flip it at draw time.
   gridNebulaScrollX += gridNebulaVelX * d;
@@ -3877,7 +3877,7 @@ function ensureGridBakeTexture() {
   const c0 = spawnPadColorKey(0);
   const c1 = spawnPadColorKey(1);
   const key = [
-    'arena32', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
+    'arena33', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
     practiceMode ? 'p1' : 'p0', inGame ? 'g1' : 'menu', c0, c1
   ].join(':');
   if (!gridBakeDirty && gridBakeTex && gridBakeKey === key) return true;
@@ -3933,7 +3933,7 @@ function paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw) {
   const label = 'ASTEROIDS';
   const cx = tw * 0.5;
   const cy = th * 0.25;
-  const fontPx = Math.max(44, Math.min(tw, th) * 0.144);
+  const fontPx = Math.max(31, Math.min(tw, th) * 0.1008);
   const font = fontPx + 'px "Press Start 2P", Consolas, monospace';
   const outlineW = Math.max(5, fontPx * 0.14);
   const shx = Math.max(3, fontPx * 0.07);
@@ -4076,7 +4076,7 @@ function tickMenuTitleNeonPulses(now) {
   const ww = gridBakeWorldW;
   const wh = gridBakeWorldH;
   const minSide = Math.min(ww, wh);
-  const fontPx = Math.max(44, minSide * 0.144);
+  const fontPx = Math.max(31, minSide * 0.1008);
   const areaCx = ox + ww * 0.5;
   const areaCy = oy + wh * 0.25;
   const textW = fontPx * 8.2;
@@ -4089,7 +4089,7 @@ function tickMenuTitleNeonPulses(now) {
   const oxOut = areaCx - textW * 0.5;
   const oyOut = areaCy - textH * 0.5;
   while (now >= menuTitleNeonNextAt) {
-    menuTitleNeonNextAt += 200;
+    menuTitleNeonNextAt += 100; // every 0.1s
     menuTitleFillPulses.push({
       x: oxFill + Math.random() * fillW,
       y: oyFill + Math.random() * fillH,
@@ -4172,7 +4172,7 @@ function drawMenuTitleNeonGlow(now) {
 
 /**
  * Esports / rink playfield markings.
- * Menu: same sport field as PvP, with baked ASTEROIDS title on top.
+ * Menu: plain space lattice (nebula-colored) + baked ASTEROIDS title — no sport paint.
  * Match: blue lattice + player-colored spawn pads + thick sport accents.
  * Practice/solo/waves: nebula (or white) lattice only — no sport paint.
  */
@@ -4189,8 +4189,8 @@ function paintSportArenaGrid(ctx, tw, th, lineStep, rs, ox, oy, worldW, worldH, 
   // Full opacity strokes (same as live grid useDraw(..., 1)); fill stays softer.
   const BLUE = 'rgba(56, 140, 220, 1)';
   const WHITE = 'rgba(255, 255, 255, 1)';
-  // Practice bake is white alpha mask; menu shares the blue PvP field under the logo.
-  const lattice = practiceMode ? WHITE : BLUE;
+  // Practice / menu bake is white alpha mask; nebula color is sampled in the shader (scrolls).
+  const lattice = (practiceMode || menuTitle) ? WHITE : BLUE;
   // Bake texels per world pixel (≈ rs; lower if max-tex clamp shrinks the atlas).
   const px = tw / Math.max(1, worldW);
   // Framebuffer pixels → bake stroke width. (tw ≈ worldW*rs ⇒ factor 1; shrinks if atlas clamped.)
@@ -4209,15 +4209,16 @@ function paintSportArenaGrid(ctx, tw, th, lineStep, rs, ox, oy, worldW, worldH, 
   ctx.lineWidth = lw;
   paintLatticePattern(ctx, tw, th, lineStep, rs, topo, true);
 
-  // Solo/practice: lattice only (nebula or white), then optional title.
-  if (practiceMode) {
-    if (menuTitle) paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw);
-    else {
-      menuTitleOutlineReady = false;
-      menuTitleFillReady = false;
-    }
+  // Title screen: space grid + logo only (no PvP sport field).
+  if (menuTitle) {
+    paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw);
     return;
   }
+  menuTitleOutlineReady = false;
+  menuTitleFillReady = false;
+
+  // Solo/practice: stop here — lattice only (nebula or white).
+  if (practiceMode) return;
 
   // --- spawn pads: recolor lattice to that player's color ---
   const spawnR = toTexR(GODMODE_SPAWN_CLEAR_R);
@@ -4328,13 +4329,6 @@ function paintSportArenaGrid(ctx, tw, th, lineStep, rs, ox, oy, worldW, worldH, 
 
   // Flipper-style lamp paints along white sport lines (runtime anim lights these).
   paintArenaFancyLamps(ctx, tw, th, cx, cy, stageInset, rStar, starVerts, spawnPads, spawnR, px, fbToBake);
-
-  // Title screen: etch logo on top of the same field background.
-  if (menuTitle) paintMenuTitleBake(ctx, tw, th, lineStep, rs, topo, lw);
-  else {
-    menuTitleOutlineReady = false;
-    menuTitleFillReady = false;
-  }
 }
 
 /** Dim lamp ticks / chevrons baked onto sport lines for chase lighting. */
@@ -4920,7 +4914,7 @@ function drawGridBaked() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, bakeFilt);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, bakeFilt);
   gl.uniform1i(gbUTex, 0);
-  const useNebula = practiceMode && ensureNebulaGLTexture();
+  const useNebula = (practiceMode || !inGame) && ensureNebulaGLTexture();
   if (gbUNebula) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, useNebula ? gridNebulaGL : gridBakeTex);
