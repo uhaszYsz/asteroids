@@ -9563,51 +9563,13 @@ function projectShip3D(cx, cy, yaw, bank) {
   return projectMesh3D(getActiveShipMesh().verts, cx, cy, yaw, bank);
 }
 
-/** Silhouette / outline edges only (front↔back or boundary) — like asteroid outlines. */
-const _shipSilEdgeMap = new Map();
-const _shipSilEdges = [];
-
-function collectShipSilhouetteEdges(xy, faces) {
-  const map = _shipSilEdgeMap;
-  map.clear();
-  for (let fi = 0; fi < faces.length; fi++) {
-    const f = faces[fi];
-    const front = astFaceScreenArea(xy, f) > 1e-6;
-    for (let e = 0; e < 3; e++) {
-      const a = f[e];
-      const b = f[(e + 1) % 3];
-      const lo = a < b ? a : b;
-      const hi = a < b ? b : a;
-      const key = lo * 100000 + hi;
-      let info = map.get(key);
-      if (!info) {
-        info = { lo, hi, fronts: 0, backs: 0 };
-        map.set(key, info);
-      }
-      if (front) info.fronts++;
-      else info.backs++;
-    }
-  }
-  const out = _shipSilEdges;
-  out.length = 0;
-  for (const info of map.values()) {
-    const n = info.fronts + info.backs;
-    // Outer contour: shared by front+back, or open boundary edge.
-    if ((info.fronts > 0 && info.backs > 0) || n === 1) {
-      out.push(info.lo, info.hi);
-    }
-  }
-  return out;
-}
-
 function drawShipOutlineEdges(xy, mesh, color, nose, tipHeat) {
-  const faces = mesh.faces || [];
-  const sil = collectShipSilhouetteEdges(xy, faces);
+  const edges = mesh.edges || [];
   const edgeW = 1.125 * RES_SCALE;
   const nNose = nose | 0;
-  for (let i = 0; i < sil.length; i += 2) {
-    const a = sil[i];
-    const b = sil[i + 1];
+  for (const e of edges) {
+    const a = e[0];
+    const b = e[1];
     const x0 = xy[a * 2], y0 = xy[a * 2 + 1];
     const x1 = xy[b * 2], y1 = xy[b * 2 + 1];
     if (tipHeat > 0 && (a === nNose || b === nNose)) {
