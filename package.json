@@ -3,9 +3,20 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/accounts-db.test.js test/smoke.test.js"
+    "test": "node --test test/accounts-db.test.js test/smoke.test.js test/steam-auth.test.js",
+    "desktop:sync": "node desktop/scripts/sync-resources.js",
+    "desktop:update": "npm run desktop:sync && cd desktop && npx neu update",
+    "desktop:run": "npm run desktop:sync && cd desktop && npx neu run",
+    "desktop:build": "npm run desktop:sync && cd desktop && npx neu build",
+    "desktop:run:steam": "node desktop/steam/run-steam.js",
+    "desktop:build:steam": "node desktop/steam/run-steam.js --build",
+    "steam:ticket": "node desktop/steam/bridge.js"
   },
   "dependencies": {
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@neutralinojs/neu": "11.3.1",
+    "uuid": "9.0.1"
   }
 }

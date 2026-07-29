@@ -5,6 +5,7 @@ const readline = require('readline');
 const { WebSocketServer } = require('ws');
 const accountsDb = require('./accounts-db');
 const demoRecorder = require('./demo-recorder');
+const steamAuth = require('./steam-auth');
 
 const PORT = Number(process.env.PORT) || 8765;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -632,7 +633,7 @@ function packOnlineNames() {
 }
 
 function findOnlineByAccount(name) {
-  const key = sanitizeName(name);
+  const key = resolveAccountKey(name);
   if (!key) return null;
   for (const c of wss.clients) {
     if (c.readyState === 1 && c.registered && c.accountKey === key) return c;
@@ -2849,6 +2850,14 @@ function sanitizeName(raw) {
   return s || null;
 }
 
+/** PIN callsign or Steam account key (`S` + SteamID64). */
+function resolveAccountKey(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return null;
+  if (/^S\d{10,22}$/i.test(s)) return 'S' + s.slice(1);
+  return sanitizeName(s);
+}
+
 function defaultCallsign(id) {
   return CALLSIGN_POOL[(id | 0) % CALLSIGN_POOL.length] + '-' + String((id | 0) % 100).padStart(2, '0');
 }
@@ -2865,6 +2874,8 @@ function sessionFields(ws) {
     : [];
   return {
     name: ws.displayName || 'PILOT',
+    accountKey: ws.registered ? (ws.accountKey || null) : null,
+    steam: !!(ws.steamId),
     registered: !!ws.registered,
     matchesWon: ws.matchesWon | 0,
     bestWaves: ws.bestWaves | 0,
@@ -2887,6 +2898,7 @@ function sendSession(ws) {
 function initGuestSession(ws) {
   ws.registered = false;
   ws.accountKey = null;
+  ws.steamId = null;
   ws.matchesWon = 0;
   ws.bestWaves = 0;
   ws.bestWavesDuo = 0;
@@ -2954,6 +2966,13 @@ function handleSetName(ws, rawName) {
   const name = sanitizeName(rawName);
   if (!name) return { ok: 0, err: 'name' };
   if (ws.registered && ws.accountKey) {
+    if (ws.steamId || String(ws.accountKey).charAt(0) === 'S') {
+      const renamed = accountsDb.renameUser(ws.accountKey, name);
+      if (!renamed.ok) return { ok: 0, err: renamed.err || 'taken' };
+      ws.displayName = name;
+      applyDisplayNameToRoom(ws, name);
+      return { ok: 1 };
+    }
     if (name !== ws.accountKey) {
       const renamed = accountsDb.renameUser(ws.accountKey, name);
       if (!renamed.ok) return { ok: 0, err: renamed.err || 'taken' };
@@ -2966,6 +2985,28 @@ function handleSetName(ws, rawName) {
   ws.displayName = name;
   applyDisplayNameToRoom(ws, name);
   return { ok: 1 };
+}
+
+async function handleSteamLogin(ws, ticketHex, ticketIdentity, personaName) {
+  if (!steamAuth.configured()) return { ok: 0, err: 'disabled' };
+  if (ws.registered) return { ok: 0, err: 'already' };
+  const verified = await steamAuth.authenticateTicket(ticketHex, ticketIdentity);
+  if (!verified.ok) return { ok: 0, err: verified.err || 'reject' };
+  const upserted = accountsDb.upsertSteamUser(verified.steamId, personaName);
+  if (!upserted.ok) return { ok: 0, err: upserted.err || 'fail' };
+  const u = upserted.user;
+  ws.registered = true;
+  ws.accountKey = upserted.key;
+  ws.steamId = verified.steamId;
+  ws.displayName = sanitizeName(u.displayName) || sanitizeName(personaName) || ('S' + String(verified.steamId).slice(-8));
+  ws.matchesWon = u.matchesWon | 0;
+  ws.bestWaves = u.bestWaves | 0;
+  ws.bestWavesDuo = u.bestWavesDuo | 0;
+  ws.playerColor = u.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
+  ws.shootColor = u.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
+  applyDisplayNameToRoom(ws, ws.displayName);
+  applyColorsToRoom(ws);
+  return { ok: 1, created: upserted.created ? 1 : 0 };
 }
 
 function handleRegister(ws, pin, pinConfirm, rawName) {
@@ -2984,6 +3025,7 @@ function handleRegister(ws, pin, pinConfirm, rawName) {
   if (!created.ok) return { ok: 0, err: created.err || 'fail' };
   ws.registered = true;
   ws.accountKey = name;
+  ws.steamId = null;
   ws.displayName = name;
   ws.matchesWon = 0;
   ws.bestWaves = 0;
@@ -3004,6 +3046,7 @@ function handleLogin(ws, rawName, pin) {
   if (!verified.ok) return { ok: 0, err: verified.err || 'pin' };
   ws.registered = true;
   ws.accountKey = name;
+  ws.steamId = null;
   ws.displayName = name;
   ws.matchesWon = verified.user.matchesWon | 0;
   ws.bestWaves = verified.user.bestWaves | 0;
@@ -7371,12 +7414,18 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({
       ok: true,
       rooms: rooms.size,
-      queue: matchQueue.length
+      queue: matchQueue.length,
+      steamAuth: steamAuth.configured() ? 1 : 0
     }));
     return;
   }
   let file = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   try { file = decodeURIComponent(file); } catch (_) {}
+  // Never expose Steam bridge, secrets, or tooling over the public HTTP server.
+  const blocked = /^(?:\/?(?:desktop(?:\/|$)|node_modules(?:\/|$)|\.git(?:\/|$)|accounts\.json|admin-password\.txt|steam-auth\.js|server\.js|accounts-db\.js))/i;
+  if (blocked.test(file.replace(/\\/g, '/'))) {
+    res.writeHead(404); res.end(); return;
+  }
   const fp = path.join(__dirname, file);
   if (!fp.startsWith(__dirname) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
     res.writeHead(404); res.end(); return;
@@ -7628,6 +7677,24 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (msg.t === 'steamLogin') {
+      if (!allowAction(ws, 'steamLogin', 1000)) return;
+      Promise.resolve()
+        .then(() => handleSteamLogin(ws, msg.ticket, msg.identity, msg.personaName))
+        .then((result) => {
+          send(ws, Object.assign({ t: 'steamLogin' }, result, sessionFields(ws)));
+          if (result.ok) {
+            sendTeamState(ws);
+            broadcastPresence();
+            sendRejoinOfferIfAny(ws);
+          }
+        })
+        .catch(() => {
+          send(ws, Object.assign({ t: 'steamLogin', ok: 0, err: 'fail' }, sessionFields(ws)));
+        });
+      return;
+    }
+
     if (msg.t === 'setColors') {
       const result = handleSetColors(ws, msg.playerColor, msg.shootColor);
       send(ws, Object.assign({ t: 'setColors' }, result, sessionFields(ws)));
@@ -7665,7 +7732,7 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'addFriend', ok: 0, err: 'guest' });
         return;
       }
-      const name = sanitizeName(msg.name);
+      const name = resolveAccountKey(msg.name);
       if (!name || name === ws.accountKey) {
         send(ws, { t: 'addFriend', ok: 0, err: 'name' });
         return;
@@ -7682,7 +7749,7 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'teamInvite', ok: 0, err: 'guest' });
         return;
       }
-      const name = sanitizeName(msg.name);
+      const name = resolveAccountKey(msg.name);
       const target = findOnlineByAccount(name);
       if (!target || target === ws) {
         send(ws, { t: 'teamInvite', ok: 0, err: 'offline' });

@@ -32,7 +32,51 @@ function migrateUser(u) {
   if (!Array.isArray(u.friends)) u.friends = [];
   u.playerColor = normalizeColor(u.playerColor) || DEFAULT_PLAYER_COLOR;
   u.shootColor = normalizeColor(u.shootColor) || DEFAULT_SHOOT_COLOR;
+  if (u.steamId != null) u.steamId = String(u.steamId);
+  if (u.displayName != null) u.displayName = String(u.displayName);
   return u;
+}
+
+/** Stable account key for a SteamID64. */
+function steamAccountKey(steamId) {
+  const id = String(steamId == null ? '' : steamId).replace(/\D/g, '');
+  if (id.length < 10) return null;
+  return 'S' + id;
+}
+
+/**
+ * Create or load a Steam-backed account (no PIN).
+ * @returns {{ ok: 1, key: string, user: object, created: boolean } | { ok: 0, err: string }}
+ */
+function upsertSteamUser(steamId, personaName) {
+  const key = steamAccountKey(steamId);
+  if (!key) return { ok: 0, err: 'steamid' };
+  const existing = data.users[key];
+  if (existing) {
+    migrateUser(existing);
+    if (personaName) {
+      const dn = String(personaName).trim().slice(0, 32);
+      if (dn) existing.displayName = dn;
+    }
+    existing.lastSteamLoginAt = Date.now();
+    save();
+    return { ok: 1, key, user: existing, created: false };
+  }
+  const dn = String(personaName || '').trim().slice(0, 32) || key;
+  data.users[key] = {
+    steamId: String(steamId).replace(/\D/g, ''),
+    displayName: dn,
+    matchesWon: 0,
+    bestWaves: 0,
+    bestWavesDuo: 0,
+    friends: [],
+    playerColor: DEFAULT_PLAYER_COLOR,
+    shootColor: DEFAULT_SHOOT_COLOR,
+    createdAt: Date.now(),
+    lastSteamLoginAt: Date.now()
+  };
+  save();
+  return { ok: 1, key, user: data.users[key], created: true };
 }
 
 function load() {
@@ -154,14 +198,21 @@ function setColors(username, playerColor, shootColor) {
 function renameUser(oldName, newName) {
   if (!oldName || !newName || oldName === newName) return { ok: 1 };
   if (!data.users[oldName]) return { ok: 0, err: 'missing' };
+  const u = migrateUser(data.users[oldName]);
+  // Steam accounts keep a fixed key; only the display name changes.
+  if (u.steamId) {
+    u.displayName = String(newName).trim().slice(0, 32) || u.displayName;
+    save();
+    return { ok: 1, user: u, displayOnly: true };
+  }
   if (data.users[newName]) return { ok: 0, err: 'taken' };
-  data.users[newName] = migrateUser(data.users[oldName]);
+  data.users[newName] = u;
   delete data.users[oldName];
   for (const k of Object.keys(data.users)) {
-    const u = data.users[k];
-    if (!Array.isArray(u.friends)) continue;
-    for (let i = 0; i < u.friends.length; i++) {
-      if (u.friends[i] === oldName) u.friends[i] = newName;
+    const ou = data.users[k];
+    if (!Array.isArray(ou.friends)) continue;
+    for (let i = 0; i < ou.friends.length; i++) {
+      if (ou.friends[i] === oldName) ou.friends[i] = newName;
     }
   }
   save();
@@ -210,7 +261,9 @@ function listLeaderboard() {
   for (const name of Object.keys(data.users)) {
     const u = migrateUser(data.users[name]);
     rows.push({
-      name,
+      name: u.displayName || name,
+      accountKey: name,
+      steam: !!u.steamId,
       wins: u.matchesWon | 0,
       bestWaves: u.bestWaves | 0,
       bestWavesDuo: u.bestWavesDuo | 0
@@ -229,6 +282,8 @@ module.exports = {
   getUser,
   createUser,
   verifyUser,
+  steamAccountKey,
+  upsertSteamUser,
   addWin,
   setBestWaves,
   setBestWavesDuo,

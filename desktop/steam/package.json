@@ -1,0 +1,8 @@
+{
+  "name": "asteroids-desktop-steam",
+  "private": true,
+  "description": "Optional Steamworks bridge for the Neutralino Steam build. Not used by the browser client.",
+  "dependencies": {
+    "steamworks.js": "^0.3.2"
+  }
+}

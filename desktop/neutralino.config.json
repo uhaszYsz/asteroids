@@ -1,0 +1,47 @@
+{
+  "applicationId": "com.asteroids.multiplayer",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "port": 0,
+  "documentRoot": "/resources/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "tokenSecurity": "one-time",
+  "logging": {
+    "enabled": true,
+    "writeToLogFile": false
+  },
+  "nativeAllowList": [
+    "app.*",
+    "window.*",
+    "os.*"
+  ],
+  "modes": {
+    "window": {
+      "title": "Asteroids",
+      "width": 1280,
+      "height": 720,
+      "minWidth": 640,
+      "minHeight": 360,
+      "fullScreen": false,
+      "alwaysOnTop": false,
+      "icon": "/resources/icons/appIcon.png",
+      "enableInspector": false,
+      "borderless": false,
+      "maximize": false,
+      "hidden": false,
+      "resizable": true,
+      "exitProcessOnClose": true,
+      "center": true
+    }
+  },
+  "cli": {
+    "binaryName": "asteroids",
+    "resourcesPath": "/resources/",
+    "extensionsPath": "/extensions/",
+    "clientLibrary": "/resources/js/neutralino.js",
+    "binaryVersion": "6.0.0",
+    "clientVersion": "6.0.0"
+  }
+}

@@ -10778,6 +10778,7 @@ let lbOnlineSet = new Set();
 let lbFriendsSet = new Set();
 let lbFriendsOnly = false;
 let lbSelectedName = null;
+let lbSelectedLabel = null;
 let lbSortKey = 'wins';
 let lbSortDir = -1; // -1 desc, 1 asc
 let lbPage = 0;
@@ -10822,7 +10823,7 @@ const pinModalSubmitBtn = document.getElementById('pin-modal-submit-btn');
 const pinModalCloseBtn = document.getElementById('pin-modal-close-btn');
 
 let accountSession = {
-  name: '', registered: false, matchesWon: 0, bestWaves: 0, bestWavesDuo: 0,
+  name: '', accountKey: null, steam: false, registered: false, matchesWon: 0, bestWaves: 0, bestWavesDuo: 0,
   hasSnapshot: false,
   playerColor: DEFAULT_PLAYER_COLOR_HEX,
   shootColor: DEFAULT_SHOOT_COLOR_HEX,
@@ -11221,8 +11222,48 @@ function accountErrText(err) {
     case 'missing': return 'No account with that name.';
     case 'already': return 'Already registered this session.';
     case 'fail': return 'Could not create account.';
+    case 'disabled': return 'Steam auth is not configured on the server.';
+    case 'ticket': return 'Invalid Steam ticket.';
+    case 'reject': return 'Steam rejected the ticket.';
+    case 'network': return 'Could not reach Steam.';
+    case 'timeout': return 'Steam auth timed out.';
+    case 'steamid': return 'Invalid SteamID.';
     default: return err ? String(err) : 'Request failed.';
   }
+}
+
+/**
+ * Steam desktop builds only. Browser / plain Neutralino never set
+ * window.__ASTEROIDS_STEAM__, so this is a no-op there.
+ */
+function trySteamAuthLogin() {
+  const steam = typeof window !== 'undefined' ? window.__ASTEROIDS_STEAM__ : null;
+  if (!steam) return;
+  if (!ws || ws.readyState !== 1) return;
+  if (accountSession.registered) return;
+
+  const attempt = () => {
+    const s = window.__ASTEROIDS_STEAM__;
+    if (!s || s.pending) return false;
+    if (!s.ok || !s.ticketHex) {
+      if (s.err) setAccountMsg('Steam: ' + accountErrText(s.err), false);
+      return true;
+    }
+    ws.send(JSON.stringify({
+      t: 'steamLogin',
+      ticket: s.ticketHex,
+      identity: s.identity || 'asteroids-game-server',
+      personaName: s.personaName || ''
+    }));
+    return true;
+  };
+
+  if (attempt()) return;
+  let n = 0;
+  const iv = setInterval(() => {
+    n += 1;
+    if (attempt() || n > 40) clearInterval(iv);
+  }, 100);
 }
 
 function setAccountMsg(text, ok) {
@@ -11251,6 +11292,8 @@ function applyAccountSession(msg) {
   const friends = Array.isArray(msg.friends) ? msg.friends.map(String) : (accountSession.friends || []);
   accountSession = {
     name: msg.name != null ? String(msg.name) : accountSession.name,
+    accountKey: msg.accountKey != null ? String(msg.accountKey) : (msg.registered ? String(msg.name || '') : null),
+    steam: !!msg.steam,
     registered: !!msg.registered,
     matchesWon: msg.matchesWon | 0,
     bestWaves: msg.bestWaves | 0,
@@ -11266,15 +11309,23 @@ function applyAccountSession(msg) {
   if (accountNameEl && document.activeElement !== accountNameEl) {
     accountNameEl.value = accountSession.name || '';
   }
-  if (accountStatusEl) accountStatusEl.textContent = accountSession.registered ? 'Registered' : 'Guest';
+  if (accountStatusEl) {
+    accountStatusEl.textContent = accountSession.registered
+      ? (accountSession.steam ? 'Steam' : 'Registered')
+      : 'Guest';
+  }
   if (accountWinsEl) {
     accountWinsEl.textContent =
       (accountSession.matchesWon | 0) + ' wins · best ' +
       (accountSession.bestWaves | 0) + ' / duo ' +
       (accountSession.bestWavesDuo | 0);
   }
-  if (accountRegisterBtn) accountRegisterBtn.style.display = accountSession.registered ? 'none' : '';
-  if (accountLoginBtn) accountLoginBtn.style.display = accountSession.registered ? 'none' : '';
+  if (accountRegisterBtn) {
+    accountRegisterBtn.style.display = (accountSession.registered || accountSession.steam) ? 'none' : '';
+  }
+  if (accountLoginBtn) {
+    accountLoginBtn.style.display = (accountSession.registered || accountSession.steam) ? 'none' : '';
+  }
   try {
     if (accountSession.registered && accountSession.name) {
       localStorage.setItem('asteroids_account_name', accountSession.name);
@@ -11603,9 +11654,9 @@ syncModeContinueUi();
 function sortedLeaderboardRows() {
   let rows = lbRows.slice();
   if (lbFriendsOnly) {
-    const me = String(accountSession.name || '');
+    const me = String(accountSession.accountKey || accountSession.name || '');
     rows = rows.filter((r) => {
-      const n = String(r.name || '');
+      const n = String(r.accountKey || r.name || '');
       return lbFriendsSet.has(n) || n === me;
     });
   }
@@ -11621,8 +11672,8 @@ function sortedLeaderboardRows() {
       if (av > bv) return 1 * dir;
       return 0;
     }
-    const ao = lbOnlineSet.has(String(a.name || '')) ? 1 : 0;
-    const bo = lbOnlineSet.has(String(b.name || '')) ? 1 : 0;
+    const ao = lbOnlineSet.has(String(a.accountKey || a.name || '')) ? 1 : 0;
+    const bo = lbOnlineSet.has(String(b.accountKey || b.name || '')) ? 1 : 0;
     if (ao !== bo) return bo - ao;
     return ((av | 0) - (bv | 0)) * dir;
   });
@@ -11636,8 +11687,8 @@ function syncLbActions() {
     return;
   }
   lbActionsEl.classList.add('show');
-  if (lbSelNameEl) lbSelNameEl.textContent = lbSelectedName;
-  const me = String(accountSession.name || '');
+  if (lbSelNameEl) lbSelNameEl.textContent = lbSelectedLabel || lbSelectedName;
+  const me = String(accountSession.accountKey || accountSession.name || '');
   const isSelf = lbSelectedName === me;
   const isFriend = lbFriendsSet.has(lbSelectedName);
   const isOnline = lbOnlineSet.has(lbSelectedName);
@@ -11691,12 +11742,13 @@ function renderLeaderboard() {
   lbBodyEl.innerHTML = '';
   for (const row of slice) {
     const name = String(row.name || '');
+    const key = String(row.accountKey || row.name || '');
     const tr = document.createElement('tr');
-    if (name && name === lbSelectedName) tr.classList.add('lb-selected');
+    if (key && key === lbSelectedName) tr.classList.add('lb-selected');
     const tdName = document.createElement('td');
     tdName.className = 'name';
     const dot = document.createElement('span');
-    dot.className = 'lb-online' + (lbOnlineSet.has(name) ? ' on' : '');
+    dot.className = 'lb-online' + (lbOnlineSet.has(key) ? ' on' : '');
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'lb-name';
@@ -11704,7 +11756,8 @@ function renderLeaderboard() {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      lbSelectedName = name || null;
+      lbSelectedName = key || null;
+      lbSelectedLabel = name || key || null;
       syncLbActions();
       renderLeaderboard();
     });
@@ -16012,6 +16065,7 @@ async function connect() {
     showMenu();
     if (playBtn) playBtn.disabled = false;
     sendPing();
+    trySteamAuthLogin();
   };
   ws.onclose = () => {
     connected = false;
@@ -16211,6 +16265,17 @@ async function connect() {
       } else {
         setPinModalMsg(accountErrText(msg.err), false);
         setAccountMsg(accountErrText(msg.err), false);
+      }
+      return;
+    }
+    if (msg.t === 'steamLogin') {
+      applyAccountSession(msg);
+      if (msg.ok) {
+        setAccountMsg(msg.created ? 'Steam account linked.' : 'Signed in with Steam.', true);
+        if (accountRegisterBtn) accountRegisterBtn.style.display = 'none';
+        if (accountLoginBtn) accountLoginBtn.style.display = 'none';
+      } else if (msg.err && msg.err !== 'disabled' && msg.err !== 'already') {
+        setAccountMsg('Steam login failed (' + accountErrText(msg.err) + ').', false);
       }
       return;
     }

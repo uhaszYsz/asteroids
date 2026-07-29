@@ -75,6 +75,17 @@ describe('server smoke', () => {
     c.close();
   });
 
+  it('rejects steamLogin when Steam auth is not configured', async () => {
+    const c = openClient(srv.wsUrl);
+    await c.ready;
+    await c.waitForType('lobby');
+    c.send({ t: 'steamLogin', ticket: 'aa'.repeat(32), identity: 'asteroids-game-server' });
+    const res = await c.waitForType('steamLogin');
+    assert.equal(res.ok, 0);
+    assert.equal(res.err, 'disabled');
+    c.close();
+  });
+
   it('rejects continue without snapshot', async () => {
     const c = openClient(srv.wsUrl);
     await c.ready;
