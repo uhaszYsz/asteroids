@@ -9790,11 +9790,12 @@ function shipBankSmoothed(id, av, dt) {
  * Project local 3D mesh verts → screen XY.
  * Roll (bank/spin) around forward axis, then yaw to face angle; Z lifts on screen.
  */
-function projectMesh3D(verts, cx, cy, yaw, bank) {
+function projectMesh3D(verts, cx, cy, yaw, bank, lift) {
   const ca = Math.cos(yaw);
   const sa = Math.sin(yaw);
   const cb = Math.cos(bank);
   const sb = Math.sin(bank);
+  const L = lift != null ? lift : SHIP3D_LIFT;
   const n = verts.length;
   const xy = new Float64Array(n * 2);
   const depth = new Float64Array(n);
@@ -9808,7 +9809,7 @@ function projectMesh3D(verts, cx, cy, yaw, bank) {
     const wx = lx * ca - y1 * sa;
     const wy = lx * sa + y1 * ca;
     xy[i * 2] = cx + wx;
-    xy[i * 2 + 1] = cy + wy - z1 * SHIP3D_LIFT;
+    xy[i * 2 + 1] = cy + wy - z1 * L;
     depth[i] = z1;
   }
   return { xy, depth };
@@ -9890,7 +9891,12 @@ const spriteShipLightU = {
 const ssAPos = gl.getAttribLocation(spriteShipProg, 'aPos');
 const ssAUV = gl.getAttribLocation(spriteShipProg, 'aUV');
 const spriteShipBuf = gl.createBuffer();
-const spriteShipMesh = new Float32Array(6 * 4);
+/** One roof panel, both windings: 12 verts × (xy + uv). */
+const spriteShipMesh = new Float32Array(12 * 4);
+/** Pitch of the two sprite halves (house-roof fold along nose→tail). */
+const SPRITE_ROOF_PITCH = 0.58;
+/** Screen lift so the ridge reads above the wing tips even at bank=0. */
+const SPRITE_ROOF_LIFT = 0.48;
 /** Attack row hold (ms) after each shot — covers a short anim cycle. */
 const SPRITE_SHIP_ATTACK_MS = 420;
 const spriteShipAttackUntil = new Map(); // ownerId -> performance.now deadline
@@ -9918,7 +9924,7 @@ function tinyShipDesiredState(spec, moving, attacking) {
   return spec.states[0] || 'idle';
 }
 
-/** Sprite on a flat local-XY plane; banks with turn like mesh ships (no continuous spin). */
+/** Sprite cut vertically onto a pitched roof (two faces meeting at the keel ridge). */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
   const spec = opt && opt.sprite;
   if (!spec) return;
@@ -9926,37 +9932,53 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
   if (!entry || !entry.ready || !entry.tex) return;
 
   const bank = shipBankSmoothed(id, av, dt);
-
   const halfL = 7.5 * RES_SCALE;
   const halfW = halfL * (spec.fw / Math.max(1, spec.fh));
-  // Flat local-XY plane (invisible carrier); nose +X, sprite top = nose.
-  const verts = [
-    [halfL, -halfW, 0],
-    [halfL, halfW, 0],
-    [-halfL, halfW, 0],
-    [-halfL, -halfW, 0]
-  ];
-  const { xy } = projectMesh3D(verts, x, y, angle, bank);
+  const cp = Math.cos(SPRITE_ROOF_PITCH);
+  const sp = Math.sin(SPRITE_ROOF_PITCH);
+  const wingY = halfW * cp;
+  const drop = halfW * sp;
+
   const state = tinyShipDesiredState(spec, !!moving, spriteShipAttacking(id));
   const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
-  // verts: 0 nose-left, 1 nose-right, 2 tail-right, 3 tail-left
-  const corners = [
-    [xy[0], xy[1], uv.u0, uv.v0],
-    [xy[2], xy[3], uv.u1, uv.v0],
-    [xy[4], xy[5], uv.u1, uv.v1],
-    [xy[6], xy[7], uv.u0, uv.v1]
+  const uMid = (uv.u0 + uv.u1) * 0.5;
+
+  // Left / right halves share the ridge (y=0,z=0); tips fold down like a roof.
+  const panels = [
+    {
+      // nose-ridge, nose-left, tail-left, tail-ridge
+      verts: [
+        [halfL, 0, 0],
+        [halfL, -wingY, -drop],
+        [-halfL, -wingY, -drop],
+        [-halfL, 0, 0]
+      ],
+      uvs: [
+        [uMid, uv.v0],
+        [uv.u0, uv.v0],
+        [uv.u0, uv.v1],
+        [uMid, uv.v1]
+      ]
+    },
+    {
+      // nose-ridge, nose-right, tail-right, tail-ridge
+      verts: [
+        [halfL, 0, 0],
+        [halfL, wingY, -drop],
+        [-halfL, wingY, -drop],
+        [-halfL, 0, 0]
+      ],
+      uvs: [
+        [uMid, uv.v0],
+        [uv.u1, uv.v0],
+        [uv.u1, uv.v1],
+        [uMid, uv.v1]
+      ]
+    }
   ];
-  const idx = [0, 1, 2, 0, 2, 3];
-  for (let v = 0; v < 6; v++) {
-    const c = corners[idx[v]];
-    spriteShipMesh[v * 4] = c[0];
-    spriteShipMesh[v * 4 + 1] = c[1];
-    spriteShipMesh[v * 4 + 2] = c[2];
-    spriteShipMesh[v * 4 + 3] = c[3];
-  }
+
   gl.useProgram(spriteShipProg);
   gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
-  gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(ssAPos);
   gl.enableVertexAttribArray(ssAUV);
   gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, 16, 0);
@@ -9966,24 +9988,32 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving) {
   gl.uniform1f(ssUAlpha, 1);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
-  // Keep crisp pixels even if another pass switched filters.
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.uniform1i(ssUTex, 0);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
-  // Flip winding so the plane stays visible when banked past edge-on.
-  const idx2 = [0, 2, 1, 0, 3, 2];
-  for (let v = 0; v < 6; v++) {
-    const c = corners[idx2[v]];
-    spriteShipMesh[v * 4] = c[0];
-    spriteShipMesh[v * 4 + 1] = c[1];
-    spriteShipMesh[v * 4 + 2] = c[2];
-    spriteShipMesh[v * 4 + 3] = c[3];
+
+  const windFwd = [0, 1, 2, 0, 2, 3];
+  const windBack = [0, 2, 1, 0, 3, 2];
+  for (let p = 0; p < panels.length; p++) {
+    const { xy } = projectMesh3D(panels[p].verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
+    const uvs = panels[p].uvs;
+    let o = 0;
+    for (let pass = 0; pass < 2; pass++) {
+      const idx = pass === 0 ? windFwd : windBack;
+      for (let v = 0; v < 6; v++) {
+        const i = idx[v];
+        spriteShipMesh[o++] = xy[i * 2];
+        spriteShipMesh[o++] = xy[i * 2 + 1];
+        spriteShipMesh[o++] = uvs[i][0];
+        spriteShipMesh[o++] = uvs[i][1];
+      }
+    }
+    gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, 12);
   }
-  gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
-  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
   gl.disable(gl.BLEND);
   gl.disableVertexAttribArray(ssAUV);
 }
@@ -17669,19 +17699,37 @@ function drawSpriteShipPreview(ctx, opt, w, h, t) {
   const row = tinyShipStateRow(spec, state);
   const sx = col * (spec.fw + 1);
   const sy = row * spec.fh;
+  const halfFw = Math.max(1, (spec.fw / 2) | 0);
   const pad = 10;
   const sc = Math.min((w - pad * 2) / spec.fw, (h - pad * 2) / spec.fh);
   const dw = spec.fw * sc;
   const dh = spec.fh * sc;
   const dx = (w - dw) * 0.5;
   const dy = (h - dh) * 0.5;
+  const mid = dx + dw * 0.5;
+  const fold = 0.74 + Math.sin((t || 0) * 1.15) * 0.05;
   ctx.save();
   ctx.translate(w * 0.5, h * 0.5);
-  ctx.rotate(Math.sin((t || 0) * 1.25) * 0.28);
-  ctx.scale(1, Math.cos((t || 0) * 1.1) * 0.18 + 0.82); // fake plane bank
+  ctx.rotate(Math.sin((t || 0) * 1.25) * 0.22);
   ctx.translate(-w * 0.5, -h * 0.5);
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(entry.img, sx, sy, spec.fw, spec.fh, dx, dy, dw, dh);
+  // Left / right halves folded like a roof toward the center ridge.
+  ctx.save();
+  ctx.translate(mid, dy + dh * 0.5);
+  ctx.transform(fold, 0.07, 0, 1, 0, 0);
+  ctx.translate(-mid, -(dy + dh * 0.5));
+  ctx.drawImage(entry.img, sx, sy, halfFw, spec.fh, dx, dy, dw * 0.5, dh);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(mid, dy + dh * 0.5);
+  ctx.transform(fold, -0.07, 0, 1, 0, 0);
+  ctx.translate(-mid, -(dy + dh * 0.5));
+  ctx.drawImage(
+    entry.img,
+    sx + halfFw, sy, spec.fw - halfFw, spec.fh,
+    mid, dy, dw * 0.5, dh
+  );
+  ctx.restore();
   ctx.restore();
 }
 
