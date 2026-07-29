@@ -12045,6 +12045,8 @@ let clientTickCursor = null;
 const CLOCK_OFFSET_MAX_STEP_MS = 8;
 
 let clockOffset = 0;
+/** False until first sane pong seeds clockOffset (avoid `!0` snap bug). */
+let clockOffsetReady = false;
 let pingMs = 0;
 let pingJitter = 0;
 let syncTick = 0;
@@ -12054,24 +12056,41 @@ const softErr = { x: 0, y: 0, angle: 0 };
 /** Remote pose history for interpolation: id -> [{st,x,y,vx,vy,angle,hp}] */
 const remoteHist = new Map();
 
+function resetClockSync() {
+  clockOffset = 0;
+  clockOffsetReady = false;
+  pingMs = 0;
+  pingJitter = 0;
+}
+
 function applyNtp(ct, st, serverTick) {
   const t3 = Date.now();
   const rtt = Math.max(0, t3 - ct);
-  // Ignore one-off delayed pongs for jitter / delay adaptation (tab timers, GC).
-  const saneRtt = rtt < (pingMs || 30) * 4 + 80;
+  // Ignore one-off delayed pongs for ping AND clock (tab timers, GC, spikes).
+  const baseline = pingMs > 0 ? pingMs : 30;
+  const saneRtt = rtt < baseline * 4 + 80;
+  const offset = st - (ct + t3) * 0.5;
+
   if (saneRtt) {
     const diff = pingMs ? Math.abs(rtt - pingMs) : 0;
     pingJitter = pingJitter ? pingJitter * 0.85 + diff * 0.15 : diff;
     pingMs = pingMs ? pingMs * 0.8 + rtt * 0.2 : rtt;
-  }
-  const offset = st - (ct + t3) * 0.5;
-  if (!clockOffset) {
-    clockOffset = offset;
-  } else {
-    let step = offset - clockOffset;
-    if (step > CLOCK_OFFSET_MAX_STEP_MS) step = CLOCK_OFFSET_MAX_STEP_MS;
-    if (step < -CLOCK_OFFSET_MAX_STEP_MS) step = -CLOCK_OFFSET_MAX_STEP_MS;
-    clockOffset += step * 0.35;
+
+    if (!clockOffsetReady) {
+      clockOffset = offset;
+      clockOffsetReady = true;
+    } else {
+      let err = offset - clockOffset;
+      // Healthy RTT but large clock error: catch up faster (recover stuck offset).
+      let maxStep = CLOCK_OFFSET_MAX_STEP_MS;
+      if (rtt < baseline * 1.5 + 25 && Math.abs(err) > 40) {
+        maxStep = Math.min(100, Math.abs(err) * 0.4);
+      }
+      let step = err;
+      if (step > maxStep) step = maxStep;
+      if (step < -maxStep) step = -maxStep;
+      clockOffset += step * 0.35;
+    }
   }
   // While playing, binary snaps own the tick timeline. Pong must not rewrite
   // syncTick/syncSt — that was rewinding estimatedServerTick every ~2s and
@@ -15947,6 +15966,7 @@ async function connect() {
   ws.onclose = () => {
     connected = false;
     consoleAdmin = false;
+    resetClockSync();
     resetMatchState();
     showMenu();
     if (playBtn) playBtn.disabled = true;
