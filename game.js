@@ -6519,9 +6519,9 @@ function freeParticle(i) {
 /**
  * Burst emit. Opts: x,y, count, speed, speedSpread, direction, spread,
  * size, sizeSpread, scaleY, sizeWiggle, sizeWiggleSpeed, lifetime, lifetimeSpread,
- * color [r,g,b], drag, inheritVx, inheritVy, collide (one-shot vs asteroids/ships),
- * edgeBounce (ignored — particles wrap on the torus, no Euclidean wall bounce),
- * skipShip (ship id to ignore — thrust/smoke vs own hull),
+ * color [r,g,b], drag, inheritVx, inheritVy,
+ * collide / edgeBounce ignored (particles never bounce or wrap-teleport),
+ * skipShip (ship id to ignore — unused while collide is off),
  * fadeLife (alpha tracks remaining life fraction)
  */
 function emitParticles(o) {
@@ -6542,8 +6542,8 @@ function emitParticles(o) {
   const drag = o.drag == null ? 1.8 : o.drag;
   const ivx = o.inheritVx || 0;
   const ivy = o.inheritVy || 0;
-  const canCollide = o.collide ? 1 : 0;
-  const edgeBounce = o.edgeBounce ? 1 : 0;
+  const canCollide = 0; // never bounce off rocks/ships/walls
+  const edgeBounce = 0; // never Euclidean edge bounce / wrap-teleport
   const skipShip = (o.skipShip | 0) || 0;
   const fadeLife = o.fadeLife ? 1 : 0;
 
@@ -6698,23 +6698,14 @@ function collideParticleOnce(i) {
   }
 }
 
-/** Particles live on the torus — never bounce off Euclidean world walls. */
-function wrapParticlePos(i) {
-  pX[i] = wrapCoord(pX[i], W);
-  pY[i] = wrapCoord(pY[i], H);
-}
-
 function updateParticles(dt) {
   if (dt <= 0) return;
   particleTime += dt;
-  let needCollide = false;
-  for (let i = 0; i < PARTICLE_MAX; i++) {
-    if (pAlive[i] && pCollide[i] === 1) {
-      needCollide = true;
-      break;
-    }
-  }
-  if (needCollide) rebuildParticleColliders();
+  // Margin past the screen — free sparks that left, no wrap/teleport, no wall bounce.
+  const xMin = -80 * RES_SCALE;
+  const xMax = W + 80 * RES_SCALE;
+  const yMin = -80 * RES_SCALE;
+  const yMax = H + 80 * RES_SCALE;
   for (let i = 0; i < PARTICLE_MAX; i++) {
     if (!pAlive[i]) continue;
     pLife[i] -= dt;
@@ -6727,9 +6718,10 @@ function updateParticles(dt) {
     pVy[i] *= damp;
     pX[i] += pVx[i] * dt;
     pY[i] += pVy[i] * dt;
-    wrapParticlePos(i);
     pPhase[i] += pWiggleSpd[i] * dt;
-    if (pCollide[i] === 1 && pColCount > 0) collideParticleOnce(i);
+    if (pX[i] < xMin || pX[i] > xMax || pY[i] < yMin || pY[i] > yMax) {
+      freeParticle(i);
+    }
   }
 }
 
