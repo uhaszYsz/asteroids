@@ -1063,6 +1063,11 @@ const CVARS = {
     def: 0.45,
     help: 'Face emission energy — Godot-style glow from tint × bright texels (0 = off).'
   },
+  cl_ship_emit: {
+    value: 0.45,
+    def: 0.45,
+    help: 'Ship hull texture emission — tint × bright texels (0 = off). Same model as cl_ast_emit.'
+  },
   cl_ast_outline_emit: {
     value: 0,
     def: 0,
@@ -8838,7 +8843,7 @@ function endShipHullTex() {
   gl.disableVertexAttribArray(astTAUV);
 }
 
-function drawShipHullFaceTex(xy, mv, f, uvScale, id, tint, alpha, tintPow) {
+function drawShipHullFaceTex(xy, mv, f, uvScale, id, tint, alpha, tintPow, emit) {
   const m = _astTexMesh;
   for (let i = 0; i < 3; i++) {
     const vi = f[i];
@@ -8855,7 +8860,7 @@ function drawShipHullFaceTex(xy, mv, f, uvScale, id, tint, alpha, tintPow) {
   gl.vertexAttribPointer(astTAUV, 2, gl.FLOAT, false, 16, 8);
   gl.uniform3f(astTUTint, tint[0], tint[1], tint[2]);
   gl.uniform1f(astTUTintPow, tintPow != null ? tintPow : 0.55);
-  gl.uniform1f(astTUEmit, 0);
+  gl.uniform1f(astTUEmit, emit != null ? emit : 0);
   gl.uniform1f(astTUAlpha, alpha);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
@@ -8874,10 +8879,11 @@ function drawShipMeshFacesTex(xy, depth, mesh, color, id) {
   const uvScale = shipMeshUvScale(mv);
   const faceA = texOn ? 0.92 : 0.28;
   const tintPow = 0.58;
+  const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
   for (const o of order) {
     const f = faces[o.i];
     if (texOn) {
-      drawShipHullFaceTex(xy, mv, f, uvScale, id, color, faceA, tintPow);
+      drawShipHullFaceTex(xy, mv, f, uvScale, id, color, faceA, tintPow, emitPow);
     } else {
       drawFilledPoly([
         xy[f[0] * 2], xy[f[0] * 2 + 1],
@@ -16954,6 +16960,7 @@ const GRID_PANEL_AST = [
   { name: 'cl_ast_z_min', min: 0.1, max: 3, step: 0.01 },
   { name: 'cl_ast_z_max', min: 0.1, max: 3, step: 0.01 },
   { name: 'cl_ast_emit', min: 0, max: 2, step: 0.01 },
+  { name: 'cl_ship_emit', min: 0, max: 2, step: 0.01 },
   { name: 'cl_ast_outline_emit', min: 0, max: 2, step: 0.01 }
 ];
 const GRID_PANEL_CVARS = GRID_PANEL_GLOBALS.concat(GRID_PANEL_EXPLOSION).concat(GRID_PANEL_AST);
@@ -17113,7 +17120,7 @@ function formatGridCvarValue(name, v) {
     || name === 'cl_ast_outline_alpha' || name === 'cl_ast_face_alpha'
     || name === 'cl_ast_face_tint' || name === 'cl_ast_wire_width' || name === 'cl_ast_wire_alpha'
     || name === 'cl_ast_z_min' || name === 'cl_ast_z_max'
-    || name === 'cl_ast_emit' || name === 'cl_ast_outline_emit'
+    || name === 'cl_ast_emit' || name === 'cl_ship_emit' || name === 'cl_ast_outline_emit'
     || name === 'cl_grid_color_r' || name === 'cl_grid_color_g' || name === 'cl_grid_color_b'
     || name === 'cl_bg_color_r' || name === 'cl_bg_color_g' || name === 'cl_bg_color_b'
   ) {
