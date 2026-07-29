@@ -9636,28 +9636,29 @@ try {
 /**
  * Tiny Ships pack (Disruptor Art) — PDF slice rules:
  * frame size per ship, 1px padding between frames (right), rows = states top→bottom.
+ * Some rows have fewer frames than sheet width allows — `frames` is per-state count.
  */
 const TINY_SHIP_SPECS = [
-  { id: 'tiny_1', name: 'Tiny 1', file: 'tinyShip1.png', fw: 24, fh: 27, states: ['idle', 'attack', 'move'] },
-  { id: 'tiny_2', name: 'Tiny 2', file: 'tinyShip2.png', fw: 34, fh: 36, states: ['attack', 'idle', 'move'] },
-  { id: 'tiny_3', name: 'Tiny 3', file: 'tinyShip3.png', fw: 26, fh: 27, states: ['move', 'idle'] },
-  { id: 'tiny_4', name: 'Tiny 4', file: 'tinyShip4.png', fw: 28, fh: 23, states: ['idle', 'attack', 'move'] },
-  { id: 'tiny_5', name: 'Tiny 5', file: 'tinyShip5.png', fw: 34, fh: 38, states: ['move', 'idle'] },
-  { id: 'tiny_6', name: 'Tiny 6', file: 'tinyShip6.png', fw: 40, fh: 22, states: ['idle'] },
-  { id: 'tiny_7', name: 'Tiny 7', file: 'tinyShip7.png', fw: 46, fh: 36, states: ['move', 'attack', 'idle'] },
-  { id: 'tiny_8', name: 'Tiny 8', file: 'tinyShip8.png', fw: 32, fh: 30, states: ['idle'] },
-  { id: 'tiny_9', name: 'Tiny 9', file: 'tinyShip9.png', fw: 34, fh: 31, states: ['idle', 'attack'] },
-  { id: 'tiny_10', name: 'Tiny 10', file: 'tinyShip10.png', fw: 40, fh: 29, states: ['idle'] },
-  { id: 'tiny_11', name: 'Tiny 11', file: 'tinyShip11.png', fw: 36, fh: 28, states: ['idle', 'move'] },
-  { id: 'tiny_12', name: 'Tiny 12', file: 'tinyShip12.png', fw: 26, fh: 27, states: ['move', 'attack', 'idle'] },
-  { id: 'tiny_13', name: 'Tiny 13', file: 'tinyShip13.png', fw: 36, fh: 41, states: ['move', 'idle'] },
-  { id: 'tiny_14', name: 'Tiny 14', file: 'tinyShip14.png', fw: 52, fh: 32, states: ['attack', 'idle'] },
-  { id: 'tiny_15', name: 'Tiny 15', file: 'tinyShip15.png', fw: 38, fh: 26, states: ['idle', 'attack'] },
-  { id: 'tiny_16', name: 'Tiny 16', file: 'tinyShip16.png', fw: 28, fh: 28, states: ['attack', 'move', 'idle'] },
-  { id: 'tiny_17', name: 'Tiny 17', file: 'tinyShip17.png', fw: 34, fh: 25, states: ['idle', 'attack'] },
-  { id: 'tiny_18', name: 'Tiny 18', file: 'tinyShip18.png', fw: 32, fh: 30, states: ['attack', 'idle'] },
-  { id: 'tiny_19', name: 'Tiny 19', file: 'tinyShip19.png', fw: 42, fh: 28, states: ['attack', 'idle'] },
-  { id: 'tiny_20', name: 'Tiny 20', file: 'tinyShip20.png', fw: 44, fh: 44, states: ['move', 'idle', 'attack'] }
+  { id: 'tiny_1', name: 'Tiny 1', file: 'tinyShip1.png', fw: 24, fh: 27, states: ['idle', 'attack', 'move'], frames: [6, 4, 6] },
+  { id: 'tiny_2', name: 'Tiny 2', file: 'tinyShip2.png', fw: 34, fh: 36, states: ['attack', 'idle', 'move'], frames: [6, 4, 4] },
+  { id: 'tiny_3', name: 'Tiny 3', file: 'tinyShip3.png', fw: 26, fh: 27, states: ['move', 'idle'], frames: [5, 5] },
+  { id: 'tiny_4', name: 'Tiny 4', file: 'tinyShip4.png', fw: 28, fh: 23, states: ['idle', 'attack', 'move'], frames: [7, 7, 6] },
+  { id: 'tiny_5', name: 'Tiny 5', file: 'tinyShip5.png', fw: 34, fh: 38, states: ['move', 'idle'], frames: [5, 5] },
+  { id: 'tiny_6', name: 'Tiny 6', file: 'tinyShip6.png', fw: 40, fh: 22, states: ['idle'], frames: [5] },
+  { id: 'tiny_7', name: 'Tiny 7', file: 'tinyShip7.png', fw: 46, fh: 36, states: ['move', 'attack', 'idle'], frames: [5, 5, 5] },
+  { id: 'tiny_8', name: 'Tiny 8', file: 'tinyShip8.png', fw: 32, fh: 30, states: ['idle'], frames: [6] },
+  { id: 'tiny_9', name: 'Tiny 9', file: 'tinyShip9.png', fw: 34, fh: 31, states: ['idle', 'attack'], frames: [5, 4] },
+  { id: 'tiny_10', name: 'Tiny 10', file: 'tinyShip10.png', fw: 40, fh: 29, states: ['idle'], frames: [4] },
+  { id: 'tiny_11', name: 'Tiny 11', file: 'tinyShip11.png', fw: 36, fh: 28, states: ['idle', 'move'], frames: [7, 4] },
+  { id: 'tiny_12', name: 'Tiny 12', file: 'tinyShip12.png', fw: 26, fh: 27, states: ['move', 'attack', 'idle'], frames: [4, 4, 4] },
+  { id: 'tiny_13', name: 'Tiny 13', file: 'tinyShip13.png', fw: 36, fh: 41, states: ['move', 'idle'], frames: [8, 4] },
+  { id: 'tiny_14', name: 'Tiny 14', file: 'tinyShip14.png', fw: 52, fh: 32, states: ['attack', 'idle'], frames: [4, 4] },
+  { id: 'tiny_15', name: 'Tiny 15', file: 'tinyShip15.png', fw: 38, fh: 26, states: ['idle', 'attack'], frames: [6, 5] },
+  { id: 'tiny_16', name: 'Tiny 16', file: 'tinyShip16.png', fw: 28, fh: 28, states: ['attack', 'move', 'idle'], frames: [4, 4, 4] },
+  { id: 'tiny_17', name: 'Tiny 17', file: 'tinyShip17.png', fw: 34, fh: 25, states: ['idle', 'attack'], frames: [6, 6] },
+  { id: 'tiny_18', name: 'Tiny 18', file: 'tinyShip18.png', fw: 32, fh: 30, states: ['attack', 'idle'], frames: [4, 4] },
+  { id: 'tiny_19', name: 'Tiny 19', file: 'tinyShip19.png', fw: 42, fh: 28, states: ['attack', 'idle'], frames: [4, 4] },
+  { id: 'tiny_20', name: 'Tiny 20', file: 'tinyShip20.png', fw: 44, fh: 44, states: ['move', 'idle', 'attack'], frames: [5, 5, 4] }
 ];
 const TINY_SHIP_DIR = 'sprites/tiny-spaceships/';
 const TINY_SHIP_FPS = 10;
@@ -9711,19 +9712,23 @@ function tinyShipStateRow(spec, stateName) {
   const idle = spec.states.indexOf('idle');
   return idle >= 0 ? idle : 0;
 }
-function tinyShipAnimCol(spec, sheetW, tSec) {
-  const cols = tinyShipCols(spec, sheetW);
-  const frame = Math.floor((tSec || 0) * TINY_SHIP_FPS) % cols;
-  return frame;
+/** Frame count for a state row (short rows must not loop into empty cells). */
+function tinyShipStateFrameCount(spec, stateName, sheetW) {
+  const i = spec.states.indexOf(stateName);
+  if (i >= 0 && spec.frames && spec.frames[i] > 0) return spec.frames[i] | 0;
+  return tinyShipCols(spec, sheetW);
+}
+function tinyShipAnimCol(spec, sheetW, tSec, stateName) {
+  const n = Math.max(1, tinyShipStateFrameCount(spec, stateName, sheetW));
+  return Math.floor((tSec || 0) * TINY_SHIP_FPS) % n;
 }
 function tinyShipFrameUV(spec, sheetW, sheetH, stateName, tSec) {
-  const cols = tinyShipCols(spec, sheetW);
-  const col = tinyShipAnimCol(spec, sheetW, tSec) % cols;
+  const col = tinyShipAnimCol(spec, sheetW, tSec, stateName);
   const row = tinyShipStateRow(spec, stateName);
-  const cellW = spec.fw + 1;
+  const cellW = spec.fw + 1; // PDF: 1px padding to the right of each frame
   const u0 = (col * cellW) / sheetW;
   const u1 = (col * cellW + spec.fw) / sheetW;
-  // Rows stack with frame height only (sheetH ≈ states * fh).
+  // Rows stack with frame height (sheetH ≈ states * fh).
   // FLIP_Y upload: image top → v=1, so invert row offsets.
   const v0 = 1 - (row * spec.fh) / sheetH;
   const v1 = 1 - (row * spec.fh + spec.fh) / sheetH;
@@ -17755,8 +17760,7 @@ function drawSpriteShipPreview(ctx, opt, w, h, t) {
     return;
   }
   const state = tinyShipDesiredState(spec, true);
-  const cols = tinyShipCols(spec, entry.w);
-  const col = tinyShipAnimCol(spec, entry.w, t) % cols;
+  const col = tinyShipAnimCol(spec, entry.w, t, state);
   const row = tinyShipStateRow(spec, state);
   const sx = col * (spec.fw + 1);
   const sy = row * spec.fh;
