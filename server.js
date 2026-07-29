@@ -2462,29 +2462,35 @@ function splitAsteroid(room, parent) {
     spawnPickup(room, parent);
   }
 
-  // Huge: 4–7 medium shards, no further cascade size logic.
+  // Huge: 1 big + 4 small shards.
   if (parent.special === 'huge' || parent.size === 'huge') {
     if (!parent.centerRock) scheduleBigAsteroidSpawn(room);
-    const count = 4 + (Math.random() * 4 | 0); // 4–7
-    for (let i = 0; i < count; i++) {
-      const ang = Math.random() * Math.PI * 2;
-      const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
-      const parentHue = parent.hue != null
-        ? wrapHue01(parent.hue)
-        : asteroidHueFromShape(parent.shapeId != null ? parent.shapeId : parent.aid);
-      const child = makeAsteroid({
-        size: 'medium',
-        allowSpecial: true,
-        x: parent.x + Math.cos(ang) * parent.r * 0.25,
-        y: parent.y + Math.sin(ang) * parent.r * 0.25,
-        vx: parent.vx * 0.4 + Math.cos(ang) * kick,
-        vy: parent.vy * 0.4 + Math.sin(ang) * kick,
-        edgeWrapMax: 1,
-        hue: shardHueFromParent(parentHue)
-      });
-      clampSpeed(child);
-      pushAsteroid(room, child);
-      emitAsteroidFire(room, child);
+    const parentHue = parent.hue != null
+      ? wrapHue01(parent.hue)
+      : asteroidHueFromShape(parent.shapeId != null ? parent.shapeId : parent.aid);
+    const shards = [
+      { size: 'big', count: 1 },
+      { size: 'small', count: 4 }
+    ];
+    for (let s = 0; s < shards.length; s++) {
+      const spec = shards[s];
+      for (let i = 0; i < spec.count; i++) {
+        const ang = Math.random() * Math.PI * 2;
+        const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
+        const child = makeAsteroid({
+          size: spec.size,
+          allowSpecial: true,
+          x: parent.x + Math.cos(ang) * parent.r * 0.25,
+          y: parent.y + Math.sin(ang) * parent.r * 0.25,
+          vx: parent.vx * 0.4 + Math.cos(ang) * kick,
+          vy: parent.vy * 0.4 + Math.sin(ang) * kick,
+          edgeWrapMax: 1,
+          hue: shardHueFromParent(parentHue)
+        });
+        clampSpeed(child);
+        pushAsteroid(room, child);
+        emitAsteroidFire(room, child);
+      }
     }
     return;
   }
