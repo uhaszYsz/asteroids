@@ -6962,27 +6962,131 @@ function resolveMuzzleShipVel(owner) {
   return { vx: 0, vy: 0 };
 }
 
-function emitMuzzleFx(x, y, angle, color, count, vx, vy) {
+/** Blend two RGB triples (t in 0..1). */
+function mixRgb(a, b, t) {
+  return [
+    a[0] + (b[0] - a[0]) * t,
+    a[1] + (b[1] - a[1]) * t,
+    a[2] + (b[2] - a[2]) * t
+  ];
+}
+
+/**
+ * Layered muzzle flash (core → flame → sparks → smoke).
+ * `count` scales intensity; optional opts.cone multiplies cone widths (shotgun).
+ */
+function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
   // Ship vel is px/tick; particle vel is px/s — same base as idle thrust.
   const shipVx = (vx || 0) * TPS;
   const shipVy = (vy || 0) * TPS;
+  const n = Math.max(1, count == null ? 8 : count | 0);
+  const tint = color || COL.bullet;
+  const S = RES_SCALE;
+  const cone = (opts && opts.cone > 0) ? opts.cone : 1;
+  // Classic gunpowder palette, lightly pulled toward weapon tint.
+  const colCore = mixRgb([1.0, 0.98, 0.92], tint, 0.12);
+  const colHot = mixRgb([1.0, 0.88, 0.35], tint, 0.2);
+  const colFlame = mixRgb([1.0, 0.42, 0.08], tint, 0.28);
+  const colEmber = mixRgb([1.0, 0.28, 0.05], tint, 0.35);
+  const colSmoke = mixRgb([0.42, 0.38, 0.34], tint, 0.15);
+
+  // White-hot bloom at the tip — brief, tight, fat.
   emitParticles({
     x, y,
-    count: count == null ? 6 : count,
-    // At RES_SCALE 2: speed 100–350, size 1–2.5 (half of prior 2–5).
-    speed: 112.5 * RES_SCALE,
-    speedSpread: 125 * RES_SCALE,
+    count: Math.max(2, Math.round(n * 0.45)),
+    speed: 70 * S,
+    speedSpread: 40 * S,
     direction: angle,
-    spread: 0.7,
-    size: 0.875 * RES_SCALE,
-    sizeSpread: 0.75 * RES_SCALE,
-    scaleY: 1.8,
-    sizeWiggle: 0.25,
-    sizeWiggleSpeed: 12,
-    lifetime: 0.35,
-    lifetimeSpread: 0,
-    color: color || COL.bullet,
-    drag: 4,
+    spread: 0.18 * cone,
+    size: 3.6 * S,
+    sizeSpread: 1.6 * S,
+    scaleY: 1.35,
+    lifetime: 0.045,
+    lifetimeSpread: 0.02,
+    color: colCore,
+    drag: 9,
+    inheritVx: shipVx,
+    inheritVy: shipVy
+  });
+
+  // Yellow-white hot tongue along the barrel axis.
+  emitParticles({
+    x, y,
+    count: Math.max(3, Math.round(n * 0.7)),
+    speed: 160 * S,
+    speedSpread: 90 * S,
+    direction: angle,
+    spread: 0.32 * cone,
+    size: 2.2 * S,
+    sizeSpread: 1.1 * S,
+    scaleY: 2.6,
+    sizeWiggle: 0.3,
+    sizeWiggleSpeed: 20,
+    lifetime: 0.08,
+    lifetimeSpread: 0.04,
+    color: colHot,
+    drag: 6.5,
+    inheritVx: shipVx,
+    inheritVy: shipVy
+  });
+
+  // Orange flame cone — the readable “blast”.
+  emitParticles({
+    x, y,
+    count: Math.max(5, n),
+    speed: 145 * S,
+    speedSpread: 110 * S,
+    direction: angle,
+    spread: 0.62 * cone,
+    size: 1.8 * S,
+    sizeSpread: 1.2 * S,
+    scaleY: 2.3,
+    sizeWiggle: 0.4,
+    sizeWiggleSpeed: 16,
+    lifetime: 0.12,
+    lifetimeSpread: 0.06,
+    color: colFlame,
+    drag: 5.2,
+    inheritVx: shipVx,
+    inheritVy: shipVy
+  });
+
+  // Fast elongated sparks / embers (weapon-tinted).
+  emitParticles({
+    x, y,
+    count: Math.max(4, Math.round(n * 0.9)),
+    speed: 240 * S,
+    speedSpread: 180 * S,
+    direction: angle,
+    spread: 0.95 * cone,
+    size: 0.85 * S,
+    sizeSpread: 0.55 * S,
+    scaleY: 3.4,
+    sizeWiggle: 0.15,
+    sizeWiggleSpeed: 22,
+    lifetime: 0.18,
+    lifetimeSpread: 0.1,
+    color: mixRgb(colEmber, tint, 0.55),
+    drag: 3.0,
+    inheritVx: shipVx,
+    inheritVy: shipVy
+  });
+
+  // Soft smoke puff — hangs a beat behind the flash.
+  emitParticles({
+    x, y,
+    count: Math.max(2, Math.round(n * 0.4)),
+    speed: 38 * S,
+    speedSpread: 32 * S,
+    direction: angle,
+    spread: 1.15 * cone,
+    size: 2.6 * S,
+    sizeSpread: 1.5 * S,
+    scaleY: 1.15,
+    lifetime: 0.3,
+    lifetimeSpread: 0.14,
+    color: colSmoke,
+    drag: 2.0,
     inheritVx: shipVx,
     inheritVy: shipVy
   });
@@ -6993,13 +7097,12 @@ function emitLocalShootFx() {
   const me = localView();
   const m = shipMuzzle(me.x, me.y, me.angle);
   const ang = me.angle;
-  // Same as muzzle / idle thrust: ship px/tick → particle px/s.
-  const ivx = (me.vx || 0) * TPS;
-  const ivy = (me.vy || 0) * TPS;
   const wpn = selectedWeapon;
 
   if (wpn === 3) {
     // Laser: nose spark; beam is handled separately.
+    const ivx = (me.vx || 0) * TPS;
+    const ivy = (me.vy || 0) * TPS;
     emitParticles({
       x: m.x, y: m.y,
       count: 5,
@@ -7021,135 +7124,34 @@ function emitLocalShootFx() {
   }
 
   if (wpn === 2) {
-    // Rocket: hot core + wider ember spray.
     playSfx(SFX.rocketFire, { vol: 0.9, pool: 6 });
-    emitParticles({
-      x: m.x, y: m.y,
-      count: 10,
-      speed: 110 * RES_SCALE,
-      speedSpread: 70 * RES_SCALE,
-      direction: ang,
-      spread: 0.95,
-      size: 3.4 * RES_SCALE,
-      sizeSpread: 2.2 * RES_SCALE,
-      scaleY: 1.9,
-      sizeWiggle: 0.4,
-      sizeWiggleSpeed: 14,
-      lifetime: 0.22,
-      lifetimeSpread: 0.1,
-      color: ownerPlayerColor(myId),
-      drag: 3.2,
-      inheritVx: ivx,
-      inheritVy: ivy
-    });
-    emitParticles({
-      x: m.x, y: m.y,
-      count: 4,
-      speed: 50 * RES_SCALE,
-      speedSpread: 25 * RES_SCALE,
-      direction: ang,
-      spread: 0.35,
-      size: 5 * RES_SCALE,
-      scaleY: 1.3,
-      lifetime: 0.08,
-      color: [1.0, 0.9, 0.45],
-      drag: 6,
-      inheritVx: ivx,
-      inheritVy: ivy
-    });
+    emitMuzzleFx(m.x, m.y, ang, COL.rocket, 12, me.vx, me.vy);
     return;
   }
 
   if (wpn === 4) {
     // Shotgun: SFX is one blast on Space press only (not here / not per pellet).
-    emitParticles({
-      x: m.x, y: m.y,
-      count: 14,
-      speed: 130 * RES_SCALE,
-      speedSpread: 80 * RES_SCALE,
-      direction: ang,
-      spread: 0.85,
-      size: 2.0 * RES_SCALE,
-      sizeSpread: 1.4 * RES_SCALE,
-      scaleY: 2.0,
-      sizeWiggle: 0.2,
-      sizeWiggleSpeed: 12,
-      lifetime: 0.14,
-      lifetimeSpread: 0.08,
-      color: COL.bullet,
-      drag: 4.5,
-      inheritVx: ivx,
-      inheritVy: ivy
-    });
-    emitParticles({
-      x: m.x, y: m.y,
-      count: 3,
-      speed: 40 * RES_SCALE,
-      speedSpread: 20 * RES_SCALE,
-      direction: ang,
-      spread: 0.5,
-      size: 4 * RES_SCALE,
-      scaleY: 1.4,
-      lifetime: 0.07,
-      color: [1.0, 0.95, 0.75],
-      drag: 7,
-      inheritVx: ivx,
-      inheritVy: ivy
-    });
+    emitMuzzleFx(m.x, m.y, ang, COL.bullet, 14, me.vx, me.vy, { cone: 1.45 });
     return;
   }
 
   if (wpn === 7) {
-    // Plasma: cyan-green bolt flash.
     if (localShoot.sfxSkipNext) {
       localShoot.sfxSkipNext = false;
     } else {
       playSfx(SFX.shoot, { vol: 0.75, pool: 8 });
     }
-    emitParticles({
-      x: m.x, y: m.y,
-      count: 6,
-      speed: 90 * RES_SCALE,
-      speedSpread: 50 * RES_SCALE,
-      direction: ang,
-      spread: 0.4,
-      size: 2.6 * RES_SCALE,
-      sizeSpread: 1.2 * RES_SCALE,
-      scaleY: 1.8,
-      sizeWiggle: 0.25,
-      sizeWiggleSpeed: 14,
-      lifetime: 0.12,
-      color: COL.plasma,
-      drag: 4.2,
-      inheritVx: ivx,
-      inheritVy: ivy
-    });
+    emitMuzzleFx(m.x, m.y, ang, COL.plasma, 9, me.vx, me.vy, { cone: 0.85 });
     return;
   }
 
   if (wpn === 8) {
-    // Void cannon: dark purple bloom.
     if (localShoot.sfxSkipNext) {
       localShoot.sfxSkipNext = false;
     } else {
       playSfx(SFX.shoot, { vol: 0.85, pool: 8 });
     }
-    emitParticles({
-      x: m.x, y: m.y,
-      count: 10,
-      speed: 50 * RES_SCALE,
-      speedSpread: 40 * RES_SCALE,
-      direction: ang,
-      spread: 0.9,
-      size: 3.5 * RES_SCALE,
-      sizeSpread: 2 * RES_SCALE,
-      scaleY: 1,
-      lifetime: 0.28,
-      color: COL.voidcannon,
-      drag: 2.8,
-      inheritVx: ivx,
-      inheritVy: ivy
-    });
+    emitMuzzleFx(m.x, m.y, ang, COL.voidcannon, 11, me.vx, me.vy, { cone: 1.2 });
     return;
   }
 
@@ -7159,40 +7161,7 @@ function emitLocalShootFx() {
   } else {
     playSfx(SFX.shoot, { vol: 0.9, pool: 8 });
   }
-  emitParticles({
-    x: m.x, y: m.y,
-    count: 8,
-    speed: 120 * RES_SCALE,
-    speedSpread: 55 * RES_SCALE,
-    direction: ang,
-    spread: 0.4,
-    size: 2.2 * RES_SCALE,
-    sizeSpread: 1.2 * RES_SCALE,
-    scaleY: 2.4,
-    sizeWiggle: 0.25,
-    sizeWiggleSpeed: 15,
-    lifetime: 0.12,
-    lifetimeSpread: 0.06,
-    color: COL.bullet,
-    drag: 4.8,
-    inheritVx: ivx,
-    inheritVy: ivy
-  });
-  emitParticles({
-    x: m.x, y: m.y,
-    count: 3,
-    speed: 45 * RES_SCALE,
-    speedSpread: 20 * RES_SCALE,
-    direction: ang,
-    spread: 0.3,
-    size: 3.5 * RES_SCALE,
-    scaleY: 1.5,
-    lifetime: 0.07,
-    color: [0.7, 0.9, 1.0],
-    drag: 6,
-    inheritVx: ivx,
-    inheritVy: ivy
-  });
+  emitMuzzleFx(m.x, m.y, ang, ownerShootColor(myId) || COL.bullet, 10, me.vx, me.vy);
 }
 
 function emitHitFx(x, y, color) {
@@ -13053,7 +13022,7 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
   const rnd = makeShotgunRng(x, y);
   if (withMuzzle) {
     const sv = resolveMuzzleShipVel(owner);
-    emitMuzzleFx(x, y, aim, COL.bullet, 2, sv.vx, sv.vy);
+    emitMuzzleFx(x, y, aim, COL.bullet, 10, sv.vx, sv.vy, { cone: 1.35 });
     playShotgunFireSfx(owner, 0.55);
   }
   for (let i = 0; i < count; i++) {
@@ -13086,31 +13055,31 @@ function addBullet(b, withMuzzle, liveFire) {
     const origin = b.localOrigin || { x: b.spawnX, y: b.spawnY };
     const sv = resolveMuzzleShipVel(b.owner);
     if (b.type === 'rocket') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.rocket, 5, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.rocket, 12, sv.vx, sv.vy);
       // Remote only — local rocket fire plays in emitLocalShootFx.
       if (b.owner !== myId) playSfx(SFX.rocketFire, { vol: 0.55, pool: 6 });
     } else if (b.type === 'enemyRocket') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyUfo, 2, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyUfo, 8, sv.vx, sv.vy);
       playSfx(SFX.rocketFire, { vol: 0.35, pool: 6 });
     } else if (b.type === 'shotgun') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 2, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 10, sv.vx, sv.vy, { cone: 1.35 });
       // Remote only — local shotgun SFX is Space press. Debounce whole burst.
       playShotgunFireSfx(b.owner, 0.55);
     } else if (b.type === 'default' || !b.type) {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 3, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 9, sv.vx, sv.vy);
       // Remote only — local default shoot plays in emitLocalShootFx.
       playSfx(SFX.shoot, { vol: 0.5, pool: 8 });
     } else if (b.type === 'plasma') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.plasma, 3, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.plasma, 9, sv.vx, sv.vy, { cone: 0.85 });
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.45, pool: 8 });
     } else if (b.type === 'voidcannon') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.voidcannon, 4, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.voidcannon, 10, sv.vx, sv.vy, { cone: 1.2 });
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.5, pool: 8 });
     } else if (b.type === 'turret') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.powerTurret, 2, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.powerTurret, 7, sv.vx, sv.vy);
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.35, pool: 8 });
     } else if (b.type === 'enemy') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, 2, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, 7, sv.vx, sv.vy);
     }
   }
 }
