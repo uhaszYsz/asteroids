@@ -65,7 +65,7 @@ const WEAPONS = {
     charge: Math.round(0.5 * TPS)
   },
   /** Rapid plasma bolts. */
-  plasma: { ammo: 50, cooldown: 2, reload: Math.round(2 * TPS), speed: 9 * RES_SCALE },
+  plasma: { ammo: 50, cooldown: 2, reload: Math.round(2 * TPS), speed: 9 * RES_SCALE * 1.7 },
   /** Slow void orb — persists through hits, escalating DoT while overlapping. */
   voidcannon: { ammo: 1, cooldown: 1, reload: 60, speed: 1.792 * RES_SCALE },
   /** Lob a little asteroid that bounces off rocks. */
