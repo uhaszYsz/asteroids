@@ -1725,7 +1725,12 @@ const GRID_PIN_SPAWN_R = 20;
 
 /** PvP sport marks only — waves / menu / queue leave the mesh free. */
 function shouldPinSportGridMarks() {
-  return !!(typeof inGame !== 'undefined' && inGame && !practiceMode);
+  // inGame / practiceMode are declared later; typeof still throws in TDZ at boot.
+  try {
+    return !!(inGame && !practiceMode);
+  } catch (_) {
+    return false;
+  }
 }
 
 /** Reset non-border pins, then re-apply sport pins if PvP. */
