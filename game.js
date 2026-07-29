@@ -9850,13 +9850,15 @@ const spriteShipVS = `
   attribute vec2 aPos;
   attribute vec2 aUV;
   uniform vec2 uRes;
+  uniform vec2 uOffset;
   varying vec2 vUV;
   varying vec2 vWorld;
   void main() {
-    vec2 p = floor(aPos + 0.5) / uRes * 2.0 - 1.0;
+    vec2 a = aPos + uOffset;
+    vec2 p = floor(a + 0.5) / uRes * 2.0 - 1.0;
     gl_Position = vec4(p.x, -p.y, 0.0, 1.0);
     vUV = aUV;
-    vWorld = aPos;
+    vWorld = a;
   }
 `;
 const spriteShipFS = `
@@ -9866,14 +9868,23 @@ const spriteShipFS = `
   uniform float uTintPow;
   uniform float uEmit;
   uniform float uAlpha;
+  uniform float uOutline;
   varying vec2 vUV;
   varying vec2 vWorld;
 ` + SCENE_LIGHT_GLSL + `
+  bool spriteSolid(vec4 t) {
+    if (t.a < 0.08) return false;
+    if (max(t.r, max(t.g, t.b)) < 0.03 && t.a < 0.2) return false;
+    return true;
+  }
   void main() {
     vec4 t = texture2D(uTex, vUV);
-    if (t.a < 0.08) discard;
-    // Near-black sheet leftovers.
-    if (max(t.r, max(t.g, t.b)) < 0.03 && t.a < 0.2) discard;
+    if (!spriteSolid(t)) discard;
+    // Silhouette stencil: opaque sprite texels → solid player color (drawn offset).
+    if (uOutline > 0.5) {
+      gl_FragColor = applyNightLit(uTint, uAlpha, vWorld);
+      return;
+    }
     // Same Godot-style emission as asteroid faces: tint × bright albedo × energy.
     vec3 tint = mix(vec3(1.0), uTint, clamp(uTintPow, 0.0, 1.0));
     vec3 albedo = t.rgb * tint;
@@ -9890,11 +9901,13 @@ gl.attachShader(spriteShipProg, shader(gl.VERTEX_SHADER, spriteShipVS));
 gl.attachShader(spriteShipProg, shader(gl.FRAGMENT_SHADER, spriteShipFS));
 linkProgram(spriteShipProg);
 const ssURes = gl.getUniformLocation(spriteShipProg, 'uRes');
+const ssUOffset = gl.getUniformLocation(spriteShipProg, 'uOffset');
 const ssUTex = gl.getUniformLocation(spriteShipProg, 'uTex');
 const ssUTint = gl.getUniformLocation(spriteShipProg, 'uTint');
 const ssUTintPow = gl.getUniformLocation(spriteShipProg, 'uTintPow');
 const ssUEmit = gl.getUniformLocation(spriteShipProg, 'uEmit');
 const ssUAlpha = gl.getUniformLocation(spriteShipProg, 'uAlpha');
+const ssUOutline = gl.getUniformLocation(spriteShipProg, 'uOutline');
 const spriteShipLightU = {
   night: gl.getUniformLocation(spriteShipProg, 'uFlashNight'),
   ships: gl.getUniformLocation(spriteShipProg, 'uShipLight[0]'),
@@ -9909,6 +9922,12 @@ const spriteShipMesh = new Float32Array(12 * 4);
 const SPRITE_ROOF_PITCH = 0.58;
 /** Screen lift so the ridge reads above the wing tips even at bank=0. */
 const SPRITE_ROOF_LIFT = 0.48;
+/** Player-color silhouette outline width (px), same ballpark as asteroid outline. */
+const SPRITE_SHIP_OUTLINE_W = 2;
+const SPRITE_SHIP_OUTLINE_DIRS = [
+  [1, 0], [-1, 0], [0, 1], [0, -1],
+  [1, 1], [-1, 1], [1, -1], [-1, -1]
+];
 /** Attack row hold (ms) after each shot — covers a short anim cycle. */
 const SPRITE_SHIP_ATTACK_MS = 420;
 const spriteShipAttackUntil = new Map(); // ownerId -> performance.now deadline
@@ -9991,6 +10010,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
 
   const tint = color || COL.self || [0.35, 0.85, 1];
   const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
+  const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
+  const outlineW = SPRITE_SHIP_OUTLINE_W * Math.max(1, RES_SCALE);
 
   gl.useProgram(spriteShipProg);
   gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
@@ -10004,7 +10025,6 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
   // Keep sprite palette; emission still uses player tint on bright texels (like rocks).
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, emitPow);
-  gl.uniform1f(ssUAlpha, 1);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -10015,9 +10035,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
 
   const windFwd = [0, 1, 2, 0, 2, 3];
   const windBack = [0, 2, 1, 0, 3, 2];
-  for (let p = 0; p < panels.length; p++) {
-    const { xy } = projectMesh3D(panels[p].verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
-    const uvs = panels[p].uvs;
+  function fillPanelMesh(panel) {
+    const { xy } = projectMesh3D(panel.verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
+    const uvs = panel.uvs;
     let o = 0;
     for (let pass = 0; pass < 2; pass++) {
       const idx = pass === 0 ? windFwd : windBack;
@@ -10030,6 +10050,28 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
       }
     }
     gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
+  }
+
+  // Player-color silhouette outline around sprite pixels (not roof plane edges).
+  if (outlineA > 0.001) {
+    gl.uniform1f(ssUOutline, 1);
+    gl.uniform1f(ssUAlpha, outlineA);
+    for (let p = 0; p < panels.length; p++) {
+      fillPanelMesh(panels[p]);
+      for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
+        const dir = SPRITE_SHIP_OUTLINE_DIRS[d];
+        gl.uniform2f(ssUOffset, dir[0] * outlineW, dir[1] * outlineW);
+        gl.drawArrays(gl.TRIANGLES, 0, 12);
+      }
+    }
+  }
+
+  // Fill sprite on top.
+  gl.uniform1f(ssUOutline, 0);
+  gl.uniform1f(ssUAlpha, 1);
+  gl.uniform2f(ssUOffset, 0, 0);
+  for (let p = 0; p < panels.length; p++) {
+    fillPanelMesh(panels[p]);
     gl.drawArrays(gl.TRIANGLES, 0, 12);
   }
 
