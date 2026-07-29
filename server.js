@@ -339,7 +339,7 @@ const ENEMY_BULLET_SPEED = WEAPONS.default.speed * 0.7;
 /** Common enemy spread shots: half that speed, 45 damage. */
 const ENEMY_COMMON_BULLET_SPEED = ENEMY_BULLET_SPEED * 0.5;
 const ENEMY_COMMON_BULLET_DMG = 45;
-const ENEMY_COMMON_RELOAD = Math.round(5 * TPS);
+const ENEMY_COMMON_RELOAD = Math.round(2.5 * TPS);
 /** Pre-shot telegraph length for commons (client charge spheres). */
 const ENEMY_COMMON_CHARGE = TPS;
 const ENEMY_UFO_RELOAD = Math.round(3.5 * TPS);
