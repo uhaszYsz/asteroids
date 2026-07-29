@@ -426,6 +426,8 @@ const SFX = {
   hitAsteroid: 'sounds/hitAsteroid.ogg',
   hitAsteroidBullet: 'sounds/hitAsteroid1.ogg',
   explosion: 'sounds/explosion.ogg',
+  /** Enemy ship kill — same VFX as asteroid burst, dedicated one-shot. */
+  enemyExplosion: 'sounds/explosion.wav',
   ambientExplosion: [
     'sounds/ambientExplosion.wav',
     'sounds/ambientExplosion1.wav',
@@ -7932,10 +7934,12 @@ function emitScorePopFx(x, y) {
   });
 }
 
-function emitAsteroidBurst(x, y, r, size) {
-  const n = Math.max(15, Math.min(30, 8 + ((r / RES_SCALE) | 0)));
-  playSfxOverlap(SFX.explosion, { vol: 0.8, pool: 4 });
-  playAmbientExplosionEcho();
+function emitAsteroidBurst(x, y, r, size, opts) {
+  opts = opts || {};
+  const src = opts.sfx != null ? opts.sfx : SFX.explosion;
+  const vol = opts.vol != null ? opts.vol : 0.8;
+  playSfxOverlap(src, { vol, pool: 4 });
+  if (opts.ambient !== false) playAmbientExplosionEcho();
   // 30% of ship–asteroid collision shake (emitPlayerAsteroidHit).
   triggerScreenShake(400, 11 * RES_SCALE * 0.3);
   let boomR = Math.max(28 * RES_SCALE, (r || 10 * RES_SCALE) * 2.8);
@@ -7948,6 +7952,7 @@ function emitAsteroidBurst(x, y, r, size) {
   const oldHalf = 20 * RES_SCALE;
   const minSpd = baseSpd - oldHalf - 25 * RES_SCALE;
   const maxSpd = baseSpd + oldHalf + 50 * RES_SCALE;
+  const n = Math.max(15, Math.min(30, 8 + ((r / RES_SCALE) | 0)));
   emitParticles({
     x, y,
     count: n,
@@ -13832,27 +13837,16 @@ function removeEnemy(id, x, y, silent) {
   const e = enemies.get(id);
   enemies.delete(id);
   if (!silent && e) {
-    const col = e.kind === 'ufo' ? COL.enemyUfo
-      : e.kind === 'carrier' ? COL.enemyCarrier
-      : COL.enemy;
     const pose = enemyAt(e);
     const px = x != null ? x : pose.x;
     const py = y != null ? y : pose.y;
-    pushFxRing(px, py, col, { r0: 4, r1: 28, life: 320 });
-    emitParticles({
-      x: px, y: py,
-      count: 14,
-      speed: 90 * RES_SCALE,
-      speedSpread: 50 * RES_SCALE,
-      direction: 0,
-      spread: Math.PI * 2,
-      size: 2.5 * RES_SCALE,
-      sizeSpread: 1.2 * RES_SCALE,
-      lifetime: 0.28,
-      color: col,
-      drag: 2.5
+    const r = enemyHitR(e);
+    const size = e.kind === 'carrier' ? 'medium' : 'small';
+    emitAsteroidBurst(px, py, r, size, {
+      sfx: SFX.enemyExplosion,
+      vol: 0.8,
+      ambient: false
     });
-    playSfx(SFX.explosion, { vol: 0.55, pool: 4 });
   }
 }
 
