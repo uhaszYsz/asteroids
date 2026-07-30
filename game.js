@@ -14577,28 +14577,65 @@ function enemyAt(e) {
   };
 }
 
-/** Common enemy = same Adder hull as UFO (slightly smaller). */
+/** Clone a selectable hull with an extra uniform scale (keeps UVs/texture). */
+function cloneShipMeshScaled(src, s) {
+  const srcMesh = src || SHIP_MESHES[0];
+  const sc = s != null ? s : 1;
+  return {
+    id: srcMesh.id,
+    name: srcMesh.name,
+    source: srcMesh.source,
+    kind: srcMesh.kind || null,
+    texture: srcMesh.texture || null,
+    nose: srcMesh.nose | 0,
+    verts: (srcMesh.verts || []).map((v) => [v[0] * sc, v[1] * sc, v[2] * sc]),
+    uvs: srcMesh.uvs ? srcMesh.uvs.map((u) => [u[0], u[1]]) : null,
+    faces: srcMesh.faces || [],
+    edges: srcMesh.edges || []
+  };
+}
+
+/** Two forward hardpoints (max ±Y among forward verts) for charge orbs / muzzles. */
+function pickForwardGunLocals(mesh) {
+  const verts = mesh.verts || [];
+  if (verts.length < 2) return [[1, 0.35, 0], [1, -0.35, 0]];
+  let minX = Infinity;
+  let maxX = -Infinity;
+  for (let i = 0; i < verts.length; i++) {
+    const x = verts[i][0];
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+  }
+  const xCut = maxX - (maxX - minX) * 0.28;
+  let left = null;
+  let right = null;
+  for (let i = 0; i < verts.length; i++) {
+    const v = verts[i];
+    if (v[0] < xCut) continue;
+    if (!left || v[1] > left[1]) left = v;
+    if (!right || v[1] < right[1]) right = v;
+  }
+  if (!left || !right) {
+    const nose = verts[mesh.nose | 0] || verts[0];
+    return [[nose[0], 0.35, nose[2] || 0], [nose[0], -0.35, nose[2] || 0]];
+  }
+  return [left.slice(), right.slice()];
+}
+
+/** Common enemy = Corvette 05 (textured), slightly smaller than player pack scale. */
 const ENEMY_COMMON_SCALE = 0.85;
 const ENEMY_COMMON_MESH = (() => {
-  const src = getShipMeshById('adder');
-  const s = ENEMY_COMMON_SCALE;
-  return {
-    verts: (src.verts || []).map((v) => [v[0] * s, v[1] * s, v[2] * s]),
-    faces: src.faces || [],
-    edges: src.edges || []
-  };
+  const src = getShipMeshById('fbx_corvette_05');
+  const fallback = (!src || src.id !== 'fbx_corvette_05') ? getShipMeshById('adder') : src;
+  return cloneShipMeshScaled(fallback, ENEMY_COMMON_SCALE);
 })();
 
-/** UFO = Elite Adder hull (a bit larger than commons). */
+/** UFO = Frigate 05 (textured), a bit larger than commons. */
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_MESH = (() => {
-  const src = getShipMeshById('adder');
-  const s = ENEMY_UFO_SCALE;
-  return {
-    verts: (src.verts || []).map((v) => [v[0] * s, v[1] * s, v[2] * s]),
-    faces: src.faces || [],
-    edges: src.edges || []
-  };
+  const src = getShipMeshById('fbx_frigate_05');
+  const fallback = (!src || src.id !== 'fbx_frigate_05') ? getShipMeshById('adder') : src;
+  return cloneShipMeshScaled(fallback, ENEMY_UFO_SCALE);
 })();
 
 /** Silhouette edges only (front-facing boundary) — not full wireframe.
@@ -14799,11 +14836,8 @@ function buildChargeSphereMesh(lonSeg, latSeg) {
 }
 
 const ENEMY_CHARGE_SPHERE = buildChargeSphereMesh(8, 5);
-/** Krait forward wing-tip cannons (mesh verts 5/6, already enemy-scaled). */
-const ENEMY_COMMON_GUNS = [
-  ENEMY_COMMON_MESH.verts[0].slice(),
-  ENEMY_COMMON_MESH.verts[1].slice()
-];
+/** Forward hardpoints on the common-enemy hull (Corvette 05). */
+const ENEMY_COMMON_GUNS = pickForwardGunLocals(ENEMY_COMMON_MESH);
 const COL_CHARGE_RED = [1.0, 0.12, 0.1];
 const enemyCharges = new Map(); // id -> { start, until, ms }
 /** Last bank used while drawing commons — charge orbs match hull roll. */
