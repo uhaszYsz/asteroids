@@ -9683,7 +9683,8 @@ function isTexturedShipDef(def) {
   return !!(def && (def.source === 'ships' || def.kind === 'textured' || def.texture));
 }
 function orientTexturedShipDef(def) {
-  return rotateShipMeshYaw180(def);
+  // Prior pose was +90° Z; user asked +180° from that → +270° from raw mesh.
+  return rotateShipMeshYaw180(rotateShipMeshYaw90(def));
 }
 function scaleShipMeshDef(def) {
   const s = SHIP_MESH_SCALE * (isTexturedShipDef(def) ? 2 : 1);
@@ -9788,9 +9789,7 @@ function appendShipMeshDefs(defs) {
   for (const d of defs) {
     if (!d || !d.id) continue;
     if (SHIP_OPTIONS.some((m) => m.id === d.id)) continue;
-    const oriented = (d.source === 'ships' || d.kind === 'textured' || d.texture)
-      ? rotateShipMeshYaw90(d)
-      : d;
+    const oriented = isTexturedShipDef(d) ? orientTexturedShipDef(d) : d;
     const scaled = scaleShipMeshDef(oriented);
     SHIP_MESHES.push(scaled);
     SHIP_OPTIONS.push(scaled);
