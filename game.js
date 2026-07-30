@@ -10269,7 +10269,8 @@ function drawShip3D(x, y, angle, av, color, id, dt, moving) {
     drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, {
       noOutline: true,
       noTint: true,
-      strongEmit: true
+      noEmit: mesh.source === 'voxels',
+      strongEmit: mesh.source !== 'voxels'
     });
     return;
   }
@@ -14649,12 +14650,16 @@ const ENEMY_COMMON_MESH = (() => {
   return cloneShipMeshScaled(fallback, ENEMY_COMMON_SCALE);
 })();
 
-/** UFO = Warship voxel (textured), a bit larger than commons. */
+/** UFO = Warship voxel (textured), unrotated vs player picker pose. */
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_MESH = (() => {
-  const src = getShipMeshById('voxel_warship');
-  const fallback = (!src || src.id !== 'voxel_warship') ? getShipMeshById('adder') : src;
-  return cloneShipMeshScaled(fallback, ENEMY_UFO_SCALE);
+  const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_warship');
+  if (raw) {
+    // Skip orientTexturedShipDef yaw — UFO keeps generator orientation.
+    return cloneShipMeshScaled(scaleShipMeshDef(raw), ENEMY_UFO_SCALE);
+  }
+  const src = getShipMeshById('adder');
+  return cloneShipMeshScaled(src, ENEMY_UFO_SCALE);
 })();
 
 /** Silhouette edges only (front-facing boundary) — not full wireframe.
@@ -14702,7 +14707,7 @@ function drawMeshSilhouetteEdges(xy, mesh, color) {
 
 /**
  * Textured hull (ship.png or mesh.texture).
- * opts: silhouetteOnly, noOutline, noTint, strongEmit
+ * opts: silhouetteOnly, noOutline, noTint, strongEmit, noEmit
  */
 function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank || 0);
@@ -14720,7 +14725,9 @@ function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
     order.sort((a, b) => a.z - b.z);
     const uvScale = shipMeshUvScale(mv);
     const baseEmit = Math.max(0, Number(cv('cl_ship_emit')) || 0);
-    const emitPow = o.strongEmit ? Math.max(1.55, baseEmit * 3) : baseEmit;
+    const emitPow = (o.noEmit || mesh.source === 'voxels')
+      ? 0
+      : (o.strongEmit ? Math.max(1.55, baseEmit * 3) : baseEmit);
     // noTint: keep albedo as texture; emission uses white so bright texels glow without recoloring.
     const tintPow = o.noTint ? 0 : 0.7;
     const tint = o.noTint ? [1, 1, 1] : (color || COL.enemy);
@@ -14788,7 +14795,8 @@ function drawEnemyCommon(x, y, angle, color, id, dt) {
   drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank, id, {
     noOutline: true,
     noTint: true,
-    strongEmit: true
+    noEmit: true,
+    strongEmit: false
   });
   return bank;
 }
@@ -15003,7 +15011,8 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
   drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
     noOutline: true,
     noTint: true,
-    strongEmit: true
+    noEmit: true,
+    strongEmit: false
   });
 }
 
@@ -18059,6 +18068,7 @@ function shipMeshSectionTitle(src) {
 /** Live 2D canvas previews for ship picker buttons. */
 const shipPreviewSlots = [];
 const SHIP_PREV_SIZE = 88;
+let shipPreviewLastMs = 0;
 
 function drawSpriteShipPreview(ctx, opt, w, h, t) {
   if (!ctx || !opt || !opt.sprite) return;
@@ -18264,9 +18274,13 @@ function buildShipMeshUi() {
 }
 
 function updateShipMeshPreviews(tSec) {
-  if (!shipPreviewSlots.length) return;
-  if (!gridPanelEl || !gridPanelEl.classList.contains('open')) return;
-  const t = tSec != null ? tSec : performance.now() * 0.001;
+  if (!shipPreviewSlots.length || !gridPanelOpen) return;
+  // Dense voxel previews were redrawing every frame for EVERY tab → ~10 FPS.
+  if (gpTab !== 'ship') return;
+  const now = performance.now();
+  if (now - shipPreviewLastMs < 250) return; // ~4 Hz max while Ship tab is open
+  shipPreviewLastMs = now;
+  const t = tSec != null ? tSec : now * 0.001;
   for (let i = 0; i < shipPreviewSlots.length; i++) {
     const slot = shipPreviewSlots[i];
     if (!slot || !slot.ctx) continue;
@@ -18403,6 +18417,10 @@ function setGridPanelTab(tab) {
   gridPanelEl.querySelectorAll('[data-gp-pane]').forEach((pane) => {
     pane.classList.toggle('show', pane.getAttribute('data-gp-pane') === gpTab);
   });
+  if (gpTab === 'ship') {
+    shipPreviewLastMs = 0;
+    updateShipMeshPreviews(performance.now() * 0.001);
+  }
 }
 
 function openGridPanel() {
