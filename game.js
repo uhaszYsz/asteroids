@@ -15155,8 +15155,8 @@ const ENEMY_UFO_TURRET_COL = 2;
 const ENEMY_UFO_TURRET_ROW = 3;
 const ENEMY_UFO_TURRET_SCALE = 0.42;
 const ENEMY_UFO_TURRET_Z = -10;
-/** Side offset as a fraction of UFO plane half-width (0.5 = mid wing). */
-const ENEMY_UFO_TURRET_SIDE_FRAC = 0.5;
+/** Side offset as a fraction of UFO plane half-width (0.75 = 3/4 toward wing tip). */
+const ENEMY_UFO_TURRET_SIDE_FRAC = 0.75;
 
 function ufoTurretSideY(ufoOpt, side) {
   const ufoSpec = ufoOpt && ufoOpt.sprite;
@@ -15577,11 +15577,12 @@ function drawEnemyCommonCharges() {
     const spin = now * 0.007 + id * 1.7;
 
     if (kind === 'ufo') {
-      const side = (ch.side | 0) || 1;
       const ufoOpt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
+      const target = ufoAimTargetPose();
+      // Live player-side flank (not the frozen ech side — that stuck on one turret).
+      const side = ufoActiveTurretSide(p.x, p.y, p.angle, target);
       const sideY = ufoTurretSideY(ufoOpt, side);
       const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, p.x, p.y, p.angle, bank);
-      const target = ufoAimTargetPose();
       const aim = ufoTurretAimAngle(mount.x, mount.y, p.angle, side, target);
       const muzzle = ENEMY_UFO_TURRET_SCALE * 64 * 0.5;
       let w = {
