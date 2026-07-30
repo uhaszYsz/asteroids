@@ -16686,23 +16686,26 @@ function ellipseVerts(x, y, rx, ry, ang, segments) {
 function drawCollisionRing(x, y, angle, color) {
   const c = Math.cos(angle);
   const s = Math.sin(angle);
-  drawLines(
-    circleVerts(
-      x + c * PLAYER_HIT_OFFSET_FRONT,
-      y + s * PLAYER_HIT_OFFSET_FRONT,
-      PLAYER_HIT_R_FRONT,
-      16
-    ),
-    color, gl.LINE_LOOP, 0.55
+  // Typical hitbox stroke was ~1× render scale; draw 2× thicker via quads.
+  const outlineW = 2 * Math.max(1, getRenderScale());
+  function oneCircle(cx, cy, r) {
+    const v = circleVerts(cx, cy, r, 20);
+    drawFilledPoly(v, color, 0.5);
+    const n = (v.length / 2) | 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      drawThickSegment(v[i * 2], v[i * 2 + 1], v[j * 2], v[j * 2 + 1], outlineW, color, 0.85);
+    }
+  }
+  oneCircle(
+    x + c * PLAYER_HIT_OFFSET_FRONT,
+    y + s * PLAYER_HIT_OFFSET_FRONT,
+    PLAYER_HIT_R_FRONT
   );
-  drawLines(
-    circleVerts(
-      x - c * PLAYER_HIT_OFFSET_BACK,
-      y - s * PLAYER_HIT_OFFSET_BACK,
-      PLAYER_HIT_R_BACK,
-      16
-    ),
-    color, gl.LINE_LOOP, 0.55
+  oneCircle(
+    x - c * PLAYER_HIT_OFFSET_BACK,
+    y - s * PLAYER_HIT_OFFSET_BACK,
+    PLAYER_HIT_R_BACK
   );
 }
 
