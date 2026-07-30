@@ -14642,11 +14642,11 @@ function pickForwardGunLocals(mesh) {
   return [left.slice(), right.slice()];
 }
 
-/** Common enemy = MicroRecon voxel (textured), half player pack scale. */
-const ENEMY_COMMON_SCALE = 0.9;
+/** Common enemy = RedFighter voxel (textured), 35% smaller than previous 0.9 player scale. */
+const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_MESH = (() => {
-  const src = getShipMeshById('voxel_microrecon');
-  const fallback = (!src || src.id !== 'voxel_microrecon') ? getShipMeshById('adder') : src;
+  const src = getShipMeshById('voxel_redfighter');
+  const fallback = (!src || src.id !== 'voxel_redfighter') ? getShipMeshById('adder') : src;
   return cloneShipMeshScaled(fallback, ENEMY_COMMON_SCALE);
 })();
 
