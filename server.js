@@ -346,6 +346,8 @@ const BIG_SPAWN_DELAY_TICKS = Math.round(7 * TPS);
 const SOLO_WAVE_CLEAR_TICKS = Math.round(1.4 * TPS);
 /** Solo enemy line-bullet speed = player default × 0.7 */
 const ENEMY_BULLET_SPEED = WEAPONS.default.speed * 0.7;
+/** UFO micro-rocket: 15% slower than common enemy bullet speed. */
+const ENEMY_UFO_ROCKET_SPEED = ENEMY_BULLET_SPEED * 0.85;
 /** Common enemy spread shots: half that speed, 45 damage. */
 const ENEMY_COMMON_BULLET_SPEED = ENEMY_BULLET_SPEED * 0.5;
 const ENEMY_COMMON_BULLET_DMG = 45;
@@ -1970,7 +1972,7 @@ function fireEnemyLineBullet(room, e, ang, spd, dmg) {
 
 /** UFO lead-aim rocket (tiny, skips asteroids). */
 function fireEnemyRocket(room, e, ang, spd, dmg) {
-  const speed = spd != null ? spd : ENEMY_BULLET_SPEED;
+  const speed = spd != null ? spd : ENEMY_UFO_ROCKET_SPEED;
   const damage = dmg != null ? dmg : BULLET_TYPES.enemyRocket.dmg;
   const x = e.x + Math.cos(ang) * (e.r + 4);
   const y = e.y + Math.sin(ang) * (e.r + 4);
@@ -2008,7 +2010,7 @@ function enemyTryFire(room, e) {
       e.x, e.y,
       target.x, target.y,
       target.vx || 0, target.vy || 0,
-      ENEMY_BULLET_SPEED
+      ENEMY_UFO_ROCKET_SPEED
     );
     fireEnemyRocket(room, e, ang);
     e.angle = ang;

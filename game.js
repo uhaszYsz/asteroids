@@ -15287,7 +15287,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
-      bank, ENEMY_UFO_SPRITE_SCALE, COL.enemyOutline
+      bank, ENEMY_UFO_SPRITE_SCALE, COL.self
     );
   } else {
     drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
