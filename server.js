@@ -147,6 +147,9 @@ function effectiveWeapon(p, name) {
     if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
   } else if (n === 'laser') {
     if (lvl >= 3) w.ammo = Math.round(base.ammo * 1.25);
+  } else if (n === 'railgun') {
+    // L2 = edge bounce (handled in fireRailgun). L3 = 30% faster shot cooldown.
+    if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
   }
   return w;
 }
@@ -4189,6 +4192,7 @@ function handlePlayerDeath(room, victim) {
   room.deathY = victim.y;
   room.deathShakeLeft = DEATH_SHAKE_TICKS;
   room.deathBoomLeft = DEATH_BOOM_TICKS;
+  if (room.pendingRailBounces) room.pendingRailBounces.length = 0;
   room.deathBoomed = false;
 
   roomBroadcast(room, {
@@ -5327,23 +5331,43 @@ function playerThrustRayAligned(p) {
   return Math.abs(diff) <= THRUST_RAY_ALIGN_RAD;
 }
 
-/** Charged rail shot — pierces all asteroids on the line; soft targets
- *  behind at least one asteroid take RAIL_THROUGH_ASTEROID_MULT damage. */
-function fireRailgun(room, p) {
-  const w = effectiveWeapon(p, 'railgun');
+/** First world AABB edge hit for a ray. Normal points into the playfield. */
+function raycastWorldEdge(ox, oy, dx, dy, maxDist) {
+  let best = null;
+  const tryEdge = (t, nx, ny) => {
+    if (!(t > 1e-6) || t > maxDist) return;
+    const x = ox + dx * t;
+    const y = oy + dy * t;
+    if (x < -0.75 || x > W + 0.75 || y < -0.75 || y > H + 0.75) return;
+    if (!best || t < best.t) best = { t, x, y, nx, ny };
+  };
+  if (dx < -1e-9) tryEdge((0 - ox) / dx, 1, 0);
+  if (dx > 1e-9) tryEdge((W - ox) / dx, -1, 0);
+  if (dy < -1e-9) tryEdge((0 - oy) / dy, 0, 1);
+  if (dy > 1e-9) tryEdge((H - oy) / dy, 0, -1);
+  return best;
+}
+
+function reflectRailDir(dx, dy, nx, ny) {
+  const dot = dx * nx + dy * ny;
+  return { dx: dx - 2 * dot * nx, dy: dy - 2 * dot * ny };
+}
+
+/**
+ * One rail pierce segment: gather hits, broadcast `rf`, apply damage.
+ * `opts.toroidal` — wrap images (L1). Bounce segments use Euclidean only.
+ */
+function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
+  opts = opts || {};
   const dmg = effectiveBulletDmg(p, 'railgun');
-  const pose = predictedFirePose(room, p);
-  const ox = pose.x + Math.cos(pose.angle) * MUZZLE;
-  const oy = pose.y + Math.sin(pose.angle) * MUZZLE;
-  const dx = Math.cos(pose.angle);
-  const dy = Math.sin(pose.angle);
-  const range = w.range || Math.hypot(W, H);
   const width = 4 * RES_SCALE;
   const now = Date.now();
+  const toroidal = opts.toroidal !== false;
+  const maxDist = Math.max(0, range);
 
   const asteroidHits = [];
   for (const a of room.asteroids) {
-    const hit = raycastAsteroid(ox, oy, dx, dy, a, range);
+    const hit = raycastAsteroid(ox, oy, dx, dy, a, maxDist);
     if (!hit) continue;
     asteroidHits.push({ t: hit.t, x: hit.x, y: hit.y, kind: 'asteroid', target: a });
   }
@@ -5354,21 +5378,45 @@ function fireRailgun(room, p) {
     if (blocksFriendlyFire(room, p.id)) continue;
     const target = lagCompPose(room, p.id, other);
     const [front, back] = playerHitCircles(target);
-    const hitF = raycastCircleToroidal(ox, oy, dx, dy, front.x, front.y, PLAYER_HIT_R_FRONT, range);
-    const hitB = raycastCircleToroidal(ox, oy, dx, dy, back.x, back.y, PLAYER_HIT_R_BACK, range);
     let best = null;
-    if (hitF) best = hitF;
-    if (hitB && (!best || hitB.t < best.t)) best = hitB;
+    if (toroidal) {
+      const hitF = raycastCircleToroidal(ox, oy, dx, dy, front.x, front.y, PLAYER_HIT_R_FRONT, maxDist);
+      const hitB = raycastCircleToroidal(ox, oy, dx, dy, back.x, back.y, PLAYER_HIT_R_BACK, maxDist);
+      if (hitF) best = hitF;
+      if (hitB && (!best || hitB.t < best.t)) best = hitB;
+    } else {
+      const tF = raycastCircle(ox, oy, dx, dy, front.x, front.y, PLAYER_HIT_R_FRONT);
+      const tB = raycastCircle(ox, oy, dx, dy, back.x, back.y, PLAYER_HIT_R_BACK);
+      if (tF != null && tF <= maxDist) best = { t: tF, x: ox + dx * tF, y: oy + dy * tF };
+      if (tB != null && tB <= maxDist && (!best || tB < best.t)) {
+        best = { t: tB, x: ox + dx * tB, y: oy + dy * tB };
+      }
+    }
     if (best) softHits.push({ t: best.t, x: best.x, y: best.y, kind: 'player', target: other });
   }
   for (const e of room.enemies || []) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
     let hit = null;
     if (enemyUsesRectHit(e)) {
-      hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, range);
+      if (toroidal) {
+        hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist);
+      } else {
+        const t = raycastOrientedRect(
+          ox, oy, dx, dy,
+          e.x, e.y, e.angle || 0,
+          ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5,
+          maxDist
+        );
+        if (t != null) hit = { t, x: ox + dx * t, y: oy + dy * t };
+      }
     } else {
       const er = e.r || ENEMY_R.common || 10;
-      hit = raycastCircleToroidal(ox, oy, dx, dy, e.x, e.y, er, range);
+      if (toroidal) {
+        hit = raycastCircleToroidal(ox, oy, dx, dy, e.x, e.y, er, maxDist);
+      } else {
+        const t = raycastCircle(ox, oy, dx, dy, e.x, e.y, er);
+        if (t != null && t <= maxDist) hit = { t, x: ox + dx * t, y: oy + dy * t };
+      }
     }
     if (hit) softHits.push({ t: hit.t, x: hit.x, y: hit.y, kind: 'enemy', target: e });
   }
@@ -5378,13 +5426,18 @@ function fireRailgun(room, p) {
     if ((b.owner | 0) === (p.id | 0)) continue;
     if (blocksFriendlyFire(room, p.id)) continue;
     const rr = rocketHitR(b);
-    const hit = raycastCircleToroidal(ox, oy, dx, dy, b.x, b.y, rr, range);
+    let hit = null;
+    if (toroidal) {
+      hit = raycastCircleToroidal(ox, oy, dx, dy, b.x, b.y, rr, maxDist);
+    } else {
+      const t = raycastCircle(ox, oy, dx, dy, b.x, b.y, rr);
+      if (t != null && t <= maxDist) hit = { t, x: ox + dx * t, y: oy + dy * t };
+    }
     if (hit) rocketHits.push({ t: hit.t, x: hit.x, y: hit.y, kind: 'rocket', target: b });
   }
 
-  // Full-length beam (pierces asteroids).
-  const x1 = ox + dx * range;
-  const y1 = oy + dy * range;
+  const x1 = ox + dx * maxDist;
+  const y1 = oy + dy * maxDist;
   let hitKind = 0;
   if (softHits.some((h) => h.kind === 'player')) hitKind = 1;
   else if (softHits.some((h) => h.kind === 'enemy')) hitKind = 3;
@@ -5407,20 +5460,19 @@ function fireRailgun(room, p) {
     l: [room.nextBulletId++, ox, oy, x1, y1, width, now, p.id],
     hit: hitKind
   };
+  if (opts.bounce) msg.bounce = 1;
   if (impact) {
     msg.ix = impact.x;
     msg.iy = impact.y;
   }
   roomBroadcast(room, msg);
 
-  // All asteroids on the line take full damage.
   for (let i = 0; i < asteroidHits.length; i++) {
     const a = asteroidHits[i].target;
     if (room.asteroids.indexOf(a) < 0) continue;
     damageAsteroid(room, a, dmg, p.id);
   }
 
-  // Soft targets: full if clear line, else attenuated through rocks.
   for (let i = 0; i < softHits.length; i++) {
     const h = softHits[i];
     const throughRock = asteroidHits.some((ah) => ah.t < h.t - 1e-6);
@@ -5437,6 +5489,63 @@ function fireRailgun(room, p) {
 
   for (let i = 0; i < rocketHits.length; i++) {
     deflectRocketFromShooter(room, rocketHits[i].target, p.id);
+  }
+}
+
+/** Charged rail shot — pierces all asteroids on the line; soft targets
+ *  behind at least one asteroid take RAIL_THROUGH_ASTEROID_MULT damage.
+ *  L2+: first segment to world edge, then one bounce hitscan 2 ticks later. */
+function fireRailgun(room, p) {
+  const w = effectiveWeapon(p, 'railgun');
+  const pose = predictedFirePose(room, p);
+  const ox = pose.x + Math.cos(pose.angle) * MUZZLE;
+  const oy = pose.y + Math.sin(pose.angle) * MUZZLE;
+  const dx = Math.cos(pose.angle);
+  const dy = Math.sin(pose.angle);
+  const fullRange = w.range || Math.hypot(W, H);
+  const bounce = getWeaponLevel(p, 'railgun') >= 2;
+
+  if (!bounce) {
+    applyRailgunSegment(room, p, ox, oy, dx, dy, fullRange, { toroidal: true });
+    return;
+  }
+
+  const edge = raycastWorldEdge(ox, oy, dx, dy, fullRange + 2);
+  const segLen = edge ? edge.t : fullRange;
+  applyRailgunSegment(room, p, ox, oy, dx, dy, segLen, { toroidal: false });
+
+  if (!edge) return;
+  const reflected = reflectRailDir(dx, dy, edge.nx, edge.ny);
+  const eps = 0.75;
+  const bx = edge.x + edge.nx * eps;
+  const by = edge.y + edge.ny * eps;
+  const next = raycastWorldEdge(bx, by, reflected.dx, reflected.dy, fullRange + 2);
+  const bounceRange = next ? next.t : fullRange;
+  if (!room.pendingRailBounces) room.pendingRailBounces = [];
+  room.pendingRailBounces.push({
+    tick: (room.tick | 0) + 2,
+    ownerId: p.id | 0,
+    ox: bx,
+    oy: by,
+    dx: reflected.dx,
+    dy: reflected.dy,
+    range: bounceRange
+  });
+}
+
+function processPendingRailBounces(room) {
+  const q = room.pendingRailBounces;
+  if (!q || !q.length) return;
+  for (let i = q.length - 1; i >= 0; i--) {
+    const job = q[i];
+    if ((room.tick | 0) < (job.tick | 0)) continue;
+    q.splice(i, 1);
+    const p = room.players.get(job.ownerId);
+    if (!p || (p.hp | 0) <= 0) continue;
+    applyRailgunSegment(room, p, job.ox, job.oy, job.dx, job.dy, job.range, {
+      toroidal: false,
+      bounce: true
+    });
   }
 }
 
@@ -5540,7 +5649,8 @@ function updateShooting(room, p) {
         t: 'rc',
         id: p.id,
         ms: Math.round(chargeMax * (1000 / TPS)),
-        st: Date.now()
+        st: Date.now(),
+        bounce: getWeaponLevel(p, 'railgun') >= 2 ? 1 : 0
       });
     }
     p.railChargeLeft--;
@@ -6408,6 +6518,8 @@ function createRoom(opts) {
     deathX: 0,
     deathY: 0,
     pendingBigSpawns: [],
+    /** Deferred L2+ rail bounce segments: { tick, ownerId, ox, oy, dx, dy, range }. */
+    pendingRailBounces: [],
     wave: 0,
     waveClearLeft: 0,
     enemies: [],
@@ -6901,6 +7013,7 @@ function stepRoom(room) {
     clearGodmodeIfLeftSpawn(room, p);
     p.inp.sp = 0;
   }
+  if (room.matchLive) processPendingRailBounces(room);
   // Move asteroids first, rebuild spatial hash once, then bullets + collisions
   // (avoids a second rebuild inside updateBullets).
   for (let i = room.asteroids.length - 1; i >= 0; i--) {

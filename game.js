@@ -10806,6 +10806,8 @@ function effectiveLocalWeapon(name) {
     if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
   } else if (n === 'laser') {
     if (lvl >= 3) w.ammo = Math.round(base.ammo * 1.25);
+  } else if (n === 'railgun') {
+    if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
   }
   return w;
 }
@@ -10986,7 +10988,7 @@ function armLocalLaser(extraMs) {
  * Prefer server wall-clock `serverSt` (NTP via clockOffset) so charge 0→1 and fire
  * land on the same instant for everyone, independent of packet arrival lag.
  */
-function armRailCharge(ownerId, ms, serverSt) {
+function armRailCharge(ownerId, ms, serverSt, bounce) {
   if (ownerId == null) return;
   const dur = Math.max(50, ms | 0);
   const now = performance.now();
@@ -11003,11 +11005,15 @@ function armRailCharge(ownerId, ms, serverSt) {
   if (until <= now) {
     if (!alreadyCharging) return;
   }
+  const wantBounce = bounce != null
+    ? !!(bounce | 0)
+    : (ownerId === myId && getLocalWeaponLevel('railgun') >= 2);
   railCharges.set(ownerId, {
     start,
     until,
     ms: dur,
     st: serverSt != null ? +serverSt : null,
+    bounce: wantBounce,
     predictedFire: false
   });
   if (alreadyCharging) return;
@@ -11029,28 +11035,43 @@ function emitPredictedRailBeam(ownerId) {
   const pose = resolveRailChargePose(ownerId);
   if (!pose) return;
   const m = shipMuzzle(pose.x, pose.y, pose.angle);
-  const range = Math.hypot(W, H);
-  const segs = localLaserSegments(m.x, m.y, m.c, m.s, range);
-  const seg = segs && segs[0];
-  const x1 = seg ? seg[2] : m.x + m.c * range;
-  const y1 = seg ? seg[3] : m.y + m.s * range;
+  const ch = railCharges.get(ownerId);
+  const bounce = !!(ch && ch.bounce) || (ownerId === myId && getLocalWeaponLevel('railgun') >= 2);
+  const segs = railAimSegments(m.x, m.y, m.c, m.s, bounce);
   const width = 4 * RES_SCALE;
   // Drop any prior predicted beam for this owner.
   for (let i = railBeams.length - 1; i >= 0; i--) {
     if (railBeams[i].owner === ownerId && railBeams[i].predicted) railBeams.splice(i, 1);
   }
   const firePerf = performance.now();
-  railBeams.push({
-    x0: m.x, y0: m.y, x1, y1, width,
-    owner: ownerId,
-    until: firePerf + 280,
-    predicted: true
-  });
+  const first = segs[0];
+  if (first) {
+    railBeams.push({
+      x0: first[0], y0: first[1], x1: first[2], y1: first[3], width,
+      owner: ownerId,
+      until: firePerf + 280,
+      predicted: true
+    });
+    emitRailBeamParticles(first[0], first[1], first[2], first[3], ownerShootColor(ownerId));
+    pushGridShock(first[0], first[1], gridBlastRailOpts(first[0], first[1], first[2], first[3]));
+  }
+  // Bounce beam ~2 sim ticks later (matches server deferred hitscan).
+  if (segs[1]) {
+    const second = segs[1];
+    const delay = 2 * TICK_MS;
+    setTimeout(() => {
+      railBeams.push({
+        x0: second[0], y0: second[1], x1: second[2], y1: second[3], width,
+        owner: ownerId,
+        until: performance.now() + 280,
+        predicted: true
+      });
+      emitRailBeamParticles(second[0], second[1], second[2], second[3], ownerShootColor(ownerId));
+    }, delay);
+  }
   stopSfxLoop('railCharge:' + ownerId);
   playSfx(SFX.railFire, { vol: ownerId === myId ? 0.85 : 0.55 });
   pulseSpriteShipAttack(ownerId);
-  emitRailBeamParticles(m.x, m.y, x1, y1, ownerShootColor(ownerId));
-  pushGridShock(m.x, m.y, gridBlastRailOpts(m.x, m.y, x1, y1));
 }
 
 function applyRailFireMsg(msg) {
@@ -14612,10 +14633,55 @@ function resolveRailChargePose(owner) {
   return resolveFxShooterPose(owner);
 }
 
+/** World AABB edge hit; normal points into the playfield (matches server). */
+function raycastWorldEdgeLocal(ox, oy, dx, dy, maxDist) {
+  let best = null;
+  const tryEdge = (t, nx, ny) => {
+    if (!(t > 1e-6) || t > maxDist) return;
+    const x = ox + dx * t;
+    const y = oy + dy * t;
+    if (x < -0.75 || x > W + 0.75 || y < -0.75 || y > H + 0.75) return;
+    if (!best || t < best.t) best = { t, x, y, nx, ny };
+  };
+  if (dx < -1e-9) tryEdge((0 - ox) / dx, 1, 0);
+  if (dx > 1e-9) tryEdge((W - ox) / dx, -1, 0);
+  if (dy < -1e-9) tryEdge((0 - oy) / dy, 0, 1);
+  if (dy > 1e-9) tryEdge((H - oy) / dy, 0, -1);
+  return best;
+}
+
+function reflectRailDirLocal(dx, dy, nx, ny) {
+  const dot = dx * nx + dy * ny;
+  return { dx: dx - 2 * dot * nx, dy: dy - 2 * dot * ny };
+}
+
+/** Primary + optional L2 bounce aim segments from muzzle. */
+function railAimSegments(mx, my, c, s, bounce) {
+  const fullRange = Math.hypot(W, H);
+  const segs = [];
+  if (!bounce) {
+    segs.push([mx, my, mx + c * fullRange, my + s * fullRange]);
+    return segs;
+  }
+  const edge = raycastWorldEdgeLocal(mx, my, c, s, fullRange + 2);
+  if (!edge) {
+    segs.push([mx, my, mx + c * fullRange, my + s * fullRange]);
+    return segs;
+  }
+  segs.push([mx, my, edge.x, edge.y]);
+  const reflected = reflectRailDirLocal(c, s, edge.nx, edge.ny);
+  const eps = 0.75;
+  const bx = edge.x + edge.nx * eps;
+  const by = edge.y + edge.ny * eps;
+  const next = raycastWorldEdgeLocal(bx, by, reflected.dx, reflected.dy, fullRange + 2);
+  const br = next ? next.t : fullRange;
+  segs.push([bx, by, bx + reflected.dx * br, by + reflected.dy * br]);
+  return segs;
+}
+
 function drawRailCharges() {
   if (!railCharges.size) return;
   const now = performance.now();
-  const range = 3000;
   for (const [owner, ch] of railCharges) {
     const until = ch && ch.until != null ? ch.until : ch;
     const start = ch && ch.start != null ? ch.start : until - 500;
@@ -14643,9 +14709,11 @@ function drawRailCharges() {
     drawFilledPoly(circleVerts(m.x, m.y, discR, 28), col, 1);
 
     if (width > 0) {
-      const x1 = m.x + m.c * range;
-      const y1 = m.y + m.s * range;
-      drawThickSegment(m.x, m.y, x1, y1, width, col);
+      const segs = railAimSegments(m.x, m.y, m.c, m.s, !!(ch && ch.bounce));
+      for (let i = 0; i < segs.length; i++) {
+        const sg = segs[i];
+        drawThickSegment(sg[0], sg[1], sg[2], sg[3], width, col);
+      }
     }
   }
 }
@@ -18318,7 +18386,7 @@ async function connect() {
       return;
     }
     if (msg.t === 'rc' && inGame) {
-      armRailCharge(msg.id, msg.ms != null ? msg.ms : 500, msg.st);
+      armRailCharge(msg.id, msg.ms != null ? msg.ms : 500, msg.st, msg.bounce);
       if ((msg.id | 0) === (myId | 0)) {
         const ch = railCharges.get(myId);
         if (ch) {
