@@ -9975,6 +9975,126 @@ function loadSpriteShipTexture(spec) {
 for (let i = 0; i < TINY_SHIP_SPECS.length; i++) loadSpriteShipTexture(TINY_SHIP_SPECS[i]);
 for (let i = 0; i < ENEMY_SPRITE_SPECS.length; i++) loadSpriteShipTexture(ENEMY_SPRITE_SPECS[i]);
 
+/* ========== Turret sprite sheets (3×4 grid, no padding between cells) ========== */
+const TURRET_SHEETS = {
+  medium: {
+    id: 'turret_medium',
+    file: 'turret_medium_64x64.png',
+    dir: 'sprites/',
+    cell: 64,
+    cols: 3,
+    rows: 4
+  },
+  small: {
+    id: 'turret_small',
+    file: 'turret_small_32x32.png',
+    dir: 'sprites/',
+    cell: 32,
+    cols: 3,
+    rows: 4
+  }
+};
+const turretTexById = new Map();
+
+function loadTurretSheet(spec) {
+  if (turretTexById.has(spec.id)) return turretTexById.get(spec.id);
+  const entry = { tex: null, w: 0, h: 0, ready: false, spec };
+  turretTexById.set(spec.id, entry);
+  const img = new Image();
+  img.onload = () => {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    entry.tex = tex;
+    entry.w = (img.naturalWidth || img.width) | 0;
+    entry.h = (img.naturalHeight || img.height) | 0;
+    entry.ready = true;
+  };
+  img.onerror = () => console.error('Failed to load turret sheet', spec.file);
+  img.src = spriteAssetUrl(spec.dir, spec.file);
+  return entry;
+}
+loadTurretSheet(TURRET_SHEETS.medium);
+loadTurretSheet(TURRET_SHEETS.small);
+
+/** UV for one cell in a packed turret grid (FLIP_Y upload). */
+function turretCellUV(entry, col, row) {
+  const cell = entry.spec.cell;
+  const sheetW = entry.w || (entry.spec.cols * cell);
+  const sheetH = entry.h || (entry.spec.rows * cell);
+  const c = Math.max(0, Math.min((entry.spec.cols | 0) - 1, col | 0));
+  const r = Math.max(0, Math.min((entry.spec.rows | 0) - 1, row | 0));
+  const u0 = (c * cell) / sheetW;
+  const u1 = ((c + 1) * cell) / sheetW;
+  const v0 = 1 - (r * cell) / sheetH;
+  const v1 = 1 - ((r + 1) * cell) / sheetH;
+  return { u0, v0, u1, v1 };
+}
+
+/**
+ * Flat z=0 textured quad in ship local space (no roof pitch).
+ * Nose along +X matches turret art "up". Banks with the host ship.
+ */
+function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localX, localY, tint) {
+  if (!entry || !entry.ready || !entry.tex || !uv) return;
+  const verts = [
+    [localX + halfL, localY - halfW, 0],
+    [localX + halfL, localY + halfW, 0],
+    [localX - halfL, localY + halfW, 0],
+    [localX - halfL, localY - halfW, 0]
+  ];
+  const uvs = [
+    [uv.u0, uv.v0],
+    [uv.u1, uv.v0],
+    [uv.u1, uv.v1],
+    [uv.u0, uv.v1]
+  ];
+  const { xy } = projectMesh3D(verts, x, y, angle, bank || 0, 0);
+  const col = tint || COL_WHITE;
+  const windFwd = [0, 1, 2, 0, 2, 3];
+  const windBack = [0, 2, 1, 0, 3, 2];
+  let o = 0;
+  for (let pass = 0; pass < 2; pass++) {
+    const idx = pass === 0 ? windFwd : windBack;
+    for (let v = 0; v < 6; v++) {
+      const i = idx[v];
+      spriteShipMesh[o++] = xy[i * 2];
+      spriteShipMesh[o++] = xy[i * 2 + 1];
+      spriteShipMesh[o++] = uvs[i][0];
+      spriteShipMesh[o++] = uvs[i][1];
+    }
+  }
+  gl.useProgram(spriteShipProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
+  gl.enableVertexAttribArray(ssAPos);
+  gl.enableVertexAttribArray(ssAUV);
+  gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, 16, 8);
+  gl.uniform2f(ssURes, W, H);
+  bindSceneLightUniforms(spriteShipLightU);
+  gl.uniform3f(ssUTint, col[0], col[1], col[2]);
+  gl.uniform1f(ssUTintPow, 0);
+  gl.uniform1f(ssUEmit, Math.max(0, Number(cv('cl_ship_emit')) || 0));
+  gl.uniform1f(ssUOutline, 0);
+  gl.uniform1f(ssUAlpha, 1);
+  gl.uniform2f(ssUOffset, 0, 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.uniform1i(ssUTex, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
+  gl.drawArrays(gl.TRIANGLES, 0, 12);
+  gl.disableVertexAttribArray(ssAUV);
+}
+
 function tinyShipCols(spec, sheetW) {
   if (spec && spec.single) return 1;
   return Math.max(1, Math.round((sheetW + 1) / (spec.fw + 1)));
@@ -14916,6 +15036,11 @@ const ENEMY_COMMON_MESH = (() => {
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_SPRITE_ID = 'enemy_370';
 const ENEMY_UFO_SPRITE_SCALE = 1;
+/** Medium sheet last cell (row 3, col 2) — flat side mounts at mid-length. */
+const ENEMY_UFO_TURRET_SHEET = 'medium';
+const ENEMY_UFO_TURRET_COL = 2;
+const ENEMY_UFO_TURRET_ROW = 3;
+const ENEMY_UFO_TURRET_SCALE = 0.42;
 const ENEMY_UFO_MESH = (() => {
   const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_transtellar');
   if (raw) {
@@ -15289,6 +15414,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
       x, y, angle, 0, id, dt, opt, true, color,
       bank, ENEMY_UFO_SPRITE_SCALE, COL.self
     );
+    drawEnemyUfoSideTurrets(x, y, angle, bank * 0.5, opt);
   } else {
     drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
       noOutline: true,
@@ -15297,6 +15423,25 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
       strongEmit: false
     });
   }
+}
+
+/** Two flat z=0 turret quads on UFO wings (mid-length, ±side). */
+function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt) {
+  const sheet = TURRET_SHEETS[ENEMY_UFO_TURRET_SHEET];
+  const entry = turretTexById.get(sheet.id);
+  if (!entry || !entry.ready) return;
+  const uv = turretCellUV(entry, ENEMY_UFO_TURRET_COL, ENEMY_UFO_TURRET_ROW);
+  const cell = sheet.cell;
+  const tSc = ENEMY_UFO_TURRET_SCALE;
+  const halfL = cell * 0.5 * tSc;
+  const halfW = cell * 0.5 * tSc;
+  // UFO half-width from its sprite plane (fw after 270° rotate).
+  const ufoSpec = ufoOpt && ufoOpt.sprite;
+  const ufoHalfW = Math.max(1, (ufoSpec && ufoSpec.fw) || 52) * 0.5 * ENEMY_UFO_SPRITE_SCALE;
+  const sideY = ufoHalfW;
+  // Same bank scale as drawSpriteShipPlane's bankOverride path.
+  drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, 0, -sideY, COL_WHITE);
+  drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, 0, sideY, COL_WHITE);
 }
 
 function carrierWeaponColor(weapon) {
