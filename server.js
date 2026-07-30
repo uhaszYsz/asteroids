@@ -368,8 +368,8 @@ const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 /** Full enemy pose broadcast interval. */
 const ENEMY_SNAP_INTERVAL = Math.round(0.5 * TPS);
 const ENEMY_R = {
-  common: 9 * RES_SCALE,
-  ufo: 11 * RES_SCALE,
+  common: 6 * RES_SCALE,
+  ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE
 };
 const ENEMY_HP = {
