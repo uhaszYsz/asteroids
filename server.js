@@ -3983,9 +3983,10 @@ function circleVsAsteroidPoly(cir, a) {
   };
 }
 
-/** Bullet vs jagged asteroid outline (broadphase circle, then poly). */
+/** Bullet vs asteroid: small rocks are circles; medium/big/huge stay jagged polys. */
 function hitBulletAsteroid(b, a) {
   if (!hitBulletTarget(b, a.x, a.y, asteroidHitR(a), false)) return false;
+  if (a.size === 'small') return true;
   const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
   let br = cfg.size || 2 * RES_SCALE;
   if (cfg.col === 'line') br = Math.max(cfg.width || 1, 1.5 * RES_SCALE);
@@ -4018,11 +4019,11 @@ function raySegT(ox, oy, dx, dy, x0, y0, x1, y1) {
   return t;
 }
 
-/** Raycast against asteroid jagged outline. Returns {t,x,y} or null. */
+/** Raycast against asteroid. Small = circle; others = jagged outline. */
 function raycastAsteroid(ox, oy, dx, dy, a, maxDist) {
   const pts = a.pts;
   const s = ASTEROID_HIT_SCALE;
-  if (!pts || pts.length < 6) {
+  if (a.size === 'small' || !pts || pts.length < 6) {
     const t = raycastCircle(ox, oy, dx, dy, a.x, a.y, asteroidHitR(a));
     if (t == null || t > maxDist) return null;
     return { t, x: ox + dx * t, y: oy + dy * t };
