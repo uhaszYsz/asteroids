@@ -15694,18 +15694,17 @@ function drawEnemyCommonCharges() {
     const spin = now * 0.007 + id * 1.7;
 
     if (kind === 'ufo') {
-      const ufoOpt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
+      // Same origin as server fireEnemyRocket / leadIntercept — hull center, not turrets.
       const target = ufoAimTargetPose();
-      // Live player-side flank (not the frozen ech side — that stuck on one turret).
-      const side = ufoActiveTurretSide(p.x, p.y, p.angle, target);
-      const sideY = ufoTurretSideY(ufoOpt, side);
-      const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, p.x, p.y, p.angle, bank);
-      const aim = ufoTurretAimAngle(mount.x, mount.y, p.angle, side, target);
-      const muzzle = ENEMY_UFO_TURRET_SCALE * 64 * 0.5;
-      let w = {
-        x: mount.x + Math.cos(aim) * muzzle,
-        y: mount.y + Math.sin(aim) * muzzle
-      };
+      const rocketSpd = (WEAPONS.default.speed || (8 * RES_SCALE)) * 0.7 * 0.85;
+      let aim = p.angle || 0;
+      if (target) {
+        const lead = leadInterceptPoint(
+          p.x, p.y, target.x, target.y, target.vx || 0, target.vy || 0, rocketSpd
+        );
+        aim = Math.atan2(lead.y - p.y, lead.x - p.x);
+      }
+      let w = { x: p.x, y: p.y };
       if (shake > 0) {
         const ph = now * 0.055 + id * 2.1;
         w = {

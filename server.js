@@ -1984,12 +1984,12 @@ function fireEnemyLineBullet(room, e, ang, spd, dmg) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
-/** UFO lead-aim rocket (tiny, skips asteroids). Fixed muzzle from hull center — turrets are visual only. */
+/** UFO lead-aim rocket (tiny, skips asteroids). Spawn + aim from hull center — turrets visual only. */
 function fireEnemyRocket(room, e, ang, spd, dmg) {
   const speed = spd != null ? spd : ENEMY_UFO_ROCKET_SPEED;
   const damage = dmg != null ? dmg : BULLET_TYPES.enemyRocket.dmg;
-  const x = e.x + Math.cos(ang) * (e.r + 4);
-  const y = e.y + Math.sin(ang) * (e.r + 4);
+  const x = e.x;
+  const y = e.y;
   const now = Date.now();
   const b = {
     id: room.nextBulletId++,
@@ -2130,11 +2130,8 @@ function updateEnemies(room) {
       emitEnemyCharge(room, e);
     }
     if (e.kind === 'ufo' && (e.fireCd | 0) === ENEMY_UFO_CHARGE) {
-      const tgt = soloHumanTarget(room);
-      if (tgt) {
-        // Charge orb on the flank facing the player (turrets visual only).
-        emitEnemyCharge(room, e, { side: pickUfoFireSide(e, tgt.x, tgt.y) });
-      }
+      // Charge at hull center (same origin as rocket spawn / lead aim).
+      emitEnemyCharge(room, e);
     }
 
     if (stepEnemyMovement(e)) {
