@@ -1430,6 +1430,7 @@ const COL = {
   enemy: [1.0, 0.55, 0.25],
   enemyUfo: [0.55, 1.0, 0.65],
   enemyCarrier: [0.85, 0.7, 1.0],
+  enemyOutline: [1.0, 0.12, 0.1],
   enemyBullet: [1.0, 0.35, 0.45],
   pickup: [1.0, 0.85, 0.35],
   health: [1.0, 0.35, 0.55],
@@ -10259,7 +10260,7 @@ const SPRITE_SHIP_PX_SCALE = 1;
 /** Sprite cut vertically onto a pitched roof (two faces meeting at the keel ridge).
  *  bankOverride: use enemy bank instead of player av smoothing.
  *  sizeScale: extra multiplier (default 1). Plane size follows sprite fw×fh. */
-function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale) {
+function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor) {
   const spec = opt && opt.sprite;
   if (!spec) return;
   const entry = spriteShipTexById.get(spec.id);
@@ -10316,6 +10317,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   ];
 
   const tint = color || COL.self || [0.35, 0.85, 1];
+  const outlineTint = outlineColor || tint;
   const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
   const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
   const outlineW = spriteShipOutlineWidth(id);
@@ -10385,6 +10387,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
 
   // Player-color silhouette outline around sprite pixels (not roof plane edges).
   if (outlineA > 0.001) {
+    gl.uniform3f(ssUTint, outlineTint[0], outlineTint[1], outlineTint[2]);
     gl.uniform1f(ssUOutline, 1);
     gl.uniform1f(ssUAlpha, outlineA);
     for (let p = 0; p < panels.length; p++) {
@@ -10398,6 +10401,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   }
 
   // Fill sprite on top (full opacity — planes are drawn separately when cl_ships_plane).
+  gl.uniform3f(ssUTint, tint[0], tint[1], tint[2]);
   gl.uniform1f(ssUOutline, 0);
   gl.uniform1f(ssUAlpha, 1);
   gl.uniform2f(ssUOffset, 0, 0);
@@ -15056,7 +15060,7 @@ function drawEnemyCommon(x, y, angle, color, id, dt) {
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
-      bank, ENEMY_COMMON_SPRITE_SCALE
+      bank, ENEMY_COMMON_SPRITE_SCALE, COL.enemyOutline
     );
   } else {
     drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank, id, {
@@ -15283,7 +15287,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
-      bank, ENEMY_UFO_SPRITE_SCALE
+      bank, ENEMY_UFO_SPRITE_SCALE, COL.enemyOutline
     );
   } else {
     drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
@@ -15316,7 +15320,7 @@ function drawEnemyCarrier(x, y, angle, weapon) {
   drawFilledPoly(hex, hull, 0.4);
   for (let i = 0; i < 6; i++) {
     const j = (i + 1) % 6;
-    drawThickSegment(hex[i * 2], hex[i * 2 + 1], hex[j * 2], hex[j * 2 + 1], 1.3 * RES_SCALE, hull);
+    drawThickSegment(hex[i * 2], hex[i * 2 + 1], hex[j * 2], hex[j * 2 + 1], 1.3 * RES_SCALE, COL.enemyOutline);
   }
   // Weapon pod on nose
   const nx = x + c * s * 0.95;
