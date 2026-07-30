@@ -9666,6 +9666,19 @@ function rotateShipMeshYaw90(def) {
   }
   return Object.assign({}, def, { verts, nose });
 }
+/** Yaw −90° around +Z (counterclockwise / “left”): (x,y,z)→(−y,x,z). */
+function rotateShipMeshYawNeg90(def) {
+  const verts = (def.verts || []).map((v) => [-v[1], v[0], v[2]]);
+  let nose = 0;
+  let best = -Infinity;
+  for (let i = 0; i < verts.length; i++) {
+    if (verts[i][0] > best) {
+      best = verts[i][0];
+      nose = i;
+    }
+  }
+  return Object.assign({}, def, { verts, nose });
+}
 /** Yaw mesh 180° around +Z: (x,y,z)→(-x,-y,z). */
 function rotateShipMeshYaw180(def) {
   const verts = (def.verts || []).map((v) => [-v[0], -v[1], v[2]]);
@@ -9683,9 +9696,12 @@ function isTexturedShipDef(def) {
   return !!(def && (def.source === 'ships' || def.source === 'voxels' || def.kind === 'textured' || def.texture));
 }
 function orientTexturedShipDef(def) {
-  // FBX pack needed extra yaw; MagicaVoxel meshes are already nose-aligned in the generator.
+  // FBX pack needed extra yaw; MagicaVoxel: +90° left from generator pose.
   if (def && def.source === 'ships') {
     return rotateShipMeshYaw180(rotateShipMeshYaw90(def));
+  }
+  if (def && def.source === 'voxels') {
+    return rotateShipMeshYawNeg90(def);
   }
   return def;
 }
