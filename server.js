@@ -1964,7 +1964,8 @@ function updateCarrierWeapon(room, e, target) {
       roomBroadcast(room, {
         t: 'rc',
         id: enemyFxOwner(e),
-        ms: Math.round(ENEMY_RAIL_CHARGE * (1000 / TPS))
+        ms: Math.round(ENEMY_RAIL_CHARGE * (1000 / TPS)),
+        st: Date.now()
       });
     }
     if ((e.railChargeLeft | 0) <= 0) return;
@@ -5513,7 +5514,8 @@ function updateShooting(room, p) {
       roomBroadcast(room, {
         t: 'rc',
         id: p.id,
-        ms: Math.round(chargeMax * (1000 / TPS))
+        ms: Math.round(chargeMax * (1000 / TPS)),
+        st: Date.now()
       });
     }
     p.railChargeLeft--;

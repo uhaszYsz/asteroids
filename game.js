@@ -10729,8 +10729,13 @@ function tryStartLocalBurst() {
   }
   if (currentWeaponName() === 'railgun') {
     const w = effectiveLocalWeapon('railgun');
-    localShoot.railChargeLeft = w.charge | 0;
-    armRailCharge(myId, Math.round((w.charge | 0) * (1000 / TPS)));
+    const dur = Math.round((w.charge | 0) * (1000 / TPS));
+    // Estimate when the server will start charge (input delay ticks ahead).
+    const estSt = serverNow() + adaptiveInputDelay() * TICK_MS;
+    armRailCharge(myId, dur, estSt);
+    const ch = railCharges.get(myId);
+    const leftMs = ch ? Math.max(0, ch.until - performance.now()) : dur;
+    localShoot.railChargeLeft = Math.max(1, Math.ceil(leftMs / TICK_MS));
   }
   return true;
 }
@@ -10779,14 +10784,12 @@ function updateLocalShooting() {
     }
     localShoot.railChargeLeft--;
     if (localShoot.railChargeLeft > 0) return;
-    // Charge complete — server fires the real ray; local chambers next + starts cd.
+    // Charge ticks mirror NTP window; beam is emitted when telegraph until expires.
     localShoot.shootCd = w.cooldown;
     localShoot.bursting = false;
     localShoot.railChargeLeft = 0;
     localShoot.shootAmmo = w.ammo;
     localShoot.reloadLeft = 0;
-    // Ring is armed on server `rf` so it lines up with the real shot (local charge
-    // finishes a bit early because of input delay).
     return;
   }
 
@@ -10847,19 +10850,122 @@ function armLocalLaser(extraMs) {
   if (until > localLaserUntil) localLaserUntil = until;
 }
 
-function armRailCharge(ownerId, ms) {
+/**
+ * Arm rail charge telegraph.
+ * Prefer server wall-clock `serverSt` (NTP via clockOffset) so charge 0→1 and fire
+ * land on the same instant for everyone, independent of packet arrival lag.
+ */
+function armRailCharge(ownerId, ms, serverSt) {
   if (ownerId == null) return;
   const dur = Math.max(50, ms | 0);
   const now = performance.now();
+  let start = now;
+  if (serverSt != null && Number.isFinite(+serverSt)) {
+    // serverNow() ≈ server Date.now(); age can be negative if we are early.
+    const age = serverNow() - (+serverSt);
+    start = now - age;
+  }
   const prev = railCharges.get(ownerId);
   const alreadyCharging = prev && now < prev.until;
-  railCharges.set(ownerId, { start: now, until: now + dur, ms: dur });
+  const until = start + dur;
+  // Late packet after the charge window — don't resurrect the telegraph.
+  if (until <= now) {
+    if (!alreadyCharging) return;
+  }
+  railCharges.set(ownerId, {
+    start,
+    until,
+    ms: dur,
+    st: serverSt != null ? +serverSt : null,
+    predictedFire: false
+  });
   if (alreadyCharging) return;
   const key = 'railCharge:' + ownerId;
   // Local Space may already be playing this held clip — don't restart.
   const a = sfxHolds.get(key);
   if (a && !a.paused && a.currentTime > 0.02) return;
   playSfxLoop(key, SFX.railCharge, { vol: ownerId === myId ? 0.75 : 0.45, loop: false });
+}
+
+/** Map a server Date.now() fire instant onto performance.now() for beam lifetime. */
+function perfFromServerSt(serverSt) {
+  if (serverSt == null || !Number.isFinite(+serverSt)) return performance.now();
+  return performance.now() - (serverNow() - (+serverSt));
+}
+
+/** Local predicted rail beam when NTP charge window ends (before rf arrives). */
+function emitPredictedRailBeam(ownerId) {
+  const pose = resolveRailChargePose(ownerId);
+  if (!pose) return;
+  const m = shipMuzzle(pose.x, pose.y, pose.angle);
+  const range = Math.hypot(W, H);
+  const segs = localLaserSegments(m.x, m.y, m.c, m.s, range);
+  const seg = segs && segs[0];
+  const x1 = seg ? seg[2] : m.x + m.c * range;
+  const y1 = seg ? seg[3] : m.y + m.s * range;
+  const width = 4 * RES_SCALE;
+  // Drop any prior predicted beam for this owner.
+  for (let i = railBeams.length - 1; i >= 0; i--) {
+    if (railBeams[i].owner === ownerId && railBeams[i].predicted) railBeams.splice(i, 1);
+  }
+  const firePerf = performance.now();
+  railBeams.push({
+    x0: m.x, y0: m.y, x1, y1, width,
+    owner: ownerId,
+    until: firePerf + 280,
+    predicted: true
+  });
+  stopSfxLoop('railCharge:' + ownerId);
+  playSfx(SFX.railFire, { vol: ownerId === myId ? 0.85 : 0.55 });
+  pulseSpriteShipAttack(ownerId);
+  emitRailBeamParticles(m.x, m.y, x1, y1, ownerShootColor(ownerId));
+  pushGridShock(m.x, m.y, gridBlastRailOpts(m.x, m.y, x1, y1));
+}
+
+function applyRailFireMsg(msg) {
+  const row = msg.l;
+  if (!row) return;
+  const x0 = row[1], y0 = row[2], x1 = row[3], y1 = row[4];
+  const width = row[5] || 4 * RES_SCALE;
+  const fireSt = row[6];
+  const hitKind = msg.hit != null ? (msg.hit | 0) : 2;
+  const ownerId = row[7];
+  const ix = msg.ix != null ? msg.ix : x1;
+  const iy = msg.iy != null ? msg.iy : y1;
+  stopSfxLoop('railCharge:' + ownerId);
+  // Authoritative shot replaces any local prediction for this owner.
+  let hadPredicted = false;
+  for (let i = railBeams.length - 1; i >= 0; i--) {
+    if (railBeams[i].owner === ownerId && railBeams[i].predicted) {
+      hadPredicted = true;
+      railBeams.splice(i, 1);
+    }
+  }
+  if (!hadPredicted) {
+    playSfx(SFX.railFire, { vol: ownerId === myId ? 0.85 : 0.55 });
+    pulseSpriteShipAttack(ownerId);
+    emitRailBeamParticles(x0, y0, x1, y1, ownerShootColor(ownerId));
+    pushGridShock(x0, y0, gridBlastRailOpts(x0, y0, x1, y1));
+  }
+  railCharges.delete(ownerId);
+  const firePerf = perfFromServerSt(fireSt);
+  railBeams.push({
+    x0, y0, x1, y1, width,
+    owner: ownerId,
+    until: Math.max(performance.now(), firePerf) + 280,
+    predicted: false
+  });
+  if (hitKind === 1) playSfxOverlap(SFX.hitPlayer, { vol: 0.9, pool: 6 });
+  else if (hitKind === 3) playSfxOverlap(SFX.hitPlayerBullet, { vol: 0.75, pool: 8 });
+  else if (hitKind === 2) playSfxOverlap(SFX.hitAsteroid, { vol: 0.75, pool: 6 });
+  emitLaserImpactFx(ix, iy, hitKind);
+  if (hitKind === 1 || hitKind === 2 || hitKind === 3) {
+    const c = findImpactCenter(ix, iy, hitKind);
+    const beamDir = Math.atan2(y1 - y0, x1 - x0);
+    emitBulletImpactSparks(ix, iy, c.x, c.y, COL.asteroid, beamDir);
+  }
+  pushFxRing(ix, iy, ownerShootColor(ownerId), { r0: 5, r1: 38, life: 320 });
+  pushHitscanDebug(x0, y0, x1, y1, hitKind, 'railgun');
 }
 
 /** Residue along the rail beam (~4 frames / 120ms). */
@@ -14319,7 +14425,13 @@ function updateLaserState() {
   }
   for (const [owner, ch] of railCharges) {
     const until = ch && ch.until != null ? ch.until : ch;
-    if (now >= until) railCharges.delete(owner);
+    if (now < until) continue;
+    // Charge window ended on NTP timeline — predict the shot; `rf` corrects it.
+    if (ch && !ch.predictedFire) {
+      ch.predictedFire = true;
+      emitPredictedRailBeam(owner);
+    }
+    railCharges.delete(owner);
   }
   for (let i = hitLasers.length - 1; i >= 0; i--) {
     if (now >= hitLasers[i].until) hitLasers.splice(i, 1);
@@ -18017,39 +18129,19 @@ async function connect() {
       return;
     }
     if (msg.t === 'rc' && inGame) {
-      armRailCharge(msg.id, msg.ms != null ? msg.ms : 500);
+      armRailCharge(msg.id, msg.ms != null ? msg.ms : 500, msg.st);
+      if ((msg.id | 0) === (myId | 0)) {
+        const ch = railCharges.get(myId);
+        if (ch) {
+          const leftMs = Math.max(0, ch.until - performance.now());
+          localShoot.railChargeLeft = Math.max(0, Math.ceil(leftMs / TICK_MS));
+          if ((localShoot.railChargeLeft | 0) > 0) localShoot.bursting = true;
+        }
+      }
       return;
     }
     if (msg.t === 'rf' && inGame && msg.l) {
-      const row = msg.l;
-      const x0 = row[1], y0 = row[2], x1 = row[3], y1 = row[4];
-      const width = row[5] || 4 * RES_SCALE;
-      const hitKind = msg.hit != null ? (msg.hit | 0) : 2;
-      const ownerId = row[7];
-      const ix = msg.ix != null ? msg.ix : x1;
-      const iy = msg.iy != null ? msg.iy : y1;
-      stopSfxLoop('railCharge:' + ownerId);
-      playSfx(SFX.railFire, { vol: ownerId === myId ? 0.85 : 0.55 });
-      railCharges.delete(ownerId);
-      pulseSpriteShipAttack(ownerId);
-      railBeams.push({
-        x0, y0, x1, y1, width,
-        owner: ownerId,
-        until: performance.now() + 280
-      });
-      emitRailBeamParticles(x0, y0, x1, y1, ownerShootColor(ownerId));
-      pushGridShock(x0, y0, gridBlastRailOpts(x0, y0, x1, y1));
-      if (hitKind === 1) playSfxOverlap(SFX.hitPlayer, { vol: 0.9, pool: 6 });
-      else if (hitKind === 3) playSfxOverlap(SFX.hitPlayerBullet, { vol: 0.75, pool: 8 });
-      else if (hitKind === 2) playSfxOverlap(SFX.hitAsteroid, { vol: 0.75, pool: 6 });
-      emitLaserImpactFx(ix, iy, hitKind);
-      if (hitKind === 1 || hitKind === 2 || hitKind === 3) {
-        const c = findImpactCenter(ix, iy, hitKind);
-        const beamDir = Math.atan2(y1 - y0, x1 - x0);
-        emitBulletImpactSparks(ix, iy, c.x, c.y, COL.asteroid, beamDir);
-      }
-      pushFxRing(ix, iy, ownerShootColor(ownerId), { r0: 5, r1: 38, life: 320 });
-      pushHitscanDebug(x0, y0, x1, y1, hitKind, 'railgun');
+      applyRailFireMsg(msg);
       return;
     }
     if (msg.t === 'wpn' && inGame) {
@@ -19896,13 +19988,7 @@ function demoReplayEvent(ev) {
     return;
   }
   if (ev.t === 'rf' && ev.l) {
-    const row = ev.l;
-    railBeams.push({
-      x0: row[1], y0: row[2], x1: row[3], y1: row[4],
-      width: row[5] || 4 * RES_SCALE,
-      until: performance.now() + 120,
-      owner: row[7] | 0
-    });
+    applyRailFireMsg({ t: 'rf', l: ev.l, hit: ev.hit, ix: ev.ix, iy: ev.iy });
     return;
   }
   if (ev.t === 'die') {
