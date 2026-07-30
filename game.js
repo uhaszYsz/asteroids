@@ -14650,10 +14650,10 @@ const ENEMY_COMMON_MESH = (() => {
   return cloneShipMeshScaled(fallback, ENEMY_COMMON_SCALE);
 })();
 
-/** UFO = Warship voxel (textured), unrotated vs player picker pose. */
+/** UFO = Transtellar voxel (textured), unrotated vs player picker pose. */
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_MESH = (() => {
-  const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_warship');
+  const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_transtellar');
   if (raw) {
     // Skip orientTexturedShipDef yaw — UFO keeps generator orientation.
     return cloneShipMeshScaled(scaleShipMeshDef(raw), ENEMY_UFO_SCALE);
@@ -18068,7 +18068,22 @@ function shipMeshSectionTitle(src) {
 /** Live 2D canvas previews for ship picker buttons. */
 const shipPreviewSlots = [];
 const SHIP_PREV_SIZE = 88;
-let shipPreviewLastMs = 0;
+let shipPreviewDrawn = false;
+
+function updateShipMeshPreviews(tSec, force) {
+  if (!shipPreviewSlots.length) return;
+  if (!force) {
+    if (!gridPanelOpen || gpTab !== 'ship') return;
+    if (shipPreviewDrawn) return;
+  }
+  shipPreviewDrawn = true;
+  const t = tSec != null ? tSec : 0.4;
+  for (let i = 0; i < shipPreviewSlots.length; i++) {
+    const slot = shipPreviewSlots[i];
+    if (!slot || !slot.ctx) continue;
+    drawShipMeshPreview(slot.ctx, slot.mesh, slot.canvas.width, slot.canvas.height, t);
+  }
+}
 
 function drawSpriteShipPreview(ctx, opt, w, h, t) {
   if (!ctx || !opt || !opt.sprite) return;
@@ -18134,12 +18149,27 @@ function drawShipMeshPreview(ctx, mesh, w, h, t) {
   ctx.fillStyle = '#061018';
   ctx.fillRect(0, 0, w, h);
 
-  const yaw = (t || 0) * 0.85 + (mesh.id ? mesh.id.length * 0.37 : 0);
-  const bank = Math.sin((t || 0) * 1.35 + 0.4) * 0.35;
+  // Fixed pose — no live spin (that was melting FPS on dense voxels).
+  const yaw = 0.55 + (mesh.id ? mesh.id.length * 0.17 : 0);
+  const bank = 0.22;
+  const faces = mesh.faces || [];
+  // Cap work hard: only project/draw a small face subset for thumbnails.
+  const maxFaces = 64;
+  const faceStep = Math.max(1, Math.ceil(faces.length / maxFaces));
+  const needVert = new Uint8Array(mesh.verts.length);
+  for (let i = 0; i < faces.length; i += faceStep) {
+    const f = faces[i];
+    if (!f || f.length < 3) continue;
+    needVert[f[0]] = 1;
+    needVert[f[1]] = 1;
+    needVert[f[2]] = 1;
+  }
+  // Project only used verts into a sparse xy/depth via full project (still OK once).
   const { xy, depth } = projectMesh3D(mesh.verts, 0, 0, yaw, bank);
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (let i = 0; i < mesh.verts.length; i++) {
+    if (!needVert[i]) continue;
     const x = xy[i * 2];
     const y = xy[i * 2 + 1];
     if (x < minX) minX = x;
@@ -18147,6 +18177,7 @@ function drawShipMeshPreview(ctx, mesh, w, h, t) {
     if (x > maxX) maxX = x;
     if (y > maxY) maxY = y;
   }
+  if (!Number.isFinite(minX)) return;
   const bw = Math.max(1e-3, maxX - minX);
   const bh = Math.max(1e-3, maxY - minY);
   const pad = 8;
@@ -18154,16 +18185,12 @@ function drawShipMeshPreview(ctx, mesh, w, h, t) {
   const ox = (w - bw * sc) * 0.5 - minX * sc;
   const oy = (h - bh * sc) * 0.5 - minY * sc;
 
-  const faces = mesh.faces || [];
   const order = [];
-  // Dense FBX hulls: subsample faces so F1 thumbnails stay cheap.
-  const faceStep = faces.length > 2500 ? Math.ceil(faces.length / 900) : 1;
   for (let i = 0; i < faces.length; i += faceStep) {
     const f = faces[i];
     if (!f || f.length < 3) continue;
-    let z = 0;
-    for (let k = 0; k < f.length; k++) z += depth[f[k]] || 0;
-    order.push({ i, z: z / f.length });
+    const z = ((depth[f[0]] || 0) + (depth[f[1]] || 0) + (depth[f[2]] || 0)) / 3;
+    order.push({ i, z });
   }
   order.sort((a, b) => a.z - b.z);
 
@@ -18183,22 +18210,6 @@ function drawShipMeshPreview(ctx, mesh, w, h, t) {
     ctx.closePath();
     ctx.fillStyle = `rgba(${(col[0] * 255) | 0},${(col[1] * 255) | 0},${(col[2] * 255) | 0},${a})`;
     ctx.fill();
-  }
-
-  const edges = mesh.edges || [];
-  if (edges.length && edges.length <= 600) {
-    ctx.strokeStyle = `rgba(${Math.min(255, (col[0] * 255 + 40) | 0)},${Math.min(255, (col[1] * 255 + 40) | 0)},${Math.min(255, (col[2] * 255 + 40) | 0)},0.95)`;
-    ctx.lineWidth = 1.15;
-    ctx.lineJoin = 'round';
-    for (let i = 0; i < edges.length; i++) {
-      const e = edges[i];
-      const a = e[0];
-      const b = e[1];
-      ctx.beginPath();
-      ctx.moveTo(xy[a * 2] * sc + ox, xy[a * 2 + 1] * sc + oy);
-      ctx.lineTo(xy[b * 2] * sc + ox, xy[b * 2 + 1] * sc + oy);
-      ctx.stroke();
-    }
   }
 }
 
@@ -18270,22 +18281,8 @@ function buildShipMeshUi() {
     wrap.appendChild(sec);
   }
   syncShipMeshUi();
-  updateShipMeshPreviews(performance.now() * 0.001);
-}
-
-function updateShipMeshPreviews(tSec) {
-  if (!shipPreviewSlots.length || !gridPanelOpen) return;
-  // Dense voxel previews were redrawing every frame for EVERY tab → ~10 FPS.
-  if (gpTab !== 'ship') return;
-  const now = performance.now();
-  if (now - shipPreviewLastMs < 250) return; // ~4 Hz max while Ship tab is open
-  shipPreviewLastMs = now;
-  const t = tSec != null ? tSec : now * 0.001;
-  for (let i = 0; i < shipPreviewSlots.length; i++) {
-    const slot = shipPreviewSlots[i];
-    if (!slot || !slot.ctx) continue;
-    drawShipMeshPreview(slot.ctx, slot.mesh, slot.canvas.width, slot.canvas.height, t);
-  }
+  shipPreviewDrawn = false;
+  updateShipMeshPreviews(0.4, true);
 }
 
 function setGridProbeShape(shape) {
@@ -18418,8 +18415,7 @@ function setGridPanelTab(tab) {
     pane.classList.toggle('show', pane.getAttribute('data-gp-pane') === gpTab);
   });
   if (gpTab === 'ship') {
-    shipPreviewLastMs = 0;
-    updateShipMeshPreviews(performance.now() * 0.001);
+    updateShipMeshPreviews(0.4, false);
   }
 }
 
@@ -20014,7 +20010,6 @@ function frame(now) {
   fpsAccumMs -= LOCK_FRAME_MS;
 
   updateFpsHud(now);
-  updateShipMeshPreviews(now * 0.001);
   if (inGame) {
     syncSimTicks();
     updateHud();
