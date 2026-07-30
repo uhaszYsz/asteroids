@@ -1144,7 +1144,7 @@ const CVARS = {
   cl_ships_plane: {
     value: 0,
     def: 0,
-    help: '1 = draw sprite ship planes at 0.6 alpha (see through folded roof).'
+    help: '1 = draw sprite roof planes as visible 0.6-alpha fills under the sprite.'
   },
   cl_ast_outline_emit: {
     value: 0,
@@ -10305,7 +10305,30 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
   const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
   const outlineW = SPRITE_SHIP_OUTLINE_W;
-  const planeAlpha = (cv('cl_ships_plane') | 0) ? 0.6 : 1;
+  const showPlanes = (cv('cl_ships_plane') | 0) !== 0;
+
+  // Debug / tune: draw the folded roof quads themselves (0.6 alpha), then sprite on top.
+  if (showPlanes) {
+    for (let p = 0; p < panels.length; p++) {
+      const { xy } = projectMesh3D(panels[p].verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
+      const quad = [
+        xy[0], xy[1],
+        xy[2], xy[3],
+        xy[4], xy[5],
+        xy[6], xy[7]
+      ];
+      drawFilledPoly(quad, tint, 0.6);
+      for (let e = 0; e < 4; e++) {
+        const a = e;
+        const b = (e + 1) % 4;
+        drawThickSegment(
+          xy[a * 2], xy[a * 2 + 1],
+          xy[b * 2], xy[b * 2 + 1],
+          1.2, tint, 0.85
+        );
+      }
+    }
+  }
 
   gl.useProgram(spriteShipProg);
   gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
@@ -10349,7 +10372,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   // Player-color silhouette outline around sprite pixels (not roof plane edges).
   if (outlineA > 0.001) {
     gl.uniform1f(ssUOutline, 1);
-    gl.uniform1f(ssUAlpha, outlineA * planeAlpha);
+    gl.uniform1f(ssUAlpha, outlineA);
     for (let p = 0; p < panels.length; p++) {
       fillPanelMesh(panels[p]);
       for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
@@ -10360,9 +10383,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     }
   }
 
-  // Fill sprite on top.
+  // Fill sprite on top (full opacity — planes are drawn separately when cl_ships_plane).
   gl.uniform1f(ssUOutline, 0);
-  gl.uniform1f(ssUAlpha, planeAlpha);
+  gl.uniform1f(ssUAlpha, 1);
   gl.uniform2f(ssUOffset, 0, 0);
   for (let p = 0; p < panels.length; p++) {
     fillPanelMesh(panels[p]);
