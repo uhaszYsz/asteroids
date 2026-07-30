@@ -1114,13 +1114,13 @@ const CVARS = {
     help: '1 = hue-tint textured asteroids (cl_ast_face_tint). 0 = natural albedo. Meteor/golden always tint.'
   },
   cl_ast_height: {
-    value: 0.16,
-    def: 0.16,
-    help: 'Asteroid heightmap displacement (fraction of radius; 0 = off).'
+    value: 0.28,
+    def: 0.28,
+    help: 'Asteroid heightmap displace in screen XY (fraction of radius; 0 = off).'
   },
   cl_ast_parallax: {
-    value: 0.045,
-    def: 0.045,
+    value: 0.08,
+    def: 0.08,
     help: 'Asteroid heightmap parallax UV offset strength (0 = off).'
   },
   cl_ast_rough: {
@@ -9028,7 +9028,7 @@ function bindAstTexMapsOn() {
   let rough = Number(cv('cl_ast_rough'));
   if (!Number.isFinite(rough)) rough = 0.55;
   let para = Number(cv('cl_ast_parallax'));
-  if (!Number.isFinite(para)) para = 0.045;
+  if (!Number.isFinite(para)) para = 0.08;
   gl.uniform1f(astTURough, rough);
   gl.uniform1f(astTUParallax, para);
   gl.activeTexture(gl.TEXTURE1);
@@ -9137,18 +9137,44 @@ function sampleAsteroidHeight(u, v) {
   let y = v - Math.floor(v);
   if (x < 0) x += 1;
   if (y < 0) y += 1;
-  const ix = Math.min(asteroidHeightW - 1, (x * asteroidHeightW) | 0);
-  const iy = Math.min(asteroidHeightH - 1, ((1 - y) * asteroidHeightH) | 0);
-  return d.data[(iy * asteroidHeightW + ix) * 4] / 255;
+  // Bilinear sample (ImageData is top-down; GL UVs use FLIP_Y).
+  const fx = x * (asteroidHeightW - 1);
+  const fy = (1 - y) * (asteroidHeightH - 1);
+  let x0 = fx | 0;
+  let y0 = fy | 0;
+  const x1 = Math.min(asteroidHeightW - 1, x0 + 1);
+  const y1 = Math.min(asteroidHeightH - 1, y0 + 1);
+  x0 = Math.min(asteroidHeightW - 1, x0);
+  y0 = Math.min(asteroidHeightH - 1, y0);
+  const tx = fx - x0;
+  const ty = fy - y0;
+  const at = (ix, iy) => d.data[(iy * asteroidHeightW + ix) * 4] / 255;
+  const h00 = at(x0, y0);
+  const h10 = at(x1, y0);
+  const h01 = at(x0, y1);
+  const h11 = at(x1, y1);
+  const h0 = h00 + (h10 - h00) * tx;
+  const h1 = h01 + (h11 - h01) * tx;
+  return h0 + (h1 - h0) * ty;
 }
 
-/** Radial height displace for visual mesh (collision silhouette unchanged). */
+/** Stretch height contrast so soft maps still move verts. */
+function asteroidHeightContrast(h) {
+  // Expand midtones: 0..1 → stronger around mean.
+  const c = (h - 0.5) * 1.65 + 0.5;
+  return c < 0 ? 0 : c > 1 ? 1 : c;
+}
+
+/**
+ * Height displace for top-down ortho: push in XY (visible on screen).
+ * Pure radial-3D displace is mostly ±Z on the deck and invisible.
+ */
 const _astDispCache = new Map();
 function asteroidHeightDisplaceVerts(verts, radius, id) {
   if (!asteroidHeightData || !verts || !verts.length) return verts;
   let amp = Number(cv('cl_ast_height'));
   if (!Number.isFinite(amp) || amp <= 0) return verts;
-  const key = ((id | 0) + '|' + ((radius * 10) | 0) + '|' + ((amp * 1000) | 0) + '|' + verts.length);
+  const key = ((id | 0) + '|' + ((radius * 10) | 0) + '|' + ((amp * 1000) | 0) + '|xy2|' + verts.length);
   let out = _astDispCache.get(key);
   if (out) return out;
   const scale = Math.max(1, radius) * amp;
@@ -9156,11 +9182,16 @@ function asteroidHeightDisplaceVerts(verts, radius, id) {
   for (let i = 0; i < verts.length; i++) {
     const v = verts[i];
     const uv = asteroidVertUV(v[0], v[1], radius, id);
-    const h = sampleAsteroidHeight(uv[0], uv[1]);
+    const h = asteroidHeightContrast(sampleAsteroidHeight(uv[0], uv[1]));
     const d = (h - 0.5) * 2 * scale;
-    const len = Math.hypot(v[0], v[1], v[2]) || 1;
-    const s = d / len;
-    out[i] = [v[0] + v[0] * s, v[1] + v[1] * s, v[2] + v[2] * s];
+    const lenXY = Math.hypot(v[0], v[1]);
+    if (lenXY > 1e-4) {
+      const s = d / lenXY;
+      // XY bump (silhouette / top-down) + light Z so shade/depth still move.
+      out[i] = [v[0] + v[0] * s, v[1] + v[1] * s, v[2] + d * 0.55];
+    } else {
+      out[i] = [v[0], v[1], v[2] + d];
+    }
   }
   if (_astDispCache.size >= 128) _astDispCache.clear();
   _astDispCache.set(key, out);
