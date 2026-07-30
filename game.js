@@ -10039,8 +10039,9 @@ function turretCellUV(entry, col, row) {
 /**
  * Flat textured quad (no roof pitch). Oriented by yaw; optional localZ (default 0).
  * Nose along +X matches turret art "up". Banks with the host ship.
+ * remap: optional { src, dst, range } — universal source→target color remapping.
  */
-function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, tint) {
+function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, tint, remap) {
   if (!entry || !entry.ready || !entry.tex || !uv) return;
   const z = localZ != null ? localZ : 0;
   const verts = [
@@ -10084,6 +10085,11 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   gl.uniform1f(ssUOutline, 0);
   gl.uniform1f(ssUAlpha, 1);
   gl.uniform2f(ssUOffset, 0, 0);
+  if (remap && remap.range > 0) {
+    bindSpriteColorRemap(remap.src, remap.dst, remap.range);
+  } else {
+    bindSpriteColorRemap(null, null, 0);
+  }
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -10093,6 +10099,7 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
   gl.drawArrays(gl.TRIANGLES, 0, 12);
+  bindSpriteColorRemap(null, null, 0);
   gl.disableVertexAttribArray(ssAUV);
 }
 
@@ -10274,6 +10281,9 @@ const spriteShipFS = `
   uniform float uEmit;
   uniform float uAlpha;
   uniform float uOutline;
+  uniform vec3 uRemapSrc;
+  uniform vec3 uRemapDst;
+  uniform float uRemapRange;
   varying vec2 vUV;
   varying vec2 vWorld;
 ` + SCENE_LIGHT_GLSL + `
@@ -10281,6 +10291,20 @@ const spriteShipFS = `
     if (t.a < 0.08) return false;
     if (max(t.r, max(t.g, t.b)) < 0.03 && t.a < 0.2) return false;
     return true;
+  }
+  vec3 remapSourceColor(vec3 rgb) {
+    if (uRemapRange <= 0.0001) return rgb;
+    float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
+    float srcLum = max(0.001, dot(uRemapSrc, vec3(0.299, 0.587, 0.114)));
+    float dRgb = distance(rgb, uRemapSrc);
+    float wRgb = 1.0 - smoothstep(0.0, uRemapRange, dRgb);
+    vec3 cTex = rgb / max(lum, 0.02);
+    vec3 cSrc = uRemapSrc / srcLum;
+    float dCh = distance(cTex, cSrc);
+    float wCh = (1.0 - smoothstep(0.0, uRemapRange * 0.85, dCh)) * smoothstep(0.04, 0.12, lum);
+    float w = clamp(max(wRgb, wCh), 0.0, 1.0);
+    vec3 remapped = uRemapDst * (lum / srcLum);
+    return mix(rgb, remapped, w);
   }
   void main() {
     vec4 t = texture2D(uTex, vUV);
@@ -10290,6 +10314,7 @@ const spriteShipFS = `
       gl_FragColor = applyNightLit(uTint, uAlpha, vWorld);
       return;
     }
+    t.rgb = remapSourceColor(t.rgb);
     // Same Godot-style emission as asteroid faces: tint × bright albedo × energy.
     vec3 tint = mix(vec3(1.0), uTint, clamp(uTintPow, 0.0, 1.0));
     vec3 albedo = t.rgb * tint;
@@ -10313,6 +10338,9 @@ const ssUTintPow = gl.getUniformLocation(spriteShipProg, 'uTintPow');
 const ssUEmit = gl.getUniformLocation(spriteShipProg, 'uEmit');
 const ssUAlpha = gl.getUniformLocation(spriteShipProg, 'uAlpha');
 const ssUOutline = gl.getUniformLocation(spriteShipProg, 'uOutline');
+const ssURemapSrc = gl.getUniformLocation(spriteShipProg, 'uRemapSrc');
+const ssURemapDst = gl.getUniformLocation(spriteShipProg, 'uRemapDst');
+const ssURemapRange = gl.getUniformLocation(spriteShipProg, 'uRemapRange');
 const spriteShipLightU = {
   night: gl.getUniformLocation(spriteShipProg, 'uFlashNight'),
   ships: gl.getUniformLocation(spriteShipProg, 'uShipLight[0]'),
@@ -10320,6 +10348,20 @@ const spriteShipLightU = {
 };
 const ssAPos = gl.getAttribLocation(spriteShipProg, 'aPos');
 const ssAUV = gl.getAttribLocation(spriteShipProg, 'aUV');
+/** Hull red #A60000 — remap source for UFO turret art. */
+const SPRITE_REMAP_HULL_RED = [0xA6 / 255, 0, 0];
+/** Catch #DD3A3A / #550000 family without eating silver/grey. */
+const SPRITE_REMAP_HULL_RANGE = 0.55;
+function bindSpriteColorRemap(src, dst, range) {
+  const r = range != null ? range : 0;
+  if (r > 0 && src && dst) {
+    gl.uniform3f(ssURemapSrc, src[0], src[1], src[2]);
+    gl.uniform3f(ssURemapDst, dst[0], dst[1], dst[2]);
+    gl.uniform1f(ssURemapRange, r);
+  } else {
+    gl.uniform1f(ssURemapRange, 0);
+  }
+}
 const spriteShipBuf = gl.createBuffer();
 /** One roof panel, both windings: 12 verts × (xy + uv). */
 const spriteShipMesh = new Float32Array(12 * 4);
@@ -10479,6 +10521,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   // Keep sprite palette; emission still uses player tint on bright texels (like rocks).
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, emitPow);
+  bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -15677,7 +15720,11 @@ function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt) {
     const sideY = ufoTurretSideY(ufoOpt, side);
     const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, x, y, angle, bank);
     const aim = ufoTurretAimAngle(mount.x, mount.y, angle, side, target);
-    drawFlatSpriteQuad(mount.x, mount.y, aim, bank, entry, uv, halfL, halfW, 0, COL_WHITE);
+    drawFlatSpriteQuad(mount.x, mount.y, aim, bank, entry, uv, halfL, halfW, 0, COL_WHITE, {
+      src: SPRITE_REMAP_HULL_RED,
+      dst: COL.self,
+      range: SPRITE_REMAP_HULL_RANGE
+    });
   }
 }
 
