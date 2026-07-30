@@ -860,6 +860,8 @@ const STUN_MAX_SPEED = 9;
 const ASTEROID_COLLIDE_DMG_MIN = 10;
 /** Collision shape is this fraction of visual radius / polygon (visual unchanged). */
 const ASTEROID_HIT_SCALE = 0.9;
+/** World asteroid lifetime from create (matches server) — after this, no teleports/portals. */
+const ASTEROID_LIFE_MS = 20000;
 const PLAYER_R = 10 * RES_SCALE;
 const PLAYER_HIT_R = PLAYER_R * 0.3;
 const PLAYER_HIT_R_FRONT = PLAYER_HIT_R * 1.1;
@@ -8414,6 +8416,18 @@ function asteroidClientWrapsExhausted(a) {
   return !!(a && (a.edgeWraps | 0) >= asteroidClientWrapMax(a));
 }
 
+function asteroidClientBornAt(a) {
+  if (!a) return serverNow();
+  if (a.bornAt != null) return a.bornAt;
+  return a.spawnSt || serverNow();
+}
+
+/** True when a world rock's create-time lifetime has elapsed (no more teleports). */
+function asteroidClientLifeExpired(a) {
+  if (!a || a.playerShot || a.centerRock) return false;
+  return serverNow() - asteroidClientBornAt(a) >= ASTEROID_LIFE_MS;
+}
+
 /**
  * Red edge warning: capsule flush on the screen edge.
  * edge: 0 left, 1 right, 2 top, 3 bottom.
@@ -8486,10 +8500,10 @@ function drawPortalDangerIndicators() {
   for (const a of asteroids.values()) {
     // Meteor-gun shots: classic edge teleport only — no portal danger bands.
     if (a.playerShot) continue;
-    // PvP: no danger for smalls. Waves: smalls get one wrap too (skip if spent).
+    // PvP: no danger for smalls. Waves: smalls wrap while lifetime remains.
     if (a.size === 'small' && !practiceMode) continue;
-    // Already used their one wrap — no portal / no opposite-edge warn (waves only).
-    if (practiceMode && asteroidClientWrapsExhausted(a)) continue;
+    // Lifetime over → no more portals/teleports. Still warn for inbound twins mid-arrival.
+    if (!a.portal && asteroidClientLifeExpired(a)) continue;
     const p = asteroidAt(a);
     const xOff = p.x < 0 || p.x > W;
     const yOff = p.y < 0 || p.y > H;
@@ -14840,8 +14854,9 @@ function predictAsteroidEdgeTeleports() {
     if (!off) continue;
 
     // One edge teleport only — further exits wait for server cull (`ad`).
-    // Meteor-gun shots always limited; wave rocks only in practice.
-    if ((a.playerShot || practiceMode) && asteroidClientWrapsExhausted(a)) continue;
+    // Meteor-gun shots always limited; world rocks stop after lifetime.
+    if (a.playerShot && asteroidClientWrapsExhausted(a)) continue;
+    if (!a.playerShot && asteroidClientLifeExpired(a)) continue;
 
     // Over the medium cap: do NOT delete locally — wait for server `ad`.
     // Local deletes caused invisible colliders (server still had the rock; ghosts drew a circle).
@@ -16350,7 +16365,9 @@ function unpackAsteroid(row) {
     edgeWrapMax: row[16] != null ? (row[16] | 0) : 1,
     playerShot: !!(row[17] | 0),
     ownerId: row[18] != null ? (row[18] | 0) : 0,
-    hue
+    hue,
+    // Create-time lifetime clock (wraps refresh spawnSt only).
+    bornAt: row[20] != null ? +row[20] : (row[10] || 0)
   };
 }
 
@@ -16370,6 +16387,7 @@ function addAsteroid(a) {
   a.entered = !asteroidOffScreenAt(a, x, y);
   // Keep server portal bit as-is (inbound twin → danger lines).
   a.portal = !!a.portal;
+  if (a.bornAt == null || !Number.isFinite(+a.bornAt)) a.bornAt = a.spawnSt || serverNow();
   clearAsteroidGridIron(a);
   asteroids.set(a.id, a);
 }
@@ -16403,13 +16421,15 @@ function applyAsteroidWrap(row) {
 
 function pruneAsteroids() {
   for (const [id, a] of asteroids) {
-    const wrapSpent = (practiceMode || a.playerShot) && asteroidClientWrapsExhausted(a);
+    const wrapSpent = a.playerShot && asteroidClientWrapsExhausted(a);
+    const lifeSpent = !a.playerShot && asteroidClientLifeExpired(a);
     // Meteor-gun: cull only after wrap budget spent.
-    // PvP world smalls: cull off-screen. Waves: cull any size after wraps spent.
+    // World rocks: cull off-screen after create lifetime (no more teleports).
+    // PvP world smalls: cull off-screen always.
     const prune =
       (a.playerShot && wrapSpent)
-      || (!a.playerShot && a.size === 'small' && (!practiceMode || wrapSpent))
-      || (!a.playerShot && a.size !== 'small' && wrapSpent);
+      || (!a.playerShot && a.size === 'small' && (!practiceMode || lifeSpent))
+      || (!a.playerShot && a.size !== 'small' && lifeSpent);
     if (!prune) continue;
     const p = asteroidAt(a);
     const m = (a.r || 8) + 24;
@@ -19865,7 +19885,8 @@ function demoCollectAsteroids() {
       a.edgeWrapMax | 0,
       a.playerShot ? 1 : 0,
       a.ownerId != null ? (a.ownerId | 0) : 0,
-      a.hue != null ? (((a.hue * 360) | 0) % 360) : null
+      a.hue != null ? (((a.hue * 360) | 0) % 360) : null,
+      a.bornAt != null ? a.bornAt : a.spawnSt
     ]);
   }
   return out;
@@ -20287,7 +20308,8 @@ function normalizeDemoAsteroidRow(a) {
     a.wrapMax | a.edgeWrapMax | 0,
     a.playerShot ? 1 : 0,
     a.ownerId != null ? (a.ownerId | 0) : 0,
-    a.hue != null ? (((a.hue * 360) | 0) % 360) : null
+    a.hue != null ? (((a.hue * 360) | 0) % 360) : null,
+    a.bornAt != null ? a.bornAt : (a.spawnSt || 0)
   ];
 }
 

@@ -847,7 +847,9 @@ function packAsteroid(a) {
     asteroidEdgeWrapMax(a),
     a.playerShot ? 1 : 0,
     a.ownerId != null ? (a.ownerId | 0) : 0,
-    packAsteroidHue(a)
+    packAsteroidHue(a),
+    // Create-time for 20s lifetime (wraps refresh spawnSt, not life).
+    asteroidBornAt(a)
   ];
 }
 
