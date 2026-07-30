@@ -14148,7 +14148,12 @@ function localLaserSegments(ox, oy, dirX, dirY, maxDist) {
   for (const e of enemies.values()) {
     if ((e.hp | 0) <= 0) continue;
     const p = enemyAt(e);
-    const t = raycastCircleToroidal(ox, oy, dirX, dirY, p.x, p.y, enemyHitR(e), best);
+    let t;
+    if (enemyUsesRectHit(e)) {
+      t = raycastEnemyRectToroidal(ox, oy, dirX, dirY, p, p.angle, best);
+    } else {
+      t = raycastCircleToroidal(ox, oy, dirX, dirY, p.x, p.y, enemyHitR(e), best);
+    }
     if (t != null && t < best) {
       best = t;
       hitX = ox + dirX * t;
@@ -14522,6 +14527,14 @@ const ENEMY_R = {
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE
 };
+/**
+ * UFO (Heavy 370) after 270° CW: fw=52, fh=84.
+ * Hitbox = full sprite length × one roof-plane width (fw/2). Match server.
+ */
+const ENEMY_UFO_HIT_LEN = 84;
+const ENEMY_UFO_HIT_WID = 26;
+const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
+ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 
 function enemyWanderSpeedOf(e) {
   const s = e && +e.speed;
@@ -14533,7 +14546,65 @@ function enemyWanderSpeedOf(e) {
 
 function enemyHitR(e) {
   if (!e) return ENEMY_R.common;
+  if (e.kind === 'ufo') return ENEMY_UFO_HIT_R;
   return ENEMY_R[e.kind] || ENEMY_R.common;
+}
+
+function enemyUsesRectHit(e) {
+  return !!(e && e.kind === 'ufo');
+}
+
+/** Ray vs oriented AABB in local space; returns t or null. */
+function raycastOrientedRect(ox, oy, dx, dy, cx, cy, angle, hl, hw, maxDist) {
+  const c = Math.cos(angle || 0);
+  const s = Math.sin(angle || 0);
+  const fx = ox - cx;
+  const fy = oy - cy;
+  const lx = fx * c + fy * s;
+  const ly = -fx * s + fy * c;
+  const ldx = dx * c + dy * s;
+  const ldy = -dx * s + dy * c;
+  let tmin = 0;
+  let tmax = maxDist != null ? maxDist : 1e12;
+
+  function slab(p, d, minB, maxB) {
+    if (Math.abs(d) < 1e-12) {
+      if (p < minB || p > maxB) return false;
+      return true;
+    }
+    let t1 = (minB - p) / d;
+    let t2 = (maxB - p) / d;
+    if (t1 > t2) {
+      const tmp = t1; t1 = t2; t2 = tmp;
+    }
+    tmin = Math.max(tmin, t1);
+    tmax = Math.min(tmax, t2);
+    return tmin <= tmax;
+  }
+
+  if (!slab(lx, ldx, -hl, hl)) return null;
+  if (!slab(ly, ldy, -hw, hw)) return null;
+  const tHit = tmin >= 0 ? tmin : tmax;
+  if (tHit < 0 || (maxDist != null && tHit > maxDist)) return null;
+  return tHit;
+}
+
+function raycastEnemyRectToroidal(ox, oy, dx, dy, e, angle, maxDist) {
+  const hl = ENEMY_UFO_HIT_LEN * 0.5;
+  const hw = ENEMY_UFO_HIT_WID * 0.5;
+  let best = null;
+  for (let oxw = -W; oxw <= W; oxw += W) {
+    for (let oyw = -H; oyw <= H; oyw += H) {
+      const t = raycastOrientedRect(
+        ox, oy, dx, dy,
+        e.x + oxw, e.y + oyw, angle || 0,
+        hl, hw, maxDist
+      );
+      if (t == null) continue;
+      if (best == null || t < best) best = t;
+    }
+  }
+  return best;
 }
 
 function enemyMoveTypeOf(e) {
@@ -15255,7 +15326,10 @@ function drawEnemies(dt) {
       const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
     }
-    if (showHit) drawHitCircle(x, y, enemyHitR(e), COL.debug);
+    if (showHit) {
+      if (enemyUsesRectHit(e)) drawHitRect(x, y, p.angle, ENEMY_UFO_HIT_LEN, ENEMY_UFO_HIT_WID, COL.debug);
+      else drawHitCircle(x, y, enemyHitR(e), COL.debug);
+    }
   }
   drawEnemyCommonCharges();
 }
@@ -16692,6 +16766,30 @@ function drawHitCircle(cx, cy, r, color) {
   const n = (v.length / 2) | 0;
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
+    drawThickSegment(v[i * 2], v[i * 2 + 1], v[j * 2], v[j * 2 + 1], outlineW, color, 0.85);
+  }
+}
+
+/** Oriented 2D hit rectangle (UFO OBB). len along facing, wid perpendicular. */
+function drawHitRect(cx, cy, angle, len, wid, color) {
+  const outlineW = 2 * Math.max(1, getRenderScale());
+  const hl = len * 0.5;
+  const hw = wid * 0.5;
+  const c = Math.cos(angle || 0);
+  const s = Math.sin(angle || 0);
+  const corners = [
+    [hl, hw], [hl, -hw], [-hl, -hw], [-hl, hw]
+  ];
+  const v = new Float32Array(8);
+  for (let i = 0; i < 4; i++) {
+    const lx = corners[i][0];
+    const ly = corners[i][1];
+    v[i * 2] = cx + lx * c - ly * s;
+    v[i * 2 + 1] = cy + lx * s + ly * c;
+  }
+  drawFilledPoly(v, color, 0.5);
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
     drawThickSegment(v[i * 2], v[i * 2 + 1], v[j * 2], v[j * 2 + 1], outlineW, color, 0.85);
   }
 }

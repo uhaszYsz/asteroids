@@ -372,6 +372,14 @@ const ENEMY_R = {
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE
 };
+/**
+ * UFO (Heavy 370) after 270° CW load: fw=52, fh=84.
+ * Hitbox = 2D OBB: full sprite length × one roof-plane width (fw/2), matching drawSpriteShipPlane.
+ */
+const ENEMY_UFO_HIT_LEN = 84;
+const ENEMY_UFO_HIT_WID = 26;
+const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
+ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 const ENEMY_HP = {
   common: 95,
   ufo: 300,
@@ -1624,7 +1632,7 @@ function makeEnemy(kind, wave, weapon) {
     angle: 0,
     dir: 0,
     hp: ENEMY_HP[k],
-    r: ENEMY_R[k],
+    r: k === 'ufo' ? ENEMY_UFO_HIT_R : ENEMY_R[k],
     tx: 0,
     ty: 0,
     fireCd: firstShotCd,
@@ -2136,7 +2144,109 @@ function damageEnemy(room, e, dmg) {
   if (wasCommon) tryPromoteQueuedCommons(room);
 }
 
+function enemyUsesRectHit(e) {
+  return !!(e && e.kind === 'ufo');
+}
+
+/** Local coords of world point relative to enemy center/facing (toroidal). */
+function enemyLocalDelta(e, px, py) {
+  const wx = shortestWrapDelta(e.x, px, W);
+  const wy = shortestWrapDelta(e.y, py, H);
+  const c = Math.cos(e.angle || 0);
+  const s = Math.sin(e.angle || 0);
+  return {
+    lx: wx * c + wy * s,
+    ly: -wx * s + wy * c
+  };
+}
+
+function circleHitsEnemyRect(cx, cy, cr, e) {
+  const hl = ENEMY_UFO_HIT_LEN * 0.5;
+  const hw = ENEMY_UFO_HIT_WID * 0.5;
+  const { lx, ly } = enemyLocalDelta(e, cx, cy);
+  const qx = Math.max(-hl, Math.min(hl, lx));
+  const qy = Math.max(-hw, Math.min(hw, ly));
+  const dx = lx - qx;
+  const dy = ly - qy;
+  return dx * dx + dy * dy <= cr * cr;
+}
+
+/** Ray vs oriented rect; returns distance t along ray or null. */
+function raycastOrientedRect(ox, oy, dx, dy, cx, cy, angle, hl, hw, maxDist) {
+  const c = Math.cos(angle || 0);
+  const s = Math.sin(angle || 0);
+  const fx = ox - cx;
+  const fy = oy - cy;
+  const lx = fx * c + fy * s;
+  const ly = -fx * s + fy * c;
+  const ldx = dx * c + dy * s;
+  const ldy = -dx * s + dy * c;
+  let tmin = 0;
+  let tmax = maxDist != null ? maxDist : 1e12;
+
+  function slab(p, d, minB, maxB) {
+    if (Math.abs(d) < 1e-12) {
+      if (p < minB || p > maxB) return false;
+      return true;
+    }
+    let t1 = (minB - p) / d;
+    let t2 = (maxB - p) / d;
+    if (t1 > t2) {
+      const tmp = t1; t1 = t2; t2 = tmp;
+    }
+    tmin = Math.max(tmin, t1);
+    tmax = Math.min(tmax, t2);
+    return tmin <= tmax;
+  }
+
+  if (!slab(lx, ldx, -hl, hl)) return null;
+  if (!slab(ly, ldy, -hw, hw)) return null;
+  const tHit = tmin >= 0 ? tmin : tmax;
+  if (tHit < 0 || (maxDist != null && tHit > maxDist)) return null;
+  return tHit;
+}
+
+function raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist) {
+  const hl = ENEMY_UFO_HIT_LEN * 0.5;
+  const hw = ENEMY_UFO_HIT_WID * 0.5;
+  let best = null;
+  for (let oxw = -W; oxw <= W; oxw += W) {
+    for (let oyw = -H; oyw <= H; oyw += H) {
+      const t = raycastOrientedRect(
+        ox, oy, dx, dy,
+        e.x + oxw, e.y + oyw, e.angle || 0,
+        hl, hw, maxDist
+      );
+      if (t == null) continue;
+      if (best == null || t < best.t) {
+        best = { t, x: ox + dx * t, y: oy + dy * t };
+      }
+    }
+  }
+  return best;
+}
+
+function distToEnemyHit(px, py, e) {
+  if (enemyUsesRectHit(e)) {
+    const hl = ENEMY_UFO_HIT_LEN * 0.5;
+    const hw = ENEMY_UFO_HIT_WID * 0.5;
+    const { lx, ly } = enemyLocalDelta(e, px, py);
+    const qx = Math.max(-hl, Math.min(hl, lx));
+    const qy = Math.max(-hw, Math.min(hw, ly));
+    return Math.hypot(lx - qx, ly - qy);
+  }
+  const er = e.r || ENEMY_R.common || 10;
+  return Math.max(0, Math.sqrt(torusDistSq(px, py, e.x, e.y)) - er);
+}
+
 function hitBulletEnemy(b, e) {
+  if (enemyUsesRectHit(e)) {
+    const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
+    let br = cfg.size || 2;
+    if (cfg.col === 'ellipse') br = Math.max(cfg.size || 2, (cfg.size || 2) * (cfg.scaleY || 1));
+    if (cfg.col === 'line') br = Math.max(cfg.width || 2, 2);
+    return circleHitsEnemyRect(b.x, b.y, br, e);
+  }
   return hitBulletTarget(b, e.x, e.y, e.r, false);
 }
 
@@ -4539,7 +4649,9 @@ function resolvePlayerShotEnemyHits(room) {
     for (let ei = room.enemies.length - 1; ei >= 0; ei--) {
       const e = room.enemies[ei];
       if (!e || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
-      const hit = circleVsAsteroidPoly({ x: e.x, y: e.y, r: e.r || 10 }, shot);
+      const hit = enemyUsesRectHit(e)
+        ? circleHitsEnemyRect(shot.x, shot.y, shot.r || 10, e)
+        : circleVsAsteroidPoly({ x: e.x, y: e.y, r: e.r || 10 }, shot);
       if (!hit) continue;
       // Damage only — leave velocities alone (no push / stun).
       shot.enemyHitCd = 6;
@@ -4809,8 +4921,13 @@ function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist) {
   // Solo / coop enemies (commons, UFOs, carriers).
   for (const e of room.enemies || []) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
-    const er = e.r || ENEMY_R.common || 10;
-    const hit = raycastCircleToroidal(ox, oy, dx, dy, e.x, e.y, er, maxDist);
+    let hit = null;
+    if (enemyUsesRectHit(e)) {
+      hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist);
+    } else {
+      const er = e.r || ENEMY_R.common || 10;
+      hit = raycastCircleToroidal(ox, oy, dx, dy, e.x, e.y, er, maxDist);
+    }
     if (!hit) continue;
     if (!best || hit.t < best.t) {
       best = { t: hit.t, x: hit.x, y: hit.y, kind: 'enemy', target: e };
@@ -4885,9 +5002,7 @@ function applyRocketBlast(room, ownerId, x, y, preAids) {
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (!enemyIsSpawned(e) || e.hp <= 0) continue;
-      const er = e.r || 0;
-      const cd = Math.sqrt(torusDistSq(x, y, e.x, e.y));
-      const dist = Math.max(0, cd - er);
+      const dist = distToEnemyHit(x, y, e);
       const dmg = rocketBlastDamageAt(dist, R, maxDmg);
       if (dmg > 0) damageEnemy(room, e, dmg);
     }
@@ -5164,8 +5279,13 @@ function fireRailgun(room, p) {
   }
   for (const e of room.enemies || []) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
-    const er = e.r || ENEMY_R.common || 10;
-    const hit = raycastCircleToroidal(ox, oy, dx, dy, e.x, e.y, er, range);
+    let hit = null;
+    if (enemyUsesRectHit(e)) {
+      hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, range);
+    } else {
+      const er = e.r || ENEMY_R.common || 10;
+      hit = raycastCircleToroidal(ox, oy, dx, dy, e.x, e.y, er, range);
+    }
     if (hit) softHits.push({ t: hit.t, x: hit.x, y: hit.y, kind: 'enemy', target: e });
   }
   const rocketHits = [];
