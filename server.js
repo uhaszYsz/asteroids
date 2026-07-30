@@ -316,7 +316,7 @@ const STUN_DECEL_TICKS = Math.round(3 * TPS);
 /** Ignore re-collides briefly after a bounce. */
 const COLLIDE_IFRAME_TICKS = Math.round(0.35 * TPS);
 /** Post-respawn / match-start invuln: max duration; also ends when leaving spawn area. */
-const GODMODE_TICKS = Math.round(8 * TPS);
+const GODMODE_TICKS = Math.round(5 * TPS);
 /** 1v1 spawn: offset from arena center (px). */
 const SPAWN_CENTER_OFFSET = 250;
 /** Spawn safe zone radius (asteroid clear + leave-to-end-godmode). */

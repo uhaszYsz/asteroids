@@ -873,7 +873,7 @@ const STUN_SPIN = 20 * Math.PI / 180;
 const STUN_END_AV = 5 * Math.PI / 180;
 const STUN_DECEL_TICKS = Math.round(3 * TPS);
 const COLLIDE_IFRAME_TICKS = Math.round(0.35 * TPS);
-const GODMODE_TICKS = Math.round(8 * TPS);
+const GODMODE_TICKS = Math.round(5 * TPS);
 /** Matches server: spawn safe zone (asteroid clear + leave-to-end-godmode). */
 const GODMODE_SPAWN_CLEAR_R = 75;
 const SPAWN_CENTER_OFFSET = 250;
