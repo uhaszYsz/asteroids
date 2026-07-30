@@ -7549,7 +7549,17 @@ const server = http.createServer((req, res) => {
   if (!fp.startsWith(__dirname) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
     res.writeHead(404); res.end(); return;
   }
-  res.writeHead(200, { 'Content-Type': MIME[path.extname(fp)] || 'text/plain' });
+  const ext = path.extname(fp);
+  const base = path.basename(fp);
+  const headers = { 'Content-Type': MIME[ext] || 'text/plain' };
+  // HTML / SW / manifest must revalidate so deploys take effect.
+  if (base === 'index.html' || base === 'sw.js' || base === 'asset-manifest.json') {
+    headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+  } else {
+    // Long-lived; service worker also hash-keys assets. Query ?v= still busts browsers without SW.
+    headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+  }
+  res.writeHead(200, headers);
   fs.createReadStream(fp).pipe(res);
 });
 

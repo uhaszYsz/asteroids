@@ -6,6 +6,25 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&family=Press+Start+2P&display=swap" rel="stylesheet">
+  <script>
+    // Hash-keyed asset cache: GitHub/jsDelivr first, VPS fallback (see sw.js).
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').then(function (reg) {
+          function sync() {
+            var w = navigator.serviceWorker.controller || (reg.active);
+            if (w) w.postMessage({ type: 'SYNC_ASSETS' });
+          }
+          if (navigator.serviceWorker.controller) sync();
+          else navigator.serviceWorker.addEventListener('controllerchange', sync);
+          // Re-check hashes on every refresh once controlling.
+          sync();
+        }).catch(function (err) {
+          console.warn('SW register failed', err);
+        });
+      });
+    }
+  </script>
   <style>
     * { margin: 0; box-sizing: border-box; }
     body {
@@ -2045,6 +2064,6 @@
 <script src="ship-meshes.js?v=1"></script>
 <script src="alien-ship-meshes.js?v=1"></script>
 <script src="ships-voxel-meshes.js?v=1"></script>
-<script src="game.js?v=641"></script>
+<script src="game.js?v=642"></script>
 </body>
 </html>
