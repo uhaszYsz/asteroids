@@ -14643,7 +14643,7 @@ function pickForwardGunLocals(mesh) {
 }
 
 /** Common enemy = MicroRecon voxel (textured), half player pack scale. */
-const ENEMY_COMMON_SCALE = 0.5;
+const ENEMY_COMMON_SCALE = 0.9;
 const ENEMY_COMMON_MESH = (() => {
   const src = getShipMeshById('voxel_microrecon');
   const fallback = (!src || src.id !== 'voxel_microrecon') ? getShipMeshById('adder') : src;
