@@ -10121,8 +10121,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
   const entry = spriteShipTexById.get(spec.id);
   if (!entry || !entry.ready || !entry.tex) return;
 
-  const bank = shipBankSmoothed(id, av, dt);
-  const halfL = 7.5 * RES_SCALE;
+  const bank = shipBankSmoothed(id, av, dt) * 0.5;
   const halfW = halfL * (spec.fw / Math.max(1, spec.fh));
   const cp = Math.cos(SPRITE_ROOF_PITCH);
   const sp = Math.sin(SPRITE_ROOF_PITCH);
@@ -14623,7 +14622,7 @@ function pickForwardGunLocals(mesh) {
 }
 
 /** Common enemy = Corvette 05 (textured), slightly smaller than player pack scale. */
-const ENEMY_COMMON_SCALE = 0.85;
+const ENEMY_COMMON_SCALE = 0.5;
 const ENEMY_COMMON_MESH = (() => {
   const src = getShipMeshById('fbx_corvette_05');
   const fallback = (!src || src.id !== 'fbx_corvette_05') ? getShipMeshById('adder') : src;
@@ -14982,7 +14981,7 @@ function drawEnemyCommonCharges() {
 function drawEnemyUfo(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
-    silhouetteOnly: true,
+    noOutline: true,
     noTint: true,
     strongEmit: true
   });
