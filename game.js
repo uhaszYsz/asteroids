@@ -19814,7 +19814,7 @@ const DEMO_STORE_PREFIX = 'asteroids_demo_';
 const DEMO_NET_TYPES = new Set([
   'bf', 'bu', 'bd', 'af', 'ad', 'aw', 'lf', 'rf', 'rc',
   'die', 'boom', 'round', 'go', 'paused', 'resumed',
-  'wpn', 'pup', 'eh', 'ed', 'ef', 'eu', 'es', 'vd', 'colors', 'roster'
+  'wpn', 'pup', 'eh', 'ed', 'ef', 'eu', 'es', 'ech', 'vd', 'colors', 'roster'
 ]);
 
 function demoSanitizeName(name) {
@@ -19879,6 +19879,32 @@ function demoCollectBullets() {
   return out;
 }
 
+/** Same row layout as server packEnemy / net `ef`. */
+function demoCollectEnemies() {
+  const out = [];
+  for (const e of enemies.values()) {
+    out.push([
+      e.id | 0,
+      e.kind || 'common',
+      e.spawnX != null ? e.spawnX : e.x,
+      e.spawnY != null ? e.spawnY : e.y,
+      e.tx, e.ty,
+      e.spawnSt || 0,
+      e.hp | 0,
+      e.weapon || '',
+      e.angle || 0,
+      e.move || ENEMY_MOVE_DESTINATION_SMOOTH,
+      e.vx || 0,
+      e.vy || 0,
+      e.x,
+      e.y,
+      e.dir != null ? e.dir : e.angle,
+      e.speed || 0
+    ]);
+  }
+  return out;
+}
+
 function demoPushEvent(ev) {
   if (!demoRec || !ev) return;
   if (demoRec.events.length >= 350000) {
@@ -19900,6 +19926,7 @@ function demoRecordSnapshot(kind) {
     ships: demoCollectShips(),
     asteroids: demoCollectAsteroids(),
     bullets: demoCollectBullets(),
+    enemies: demoCollectEnemies(),
     scores: [...scores.entries()],
     names: [...rosterNames.entries()],
     myId,
@@ -20090,6 +20117,11 @@ function demoApplySnap(ev) {
       addBullet(b, false, false);
     }
   }
+  enemies.clear();
+  enemyCharges.clear();
+  if (ev.enemies) {
+    for (const row of ev.enemies) addEnemy(unpackEnemy(row));
+  }
   demoApplyShips(ev.ships);
 }
 
@@ -20158,6 +20190,30 @@ function demoReplayEvent(ev) {
   }
   if (ev.t === 'rf' && ev.l) {
     applyRailFireMsg({ t: 'rf', l: ev.l, hit: ev.hit, ix: ev.ix, iy: ev.iy });
+    return;
+  }
+  if (ev.t === 'ef' && ev.e) {
+    addEnemy(unpackEnemy(ev.e));
+    return;
+  }
+  if (ev.t === 'eu' && ev.e) {
+    applyEnemyUpdate(ev.e);
+    return;
+  }
+  if (ev.t === 'es' && ev.e) {
+    applyEnemySnapList(ev.e, ev.st);
+    return;
+  }
+  if (ev.t === 'eh') {
+    applyEnemyHp(ev.id, ev.hp);
+    return;
+  }
+  if (ev.t === 'ed') {
+    removeEnemy(ev.id | 0, ev.x, ev.y, !!ev.silent);
+    return;
+  }
+  if (ev.t === 'ech') {
+    beginEnemyCharge(ev.id | 0, ev.ms | 0, ev.side | 0, ev.kind);
     return;
   }
   if (ev.t === 'die') {

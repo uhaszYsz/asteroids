@@ -778,7 +778,7 @@ function broadcastPresence() {
 
 const DEMO_MIRROR_TYPES = new Set([
   'bd', 'bu', 'lf', 'rf', 'rc', 'die', 'boom', 'round', 'go',
-  'paused', 'resumed', 'wpn', 'pup', 'eh', 'ed', 'ef', 'eu', 'es', 'vd',
+  'paused', 'resumed', 'wpn', 'pup', 'eh', 'ed', 'ef', 'eu', 'es', 'ech', 'vd',
   'colors', 'roster'
 ]);
 
@@ -5839,10 +5839,15 @@ function packDemoShips(room) {
 function seedDemoRecording(room) {
   if (!room || !room.demo) return;
   const scores = packScoreboard(room).map((row) => [row[0] | 0, row[1] | 0]);
+  const enemyRows = [];
+  for (const e of room.enemies || []) {
+    if (enemyIsSpawned(e)) enemyRows.push(packEnemy(e));
+  }
   demoRecorder.recordSnap(room, {
     ships: packDemoShips(room),
     asteroids: (room.asteroids || []).map(packAsteroid),
     bullets: (room.bullets || []).map(packBullet),
+    enemies: enemyRows,
     scores,
     names: packRosterNames(room),
     myId: 0,
