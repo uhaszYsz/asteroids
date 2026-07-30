@@ -15155,15 +15155,13 @@ const ENEMY_UFO_TURRET_COL = 2;
 const ENEMY_UFO_TURRET_ROW = 3;
 const ENEMY_UFO_TURRET_SCALE = 0.42;
 const ENEMY_UFO_TURRET_Z = -10;
-/** Inset from wing tip toward hull center, as a fraction of full plane width (fw). */
-const ENEMY_UFO_TURRET_INSET_FRAC = 0.2;
+/** Side offset as a fraction of UFO plane half-width (0.5 = mid wing). */
+const ENEMY_UFO_TURRET_SIDE_FRAC = 0.5;
 
 function ufoTurretSideY(ufoOpt, side) {
   const ufoSpec = ufoOpt && ufoOpt.sprite;
   const halfW = Math.max(1, (ufoSpec && ufoSpec.fw) || 52) * 0.5 * ENEMY_UFO_SPRITE_SCALE;
-  const fullW = halfW * 2;
-  const inset = fullW * ENEMY_UFO_TURRET_INSET_FRAC;
-  return Math.max(1, halfW - inset) * (side < 0 ? -1 : 1);
+  return Math.max(1, halfW * ENEMY_UFO_TURRET_SIDE_FRAC) * (side < 0 ? -1 : 1);
 }
 const ENEMY_UFO_MESH = (() => {
   const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_transtellar');
@@ -15570,8 +15568,7 @@ function drawEnemyCommonCharges() {
     if (kind === 'ufo') {
       const side = (ch.side | 0) || 1;
       const ufoOpt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
-      const ufoSpec = ufoOpt && ufoOpt.sprite;
-      const sideY = Math.max(1, (ufoSpec && ufoSpec.fw) || 52) * 0.5 * ENEMY_UFO_SPRITE_SCALE * side;
+      const sideY = ufoTurretSideY(ufoOpt, side);
       const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, p.x, p.y, p.angle, bank);
       const target = ufoAimTargetPose();
       const aim = ufoTurretAimAngle(mount.x, mount.y, p.angle, side, target);
@@ -15663,11 +15660,9 @@ function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt) {
   const tSc = ENEMY_UFO_TURRET_SCALE;
   const halfL = cell * 0.5 * tSc;
   const halfW = cell * 0.5 * tSc;
-  const ufoSpec = ufoOpt && ufoOpt.sprite;
-  const ufoHalfW = Math.max(1, (ufoSpec && ufoSpec.fw) || 52) * 0.5 * ENEMY_UFO_SPRITE_SCALE;
   const target = ufoAimTargetPose();
   for (const side of [-1, 1]) {
-    const sideY = ufoHalfW * side;
+    const sideY = ufoTurretSideY(ufoOpt, side);
     const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, x, y, angle, bank);
     const aim = ufoTurretAimAngle(mount.x, mount.y, angle, side, target);
     drawFlatSpriteQuad(mount.x, mount.y, aim, bank, entry, uv, halfL, halfW, 0, COL_WHITE);
