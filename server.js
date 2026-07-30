@@ -64,10 +64,10 @@ const WEAPONS = {
     shotgunSpeeds: [4 * RES_SCALE, 9 * RES_SCALE],
     relative: false
   },
-  /** Charge 0.5s then one raycast; 60-tick cooldown between shots; infinite reloads. */
+  /** Charge 0.5s then one raycast; 45-tick cooldown between shots; infinite reloads. */
   railgun: {
     ammo: 1,
-    cooldown: 60,
+    cooldown: 45,
     reload: 1,
     range: Math.hypot(W, H),
     charge: Math.round(0.5 * TPS)

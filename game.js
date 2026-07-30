@@ -10751,7 +10751,7 @@ const WEAPONS = {
     spread: 30,
     shotgunSpeeds: [4 * RES_SCALE, 9 * RES_SCALE]
   },
-  railgun: { ammo: 1, cooldown: 60, reload: 1, charge: Math.round(0.5 * TPS) },
+  railgun: { ammo: 1, cooldown: 45, reload: 1, charge: Math.round(0.5 * TPS) },
   plasma: { ammo: 50, cooldown: 2, reload: Math.round(2 * TPS), speed: 9 * RES_SCALE * 1.7 },
   voidcannon: { ammo: 1, cooldown: 1, reload: 60, speed: 2.1504 * RES_SCALE },
   asteroidgun: { ammo: 1, cooldown: 3, reload: Math.round(2.5 * TPS), speed: 8 * RES_SCALE }
