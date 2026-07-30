@@ -15643,7 +15643,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
   }
 }
 
-/** Flat z=-10 turrets on UFO wings; each aims player in its 180° side arc. */
+/** Flat z=-10 turrets — visual only; each aims player in its 180° flank arc. */
 function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt) {
   const sheet = TURRET_SHEETS[ENEMY_UFO_TURRET_SHEET];
   const entry = turretTexById.get(sheet.id);

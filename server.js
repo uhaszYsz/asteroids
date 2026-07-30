@@ -357,9 +357,6 @@ const ENEMY_COMMON_CHARGE = TPS;
 const ENEMY_UFO_RELOAD = Math.round(3.5 * TPS);
 /** UFO turret pre-shot telegraph (red charge sphere). */
 const ENEMY_UFO_CHARGE = Math.round(0.5 * TPS);
-/** Side mount ±Y (Heavy 370 half-width after rotate) and muzzle along aim. */
-const ENEMY_UFO_TURRET_SIDE = 26;
-const ENEMY_UFO_TURRET_MUZZLE = 64 * 0.42 * 0.5;
 /** After spawn, wait this long before the first shot (all enemy kinds). */
 const ENEMY_FIRST_SHOT_MIN_S = 4;
 const ENEMY_FIRST_SHOT_MAX_S = 6;
@@ -1569,35 +1566,7 @@ function emitEnemyCharge(room, e, opts) {
   });
 }
 
-function angleDeltaSigned(from, to) {
-  let d = to - from;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return d;
-}
-
-/** Clamp world aim into the left (side<0) or right (side>0) 180° of ship facing. */
-function clampAimToShipSide(aim, shipAngle, side) {
-  const d = angleDeltaSigned(shipAngle, aim);
-  if (side < 0) {
-    if (d > 0) return shipAngle;
-    if (d < -Math.PI) return shipAngle - Math.PI;
-    return shipAngle + d;
-  }
-  if (d < 0) return shipAngle;
-  if (d > Math.PI) return shipAngle + Math.PI;
-  return shipAngle + d;
-}
-
-function ufoTurretMountXY(e, side) {
-  const a = e.angle || 0;
-  const ly = (side < 0 ? -1 : 1) * ENEMY_UFO_TURRET_SIDE;
-  return {
-    x: e.x - ly * Math.sin(a),
-    y: e.y + ly * Math.cos(a)
-  };
-}
-
+/** Which UFO flank faces the target (for charge orb / turret visual). */
 function pickUfoFireSide(e, tx, ty) {
   const { ly } = enemyLocalDelta(e, tx, ty);
   return ly < 0 ? -1 : 1;
@@ -2015,12 +1984,12 @@ function fireEnemyLineBullet(room, e, ang, spd, dmg) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
-/** UFO lead-aim rocket (tiny, skips asteroids). Optional muzzle override. */
-function fireEnemyRocket(room, e, ang, spd, dmg, ox, oy) {
+/** UFO lead-aim rocket (tiny, skips asteroids). Fixed muzzle from hull center — turrets are visual only. */
+function fireEnemyRocket(room, e, ang, spd, dmg) {
   const speed = spd != null ? spd : ENEMY_UFO_ROCKET_SPEED;
   const damage = dmg != null ? dmg : BULLET_TYPES.enemyRocket.dmg;
-  const x = ox != null ? ox : (e.x + Math.cos(ang) * (e.r + 4));
-  const y = oy != null ? oy : (e.y + Math.sin(ang) * (e.r + 4));
+  const x = e.x + Math.cos(ang) * (e.r + 4);
+  const y = e.y + Math.sin(ang) * (e.r + 4);
   const now = Date.now();
   const b = {
     id: room.nextBulletId++,
@@ -2051,19 +2020,14 @@ function enemyTryFire(room, e) {
   if ((e.fireCd | 0) > 0) return;
 
   if (e.kind === 'ufo') {
-    const side = e.ufoFireSide != null ? (e.ufoFireSide | 0) : pickUfoFireSide(e, target.x, target.y);
-    const mount = ufoTurretMountXY(e, side);
-    const angRaw = leadInterceptAngleFlat(
-      mount.x, mount.y,
+    // Full 360° lead aim from hull — not clamped to turret arcs.
+    const ang = leadInterceptAngleFlat(
+      e.x, e.y,
       target.x, target.y,
       target.vx || 0, target.vy || 0,
       ENEMY_UFO_ROCKET_SPEED
     );
-    const ang = clampAimToShipSide(angRaw, e.angle || 0, side);
-    const mx = mount.x + Math.cos(ang) * ENEMY_UFO_TURRET_MUZZLE;
-    const my = mount.y + Math.sin(ang) * ENEMY_UFO_TURRET_MUZZLE;
-    fireEnemyRocket(room, e, ang, null, null, mx, my);
-    e.ufoFireSide = 0;
+    fireEnemyRocket(room, e, ang);
     e.fireCd = ENEMY_UFO_RELOAD;
     return;
   }
@@ -2168,8 +2132,8 @@ function updateEnemies(room) {
     if (e.kind === 'ufo' && (e.fireCd | 0) === ENEMY_UFO_CHARGE) {
       const tgt = soloHumanTarget(room);
       if (tgt) {
-        e.ufoFireSide = pickUfoFireSide(e, tgt.x, tgt.y);
-        emitEnemyCharge(room, e, { side: e.ufoFireSide });
+        // Charge orb on the flank facing the player (turrets visual only).
+        emitEnemyCharge(room, e, { side: pickUfoFireSide(e, tgt.x, tgt.y) });
       }
     }
 
