@@ -8951,12 +8951,9 @@ const astTexFS = `
     vec3 tint = mix(vec3(1.0), uTint, clamp(uTintPow, 0.0, 1.0));
     vec3 albedo = t.rgb * tint;
     if (uMaps > 0.5) {
-      vec3 nm = texture2D(uNrm, uv).xyz * 2.0 - 1.0;
       vec3 N = normalize(uFaceN);
-      vec3 up = abs(N.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
-      vec3 T = normalize(cross(up, N));
-      vec3 B = cross(N, T);
-      vec3 nW = normalize(T * nm.x + B * nm.y + N * nm.z);
+      // Normal map disabled for now — flat face lighting + height/rough only.
+      vec3 nW = N;
       vec3 L = normalize(uLDir);
       float ndl = max(dot(nW, L), 0.0);
       float shade = 0.20 + 0.80 * ndl;
