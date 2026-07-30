@@ -12924,6 +12924,28 @@ function adaptiveInputDelay() {
   return Math.min(dMax, d);
 }
 
+/**
+ * How many unacked input seqs we may have in flight / on the server queue.
+ * Must cover RTT (+ jitter) so we don't starve, but stay tight enough that a
+ * hitch/catchup/clock drift cannot build a sticky multi-second shoot delay.
+ */
+function maxUnackedInputs() {
+  const rttTicks = Math.ceil(Math.max(0, pingMs) / TICK_MS);
+  const jitterTicks = Math.ceil(Math.max(0, pingJitter) / TICK_MS);
+  const dly = adaptiveInputDelay();
+  // cmdDelay is local-only; still reserve room so release buffer stays valid.
+  return Math.min(12, Math.max(dly + 2, rttTicks + jitterTicks + 2, 3));
+}
+
+function unackedInputCount() {
+  return Math.max(0, (inputSeq | 0) - (ackedSeq | 0));
+}
+
+/** False when producing another frame would deepen a sticky server input queue. */
+function canProduceInputFrame() {
+  return unackedInputCount() < maxUnackedInputs();
+}
+
 /** How far behind realtime to sample remotes (ms). */
 function adaptiveInterpMs() {
   const fixed = cv('cl_interp');
@@ -13120,9 +13142,19 @@ function syncSimTicks() {
     return;
   }
 
+  // Never flood the server input queue. Catchup after a hitch used to enqueue
+  // many frames at once; server only eats one/tick so shoot lag stuck forever.
+  if (!canProduceInputFrame()) {
+    // Clock estimate ran ahead (or queue already deep): skip ticking until acks
+    // drain unacked depth. Snap cursor so we don't bank a huge catchup burst.
+    if (behind > maxUnackedInputs()) clientTickCursor = target;
+    return;
+  }
+
   let steps = 0;
   const maxCatchup = Math.max(1, cv('cl_catchup') | 0);
   while (clientTickCursor < target && steps < maxCatchup) {
+    if (!canProduceInputFrame()) break;
     clientTickCursor++;
     predictTick(false);
     steps++;
@@ -13187,7 +13219,7 @@ function updateHud() {
   // Keep debug status available but tucked away — sports HUD owns the score moments.
   statusEl.classList.add('hidden');
   statusEl.textContent =
-    `room ${roomId || '?'} | p${myId} ${player.hp}hp | ping ${Math.round(pingMs)}ms ±${Math.round(pingJitter)} | dly ${adaptiveInputDelay()} | srv ${fmtServerTime()} | game ${fmtGameTime(gameTimeSec())}${practiceMode ? ' | SOLO WAVE ' + (soloWave || 1) : ''}`;
+    `room ${roomId || '?'} | p${myId} ${player.hp}hp | ping ${Math.round(pingMs)}ms ±${Math.round(pingJitter)} | dly ${adaptiveInputDelay()} | unack ${unackedInputCount()}/${maxUnackedInputs()} | srv ${fmtServerTime()} | game ${fmtGameTime(gameTimeSec())}${practiceMode ? ' | SOLO WAVE ' + (soloWave || 1) : ''}`;
 
   // No persistent score strip during play — big board only on death / match end.
   if (scoreHudEl) scoreHudEl.classList.add('hidden');
@@ -19850,6 +19882,7 @@ function runConsole(line) {
   if (cmdName === 'status') {
     conPrint(
       `local: ping ${Math.round(pingMs)}ms ±${Math.round(pingJitter)} | dly ${adaptiveInputDelay()} | ` +
+      `unack ${unackedInputCount()}/${maxUnackedInputs()} | ` +
       `interp ${adaptiveInterpMs().toFixed(0)}ms | admin ${consoleAdmin ? 1 : 0}`,
       'info'
     );

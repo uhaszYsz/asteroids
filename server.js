@@ -19,7 +19,14 @@ const RATE_MSG_BURST = 40;
 /** Max input frames accepted per second (~2× TPS). */
 const RATE_INPUT_FRAMES_PER_SEC = TPS * 2;
 const RATE_INPUT_FRAMES_BURST = TPS;
-const MAX_INPUT_QUEUE = 60;
+/**
+ * Hard cap on per-player input backlog. Server applies 1 frame/tick; a deep
+ * queue is sticky shoot/move lag until refresh. Keep this small so overflow
+ * self-heals by dropping oldest frames (prefer fresh input over delayed shots).
+ */
+const MAX_INPUT_QUEUE = 8;
+/** Shed mild overproduce before hitting the hard cap (~200ms at 30Hz). */
+const SOFT_INPUT_QUEUE = 6;
 const MAX_FRAMES_PER_MSG = 24;
 /** Reject seq that jumps more than this ahead of last applied/queued. */
 const MAX_SEQ_JUMP = TPS * 3;
@@ -594,6 +601,27 @@ function sanitizeInputFrame(frame, lastSeq, maxQueuedSeq) {
   return { seq, l, r, u, sp, sh };
 }
 
+/** Drop oldest queued frames so latency cannot stick. Prefer keeping shoot pulses. */
+function trimInputQueue(pl, maxLen) {
+  const cap = Math.max(1, maxLen | 0);
+  if (!pl || !pl.inputQueue || pl.inputQueue.length <= cap) return;
+  const q = pl.inputQueue;
+  // Drop from the front, but skip over a shoot pulse when a later idle frame
+  // can be discarded instead (keeps the shot, sheds backlog).
+  while (q.length > cap) {
+    let dropAt = 0;
+    if ((q[0].sp | 0) === 1) {
+      for (let i = 1; i < q.length; i++) {
+        if ((q[i].sp | 0) === 0) {
+          dropAt = i;
+          break;
+        }
+      }
+    }
+    q.splice(dropAt, 1);
+  }
+}
+
 function enqueuePlayerInputs(ws, pl, frames) {
   if (!pl || !Array.isArray(frames) || !frames.length) return;
   if (frames.length > MAX_FRAMES_PER_MSG) rlStrike(ws);
@@ -611,7 +639,7 @@ function enqueuePlayerInputs(ws, pl, frames) {
 
   let accepted = 0;
   for (let i = 0; i < slice.length && accepted < budget; i++) {
-    if (pl.inputQueue.length >= MAX_INPUT_QUEUE) break;
+    if (pl.inputQueue.length >= MAX_INPUT_QUEUE) trimInputQueue(pl, MAX_INPUT_QUEUE - 1);
     const cleaned = sanitizeInputFrame(slice[i], pl.lastSeq | 0, maxQueuedSeq);
     if (!cleaned) {
       rlStrike(ws);
@@ -632,9 +660,9 @@ function enqueuePlayerInputs(ws, pl, frames) {
   }
   if (accepted) {
     pl.inputQueue.sort((a, b) => a.seq - b.seq);
-    if (pl.inputQueue.length > MAX_INPUT_QUEUE) {
-      pl.inputQueue.splice(0, pl.inputQueue.length - MAX_INPUT_QUEUE);
-    }
+    // Soft trim first so mild overproduce never sits for hundreds of ms.
+    trimInputQueue(pl, SOFT_INPUT_QUEUE);
+    trimInputQueue(pl, MAX_INPUT_QUEUE);
   }
 }
 
