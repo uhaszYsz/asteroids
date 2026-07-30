@@ -10208,16 +10208,22 @@ const SPRITE_ROOF_LIFT = 0.48;
 /** Player-color silhouette outline width (screen px; fixed, not scaled by RES_SCALE). */
 const SPRITE_SHIP_OUTLINE_W_MIN = 0.3;
 const SPRITE_SHIP_OUTLINE_W_MAX = 1.5;
+const SPRITE_SHIP_OUTLINE_W_MIN_SELF = 1;
 const SPRITE_SHIP_OUTLINE_PULSE_HZ = 3;
 const SPRITE_SHIP_OUTLINE_DIRS = [
   [1, 0], [-1, 0], [0, 1], [0, -1],
   [1, 1], [-1, 1], [1, -1], [-1, -1]
 ];
 
-function spriteShipOutlineWidth() {
-  const mid = (SPRITE_SHIP_OUTLINE_W_MIN + SPRITE_SHIP_OUTLINE_W_MAX) * 0.5;
-  const amp = (SPRITE_SHIP_OUTLINE_W_MAX - SPRITE_SHIP_OUTLINE_W_MIN) * 0.5;
-  return mid + amp * Math.sin(performance.now() * 0.001 * Math.PI * 2 * SPRITE_SHIP_OUTLINE_PULSE_HZ);
+/** Local player: ½ speed, min 1px. Enemies / other players: 2× speed. */
+function spriteShipOutlineWidth(ownerId) {
+  const self = myId != null && (ownerId | 0) === (myId | 0);
+  const minW = self ? SPRITE_SHIP_OUTLINE_W_MIN_SELF : SPRITE_SHIP_OUTLINE_W_MIN;
+  const maxW = SPRITE_SHIP_OUTLINE_W_MAX;
+  const hz = SPRITE_SHIP_OUTLINE_PULSE_HZ * (self ? 0.5 : 2);
+  const mid = (minW + maxW) * 0.5;
+  const amp = (maxW - minW) * 0.5;
+  return mid + amp * Math.sin(performance.now() * 0.001 * Math.PI * 2 * hz);
 }
 /** Attack row hold (ms) after each shot — covers a short anim cycle. */
 const SPRITE_SHIP_ATTACK_MS = 420;
@@ -10312,7 +10318,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const tint = color || COL.self || [0.35, 0.85, 1];
   const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
   const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
-  const outlineW = spriteShipOutlineWidth();
+  const outlineW = spriteShipOutlineWidth(id);
   const showPlanes = (cv('cl_ships_plane') | 0) !== 0;
 
   // Debug / tune: draw the folded roof quads themselves (0.6 alpha), then sprite on top.
