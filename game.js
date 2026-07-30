@@ -9898,25 +9898,42 @@ function invalidateShipMeshPreviews() {
   }
 }
 
+/** Rotate source image 90° clockwise into a canvas (w/h swap). */
+function rotateImageCW90(src) {
+  const sw = src.naturalWidth || src.width | 0;
+  const sh = src.naturalHeight || src.height | 0;
+  const cnv = document.createElement('canvas');
+  cnv.width = sh;
+  cnv.height = sw;
+  const ctx = cnv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.translate(sh, 0);
+  ctx.rotate(Math.PI * 0.5);
+  ctx.drawImage(src, 0, 0);
+  return cnv;
+}
+
 function loadSpriteShipTexture(spec) {
   if (spriteShipTexById.has(spec.id)) return spriteShipTexById.get(spec.id);
   const entry = { tex: null, img: null, w: 0, h: 0, ready: false };
   spriteShipTexById.set(spec.id, entry);
   const img = new Image();
   img.onload = () => {
+    // Enemy craft art faces "up" in the PNG; planes expect nose along +X — CW 90°.
+    const upload = (spec.single || spec.rotateCw90) ? rotateImageCW90(img) : img;
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, upload);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     entry.tex = tex;
-    entry.img = img;
-    entry.w = img.naturalWidth | 0;
-    entry.h = img.naturalHeight | 0;
-    // Single-frame craft: use real pixel size (specs are hints).
+    entry.img = upload;
+    entry.w = (upload.naturalWidth || upload.width) | 0;
+    entry.h = (upload.naturalHeight || upload.height) | 0;
+    // Single-frame craft: use real pixel size after optional rotate (w/h swapped).
     if (spec.single) {
       spec.fw = entry.w || spec.fw;
       spec.fh = entry.h || spec.fh;
