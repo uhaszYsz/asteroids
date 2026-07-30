@@ -3535,6 +3535,52 @@ function resolveAdminGiveItem(raw) {
 }
 
 /**
+ * Admin console `spawn <kind>` — off-screen asteroid / enemy with normal entry path.
+ * kinds: big medium small huge meteor common ufo
+ */
+function handleAdminSpawn(ws, kindRaw) {
+  if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
+  const room = ws.room;
+  if (!room || !room.matchLive) return { ok: 0, err: 'not in a live match' };
+  const kind = String(kindRaw == null ? '' : kindRaw).toLowerCase().trim();
+
+  if (kind === 'big' || kind === 'medium' || kind === 'small') {
+    const a = makeAsteroid({ size: kind, offscreen: true, allowSpecial: false, special: null });
+    pushAsteroid(room, a);
+    emitAsteroidFire(room, a);
+    return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
+  }
+  if (kind === 'huge') {
+    const a = makeAsteroid({ size: 'huge', special: 'huge', offscreen: true, allowSpecial: false });
+    pushAsteroid(room, a);
+    emitAsteroidFire(room, a);
+    return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
+  }
+  if (kind === 'meteor') {
+    const a = makeAsteroid({ size: 'big', special: 'meteor', offscreen: true, allowSpecial: false });
+    pushAsteroid(room, a);
+    emitAsteroidFire(room, a);
+    return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
+  }
+  if (kind === 'common' || kind === 'ufo') {
+    if (!room.practice) return { ok: 0, err: 'enemies only in solo/coop wave rooms' };
+    if (!room.enemies) room.enemies = [];
+    if (!room.nextEnemyId) room.nextEnemyId = 1;
+    const e = makeEnemy(kind, room.wave || 1);
+    e.id = room.nextEnemyId++;
+    e.appearLeft = 0;
+    e.queued = false;
+    room.enemies.push(e);
+    emitEnemyFire(room, e);
+    return { ok: 1, kind, what: 'enemy', id: e.id | 0 };
+  }
+  return {
+    ok: 0,
+    err: 'usage: spawn big|medium|small|huge|meteor|common|ufo'
+  };
+}
+
+/**
  * Admin console `give <item>` — equip weapon, grant powerup, or enable buffed admingun turret.
  */
 function handleAdminGive(ws, itemRaw) {
@@ -7803,10 +7849,10 @@ wss.on('connection', (ws) => {
       const pw = String(msg.pw == null ? '' : msg.pw);
       if (pw && pw === adminPassword) {
         ws.isAdmin = true;
-        send(ws, { t: 'admin', ok: 1 });
+        send(ws, { t: 'admin', ok: 1, auto: msg.auto ? 1 : 0 });
       } else {
         ws.isAdmin = false;
-        send(ws, { t: 'admin', ok: 0, err: 'bad password' });
+        send(ws, { t: 'admin', ok: 0, err: 'bad password', auto: msg.auto ? 1 : 0 });
       }
       return;
     }
@@ -7845,6 +7891,17 @@ wss.on('connection', (ws) => {
       if (!allowAction(ws, 'adminGive', 80)) return;
       const result = handleAdminGive(ws, msg.item != null ? msg.item : msg.name);
       send(ws, Object.assign({ t: 'adminGive' }, result));
+      return;
+    }
+
+    if (msg.t === 'adminSpawn') {
+      if (!ws.isAdmin) {
+        send(ws, { t: 'adminSpawn', ok: 0, err: 'not admin' });
+        return;
+      }
+      if (!allowAction(ws, 'adminSpawn', 80)) return;
+      const result = handleAdminSpawn(ws, msg.kind != null ? msg.kind : msg.name);
+      send(ws, Object.assign({ t: 'adminSpawn' }, result));
       return;
     }
 

@@ -17633,6 +17633,7 @@ async function connect() {
     if (playBtn) playBtn.disabled = false;
     sendPing();
     trySteamAuthLogin();
+    tryAutoAdminLogin();
   };
   ws.onclose = () => {
     connected = false;
@@ -17671,18 +17672,42 @@ async function connect() {
       }
       if (msg.ok) {
         consoleAdmin = true;
-        conPrint('admin login ok', 'info');
+        if (pendingAdminLoginPw) {
+          saveAdminPasswordLocal(pendingAdminLoginPw);
+          pendingAdminLoginPw = '';
+        }
+        if (msg.auto) conPrint('admin auto-login ok', 'info');
+        else conPrint('admin login ok', 'info');
         syncPortalCvar();
         syncDemoCvar();
       } else {
         consoleAdmin = false;
-        conPrint(msg.err || 'admin login failed', 'err');
+        pendingAdminLoginPw = '';
+        if (msg.auto) {
+          // Saved password no longer valid — drop it quietly.
+          saveAdminPasswordLocal('');
+        } else {
+          conPrint(msg.err || 'admin login failed', 'err');
+        }
+      }
+      return;
+    }
+    if (msg.t === 'adminSpawn') {
+      if (msg.ok) {
+        const label = msg.kind || 'thing';
+        if (msg.what === 'enemy') conPrint(`spawned ${label} e${msg.id | 0}`, 'info');
+        else conPrint(`spawned ${label} #${msg.aid | 0}`, 'info');
+      } else {
+        conPrint(msg.err || 'spawn failed', 'err');
       }
       return;
     }
     if (msg.t === 'adminPw') {
-      if (msg.ok) conPrint('admin password updated', 'info');
-      else conPrint(msg.err || 'password change failed', 'err');
+      if (msg.ok) {
+        conPrint('admin password updated', 'info');
+        // Keep auto-login in sync with the new shared password if we know it.
+        if (pendingAdminLoginPw) saveAdminPasswordLocal(pendingAdminLoginPw);
+      } else conPrint(msg.err || 'password change failed', 'err');
       return;
     }
     if (msg.t === 'adminGive') {
@@ -20197,10 +20222,38 @@ function demoDelete(rawName) {
 
 const CON_COMMANDS = [
   'clear', 'echo', 'help', 'find', 'status', 'cvar', 'login', 'logout', 'password', 'give',
-  'record', 'stop', 'play', 'demos', 'demolish'
+  'spawn', 'record', 'stop', 'play', 'demos', 'demolish'
 ];
 /** True after successful server `login` — required for sv_ cvars and `password`. */
 let consoleAdmin = false;
+const ADMIN_PW_STORAGE_KEY = 'asteroids_admin_pw';
+/** Password awaiting server ack — saved only on successful login. */
+let pendingAdminLoginPw = '';
+
+function loadSavedAdminPassword() {
+  try {
+    const s = localStorage.getItem(ADMIN_PW_STORAGE_KEY);
+    return s ? String(s) : '';
+  } catch (_) {
+    return '';
+  }
+}
+
+function saveAdminPasswordLocal(pw) {
+  try {
+    if (pw) localStorage.setItem(ADMIN_PW_STORAGE_KEY, String(pw));
+    else localStorage.removeItem(ADMIN_PW_STORAGE_KEY);
+  } catch (_) {}
+}
+
+/** Re-auth after refresh / reconnect using locally saved password. */
+function tryAutoAdminLogin() {
+  if (!ws || ws.readyState !== 1) return;
+  const pw = loadSavedAdminPassword();
+  if (!pw) return;
+  pendingAdminLoginPw = pw;
+  ws.send(JSON.stringify({ t: 'adminLogin', pw, auto: 1 }));
+}
 
 function conRequireAdmin() {
   if (consoleAdmin) return true;
@@ -20516,11 +20569,14 @@ function runConsole(line) {
       conPrint('not connected', 'err');
       return;
     }
-    ws.send(JSON.stringify({ t: 'adminLogin', pw: args.join(' ') }));
+    pendingAdminLoginPw = args.join(' ');
+    ws.send(JSON.stringify({ t: 'adminLogin', pw: pendingAdminLoginPw }));
     return;
   }
   if (cmdName === 'logout') {
     consoleAdmin = false;
+    pendingAdminLoginPw = '';
+    saveAdminPasswordLocal('');
     if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'adminLogout' }));
     else conPrint('admin logged out', 'info');
     return;
@@ -20565,12 +20621,30 @@ function runConsole(line) {
     ws.send(JSON.stringify({ t: 'adminGive', item: args[0] }));
     return;
   }
+  if (cmdName === 'spawn') {
+    if (!conRequireAdmin()) return;
+    if (!args.length) {
+      conPrint('usage: spawn big|medium|small|huge|meteor|common|ufo', 'err');
+      return;
+    }
+    if (!ws || ws.readyState !== 1) {
+      conPrint('not connected', 'err');
+      return;
+    }
+    if (!inGame) {
+      conPrint('not in game', 'err');
+      return;
+    }
+    ws.send(JSON.stringify({ t: 'adminSpawn', kind: args[0] }));
+    return;
+  }
   if (cmdName === 'help' || cmdName === 'find') {
-    conPrint('Commands: help, find, clear, echo, status, cvar, login, logout, password, give', 'info');
+    conPrint('Commands: help, find, clear, echo, status, cvar, login, logout, password, give, spawn', 'info');
     conPrint('record <name> | stop | play <name> | demos | demolish <name>', 'info');
-    conPrint('login <password>  — admin auth (shared server password)', 'info');
+    conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
     conPrint('give <weapon|powerup|admingun>  — grant loadout (admin, in-game)', 'info');
+    conPrint('spawn big|medium|small|huge|meteor|common|ufo  — off-screen spawn (admin, in-game)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');
     conPrint('cl_allToDefault 1  — reset all cl_ cvars to defaults', 'info');
