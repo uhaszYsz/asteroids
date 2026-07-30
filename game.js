@@ -7165,7 +7165,7 @@ function emitLocalShootFx() {
 
   if (wpn === 4) {
     // Shotgun: SFX is one blast on Space press only (not here / not per pellet).
-    emitMuzzleFx(m.x, m.y, ang, COL.bullet, 14, me.vx, me.vy, { cone: 1.45 });
+    emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 14, me.vx, me.vy, { cone: 1.45 });
     return;
   }
 
@@ -7198,7 +7198,7 @@ function emitLocalShootFx() {
   } else {
     playSfx(SFX.shoot, { vol: 0.9, pool: 8 });
   }
-  emitMuzzleFx(m.x, m.y, ang, ownerShootColor(myId) || COL.bullet, 10, me.vx, me.vy);
+  emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 10, me.vx, me.vy);
 }
 
 function emitHitFx(x, y, color) {
@@ -11280,6 +11280,11 @@ function ownerHasDamagePowerup(ownerId) {
   const r = remotes.get(ownerId);
   return !!(r && r.powerups && r.powerups.damage);
 }
+
+/** Default / shotgun muzzle flash: white, or red with damage boost. */
+function muzzleBlasterColor(ownerId) {
+  return ownerHasDamagePowerup(ownerId) ? [1.0, 0.18, 0.12] : COL_WHITE;
+}
 function ownerHasPowerup(ownerId, name) {
   if (ownerId === myId) return !!(player.powerups && player.powerups[name]);
   const r = remotes.get(ownerId);
@@ -14289,7 +14294,7 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
   if (withMuzzle) {
     pulseSpriteShipAttack(owner);
     const sv = resolveMuzzleShipVel(owner);
-    emitMuzzleFx(x, y, aim, COL.bullet, 10, sv.vx, sv.vy, { cone: 1.35 });
+    emitMuzzleFx(x, y, aim, muzzleBlasterColor(owner), 10, sv.vx, sv.vy, { cone: 1.35 });
     playShotgunFireSfx(owner, 0.55);
   }
   for (let i = 0; i < count; i++) {
@@ -14330,11 +14335,11 @@ function addBullet(b, withMuzzle, liveFire) {
       emitMuzzleFx(origin.x, origin.y, ang, COL.enemyUfo, 8, sv.vx, sv.vy);
       playSfx(SFX.rocketFire, { vol: 0.35, pool: 6 });
     } else if (b.type === 'shotgun') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 10, sv.vx, sv.vy, { cone: 1.35 });
+      emitMuzzleFx(origin.x, origin.y, ang, muzzleBlasterColor(b.owner), 10, sv.vx, sv.vy, { cone: 1.35 });
       // Remote only — local shotgun SFX is Space press. Debounce whole burst.
       playShotgunFireSfx(b.owner, 0.55);
     } else if (b.type === 'default' || !b.type) {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.bullet, 9, sv.vx, sv.vy);
+      emitMuzzleFx(origin.x, origin.y, ang, muzzleBlasterColor(b.owner), 9, sv.vx, sv.vy);
       // Remote only — local default shoot plays in emitLocalShootFx.
       playSfx(SFX.shoot, { vol: 0.5, pool: 8 });
     } else if (b.type === 'plasma') {
