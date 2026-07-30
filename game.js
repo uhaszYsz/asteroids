@@ -1141,6 +1141,11 @@ const CVARS = {
     def: 0.45,
     help: 'Ship hull texture emission — tint × bright texels (0 = off). Same model as cl_ast_emit.'
   },
+  cl_ships_plane: {
+    value: 0,
+    def: 0,
+    help: '1 = draw sprite ship planes at 0.6 alpha (see through folded roof).'
+  },
   cl_ast_outline_emit: {
     value: 0,
     def: 0,
@@ -10300,6 +10305,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
   const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
   const outlineW = SPRITE_SHIP_OUTLINE_W;
+  const planeAlpha = (cv('cl_ships_plane') | 0) ? 0.6 : 1;
 
   gl.useProgram(spriteShipProg);
   gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
@@ -10343,7 +10349,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   // Player-color silhouette outline around sprite pixels (not roof plane edges).
   if (outlineA > 0.001) {
     gl.uniform1f(ssUOutline, 1);
-    gl.uniform1f(ssUAlpha, outlineA);
+    gl.uniform1f(ssUAlpha, outlineA * planeAlpha);
     for (let p = 0; p < panels.length; p++) {
       fillPanelMesh(panels[p]);
       for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
@@ -10356,7 +10362,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
 
   // Fill sprite on top.
   gl.uniform1f(ssUOutline, 0);
-  gl.uniform1f(ssUAlpha, 1);
+  gl.uniform1f(ssUAlpha, planeAlpha);
   gl.uniform2f(ssUOffset, 0, 0);
   for (let p = 0; p < panels.length; p++) {
     fillPanelMesh(panels[p]);
