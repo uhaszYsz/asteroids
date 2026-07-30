@@ -10054,7 +10054,7 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localX, 
     [uv.u1, uv.v1],
     [uv.u0, uv.v1]
   ];
-  const { xy } = projectMesh3D(verts, x, y, angle, bank || 0, 0);
+  const { xy } = projectMesh3D(verts, x, y, angle, bank || 0, SPRITE_ROOF_LIFT);
   const col = tint || COL_WHITE;
   const windFwd = [0, 1, 2, 0, 2, 3];
   const windBack = [0, 2, 1, 0, 3, 2];
