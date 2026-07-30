@@ -1113,26 +1113,6 @@ const CVARS = {
     def: 1,
     help: '1 = hue-tint textured asteroids (cl_ast_face_tint). 0 = natural albedo. Meteor/golden always tint.'
   },
-  cl_ast_height: {
-    value: 0.22,
-    def: 0.22,
-    help: 'Asteroid heightmap vertex displace (fraction of radius; 0 = off).'
-  },
-  cl_ast_bump: {
-    value: 5,
-    def: 5,
-    help: 'Heightmap bump strength on faces (lighting; 0 = off). Visible on angled faces.'
-  },
-  cl_ast_parallax: {
-    value: 0.06,
-    def: 0.06,
-    help: 'Asteroid heightmap parallax UV offset strength (0 = off).'
-  },
-  cl_ast_rough: {
-    value: 0.55,
-    def: 0.55,
-    help: 'Asteroid specular roughness (0 = glossy, 1 = matte).'
-  },
   cl_ast_wire_width: {
     value: 2,
     def: 2,
@@ -8396,7 +8376,7 @@ function drawSceneLines(dt) {
     const size = a.size || (a.big ? 'big' : 'medium');
     const sid = asteroidShapeId(a);
     const specialTint = !!(a.playerShot || a.special === 'meteor' || a.special === 'golden');
-    drawAsteroid2D(ax, ay, p.angle, sid, a.r || 16, col, size, asteroidUsesDetailMaps(a), specialTint);
+    drawAsteroid2D(ax, ay, p.angle, sid, a.r || 16, col, size, specialTint);
     if ((a.special === 'meteor' || a.playerShot) && !deathSpectating) {
       const boost = (a._meteorBurnBoostUntil && performance.now() < a._meteorBurnBoostUntil) ? 3 : 1;
       emitMeteorBurnFx(
@@ -8904,17 +8884,9 @@ function asteroidCollisionPts(a) {
   return a._silPts;
 }
 
-/** Height/normal strip maps: medium / big / huge only (not small, meteor, golden). */
-function asteroidUsesDetailMaps(a) {
-  if (!a) return false;
-  if (a.playerShot || a.special === 'meteor' || a.special === 'golden') return false;
-  const size = a.size || (a.big ? 'big' : 'medium');
-  return size === 'medium' || size === 'big' || size === 'huge';
-}
-
 /** Draw jagged asteroid: perspective 3D mesh (fill + wire + equator outline). */
-function drawAsteroid2D(cx, cy, angle, id, radius, color, size, detailMaps, specialTint) {
-  drawAsteroid3D(cx, cy, angle, id, radius, color, size || 'medium', detailMaps, specialTint);
+function drawAsteroid2D(cx, cy, angle, id, radius, color, size, specialTint) {
+  drawAsteroid3D(cx, cy, angle, id, radius, color, size || 'medium', specialTint);
 }
 
 /**
@@ -8937,61 +8909,17 @@ const astTexVS = `
 const astTexFS = `
   precision mediump float;
   uniform sampler2D uTex;
-  uniform sampler2D uHeight;
-  uniform sampler2D uNrm;
   uniform vec3 uTint;
   uniform float uTintPow;
   uniform float uEmit;
   uniform float uAlpha;
-  uniform float uMaps;
-  uniform float uRough;
-  uniform float uParallax;
-  uniform float uBump;
-  uniform vec3 uFaceN;
-  uniform vec3 uLDir;
   varying vec2 vUV;
   varying vec2 vWorld;
 ` + SCENE_LIGHT_GLSL + `
   void main() {
-    vec2 uv = vUV;
-    float hSample = 0.5;
-    if (uMaps > 0.5) {
-      hSample = texture2D(uHeight, uv).r;
-      if (uParallax > 0.0001) {
-        vec2 viewXY = normalize(uFaceN.xy + vec2(0.0001));
-        uv += viewXY * ((hSample - 0.5) * uParallax);
-        hSample = texture2D(uHeight, uv).r;
-      }
-    }
-    vec4 t = texture2D(uTex, uv);
+    vec4 t = texture2D(uTex, vUV);
     vec3 tint = mix(vec3(1.0), uTint, clamp(uTintPow, 0.0, 1.0));
     vec3 albedo = t.rgb * tint;
-    if (uMaps > 0.5) {
-      vec3 N = normalize(uFaceN);
-      vec3 nW = N;
-      // Derive bump from heightmap (normal map disabled) — shows on angled faces.
-      if (uBump > 0.001) {
-        float eps = 1.0 / 128.0;
-        float hX = texture2D(uHeight, uv + vec2(eps, 0.0)).r;
-        float hY = texture2D(uHeight, uv + vec2(0.0, eps)).r;
-        vec3 bumpTS = normalize(vec3((hSample - hX) * uBump, (hSample - hY) * uBump, 1.0));
-        vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
-        vec3 T = normalize(cross(up, N));
-        vec3 B = cross(N, T);
-        nW = normalize(T * bumpTS.x + B * bumpTS.y + N * bumpTS.z);
-      }
-      vec3 L = normalize(uLDir);
-      float ndl = max(dot(nW, L), 0.0);
-      float shade = 0.18 + 0.82 * ndl;
-      // Valleys darker (cheap AO from height).
-      shade *= 0.62 + 0.38 * hSample;
-      float rough = clamp(uRough, 0.04, 1.0);
-      rough = clamp(rough + (0.5 - hSample) * 0.25, 0.04, 1.0);
-      float gloss = 1.0 - rough;
-      vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
-      float spec = pow(max(dot(nW, H), 0.0), mix(6.0, 48.0, gloss)) * gloss * 0.4;
-      albedo = albedo * shade + vec3(spec);
-    }
     // Godot-style emission: bright texels glow. Untinted hulls emit in texture color.
     float lum = dot(t.rgb, vec3(0.299, 0.587, 0.114));
     float emitMask = smoothstep(0.12, 0.72, lum);
@@ -9008,18 +8936,10 @@ gl.attachShader(astTexProg, shader(gl.FRAGMENT_SHADER, astTexFS));
 linkProgram(astTexProg);
 const astTURes = gl.getUniformLocation(astTexProg, 'uRes');
 const astTUTex = gl.getUniformLocation(astTexProg, 'uTex');
-const astTUHeight = gl.getUniformLocation(astTexProg, 'uHeight');
-const astTUNrm = gl.getUniformLocation(astTexProg, 'uNrm');
 const astTUTint = gl.getUniformLocation(astTexProg, 'uTint');
 const astTUTintPow = gl.getUniformLocation(astTexProg, 'uTintPow');
 const astTUEmit = gl.getUniformLocation(astTexProg, 'uEmit');
 const astTUAlpha = gl.getUniformLocation(astTexProg, 'uAlpha');
-const astTUMaps = gl.getUniformLocation(astTexProg, 'uMaps');
-const astTURough = gl.getUniformLocation(astTexProg, 'uRough');
-const astTUParallax = gl.getUniformLocation(astTexProg, 'uParallax');
-const astTUBump = gl.getUniformLocation(astTexProg, 'uBump');
-const astTUFaceN = gl.getUniformLocation(astTexProg, 'uFaceN');
-const astTULDir = gl.getUniformLocation(astTexProg, 'uLDir');
 const astTexLightU = {
   night: gl.getUniformLocation(astTexProg, 'uFlashNight'),
   ships: gl.getUniformLocation(astTexProg, 'uShipLight[0]'),
@@ -9031,38 +8951,6 @@ const astTexBuf = gl.createBuffer();
 /** Face: 3 verts; edge quad: 6 verts × (x,y,u,v). */
 const _astTexMesh = new Float32Array(6 * 4);
 let _astTexBatch = new Float32Array(4096 * 12);
-
-function bindAstTexMapsOff() {
-  gl.uniform1f(astTUMaps, 0);
-  gl.uniform1f(astTUBump, 0);
-  gl.uniform1i(astTUHeight, 1);
-  gl.uniform1i(astTUNrm, 2);
-  gl.activeTexture(gl.TEXTURE1);
-  gl.bindTexture(gl.TEXTURE_2D, asteroidFaceTex);
-  gl.activeTexture(gl.TEXTURE2);
-  gl.bindTexture(gl.TEXTURE_2D, asteroidFaceTex);
-  gl.activeTexture(gl.TEXTURE0);
-}
-
-function bindAstTexMapsOn() {
-  gl.uniform1f(astTUMaps, 1);
-  gl.uniform1i(astTUHeight, 1);
-  gl.uniform1i(astTUNrm, 2);
-  let rough = Number(cv('cl_ast_rough'));
-  if (!Number.isFinite(rough)) rough = 0.55;
-  let para = Number(cv('cl_ast_parallax'));
-  if (!Number.isFinite(para)) para = 0.06;
-  let bump = Number(cv('cl_ast_bump'));
-  if (!Number.isFinite(bump)) bump = 5;
-  gl.uniform1f(astTURough, rough);
-  gl.uniform1f(astTUParallax, para);
-  gl.uniform1f(astTUBump, bump);
-  gl.activeTexture(gl.TEXTURE1);
-  gl.bindTexture(gl.TEXTURE_2D, asteroidHeightTex);
-  gl.activeTexture(gl.TEXTURE2);
-  gl.bindTexture(gl.TEXTURE_2D, asteroidNormalTex);
-  gl.activeTexture(gl.TEXTURE0);
-}
 
 function ensureAstTexBatch(triCount) {
   const need = triCount * 12;
@@ -9104,120 +8992,22 @@ function drawEnemyHullFacesBatched(xy, mv, faces, order, uvScale, id, tint, alph
 }
 
 const asteroidFaceTex = gl.createTexture();
-const asteroidHeightTex = gl.createTexture();
-const asteroidNormalTex = gl.createTexture();
 let asteroidFaceTexReady = false;
-let asteroidMapsReady = false;
-/** CPU height samples for mesh displace — ImageData of height panel. */
-let asteroidHeightData = null;
-let asteroidHeightW = 0;
-let asteroidHeightH = 0;
-
-function uploadAsteroidPanelTex(tex, canvas, repeat) {
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  const wrap = repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE;
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
-}
-
 (function loadAsteroidFaceTex() {
   const img = new Image();
   img.onload = () => {
-    const cols = 3;
-    const tw = Math.max(1, (img.width / cols) | 0);
-    const th = Math.max(1, img.height | 0);
-    const c = document.createElement('canvas');
-    c.width = tw;
-    c.height = th;
-    const ctx = c.getContext('2d', { willReadFrequently: true });
-    for (let panel = 0; panel < cols; panel++) {
-      ctx.clearRect(0, 0, tw, th);
-      ctx.drawImage(img, panel * tw, 0, tw, th, 0, 0, tw, th);
-      if (panel === 0) uploadAsteroidPanelTex(asteroidFaceTex, c, true);
-      else if (panel === 1) {
-        uploadAsteroidPanelTex(asteroidHeightTex, c, true);
-        asteroidHeightData = ctx.getImageData(0, 0, tw, th);
-        asteroidHeightW = tw;
-        asteroidHeightH = th;
-      } else {
-        // Strip panel 2 is tangent-space normal (authored label: roughness).
-        uploadAsteroidPanelTex(asteroidNormalTex, c, true);
-      }
-    }
+    gl.bindTexture(gl.TEXTURE_2D, asteroidFaceTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
     asteroidFaceTexReady = true;
-    asteroidMapsReady = true;
   };
-  img.onerror = () => console.error('Failed to load textures/asteroid_strip3.png');
-  img.src = 'textures/asteroid_strip3.png';
+  img.onerror = () => console.error('Failed to load textures/asteroid.png');
+  img.src = 'textures/asteroid.png';
 })();
-
-/** Sample height panel (0..1). UVs match GL FLIP_Y albedo. */
-function sampleAsteroidHeight(u, v) {
-  const d = asteroidHeightData;
-  if (!d) return 0.5;
-  let x = u - Math.floor(u);
-  let y = v - Math.floor(v);
-  if (x < 0) x += 1;
-  if (y < 0) y += 1;
-  // Bilinear sample (ImageData is top-down; GL UVs use FLIP_Y).
-  const fx = x * (asteroidHeightW - 1);
-  const fy = (1 - y) * (asteroidHeightH - 1);
-  let x0 = fx | 0;
-  let y0 = fy | 0;
-  const x1 = Math.min(asteroidHeightW - 1, x0 + 1);
-  const y1 = Math.min(asteroidHeightH - 1, y0 + 1);
-  x0 = Math.min(asteroidHeightW - 1, x0);
-  y0 = Math.min(asteroidHeightH - 1, y0);
-  const tx = fx - x0;
-  const ty = fy - y0;
-  const at = (ix, iy) => d.data[(iy * asteroidHeightW + ix) * 4] / 255;
-  const h00 = at(x0, y0);
-  const h10 = at(x1, y0);
-  const h01 = at(x0, y1);
-  const h11 = at(x1, y1);
-  const h0 = h00 + (h10 - h00) * tx;
-  const h1 = h01 + (h11 - h01) * tx;
-  return h0 + (h1 - h0) * ty;
-}
-
-/** Stretch height contrast so soft maps still move verts. */
-function asteroidHeightContrast(h) {
-  // Expand midtones: 0..1 → stronger around mean.
-  const c = (h - 0.5) * 1.65 + 0.5;
-  return c < 0 ? 0 : c > 1 ? 1 : c;
-}
-
-/**
- * Height displace along 3D radial (outward from rock center).
- * Changes face angles → lighting; coarse mesh still needs shader bump for detail.
- */
-const _astDispCache = new Map();
-function asteroidHeightDisplaceVerts(verts, radius, id) {
-  if (!asteroidHeightData || !verts || !verts.length) return verts;
-  let amp = Number(cv('cl_ast_height'));
-  if (!Number.isFinite(amp) || amp <= 0) return verts;
-  const key = ((id | 0) + '|' + ((radius * 10) | 0) + '|' + ((amp * 1000) | 0) + '|r3|' + verts.length);
-  let out = _astDispCache.get(key);
-  if (out) return out;
-  const scale = Math.max(1, radius) * amp;
-  out = new Array(verts.length);
-  for (let i = 0; i < verts.length; i++) {
-    const v = verts[i];
-    const uv = asteroidVertUV(v[0], v[1], radius, id);
-    const h = asteroidHeightContrast(sampleAsteroidHeight(uv[0], uv[1]));
-    const d = (h - 0.5) * 2 * scale;
-    const len = Math.hypot(v[0], v[1], v[2]) || 1;
-    const s = d / len;
-    out[i] = [v[0] + v[0] * s, v[1] + v[1] * s, v[2] + v[2] * s];
-  }
-  if (_astDispCache.size >= 128) _astDispCache.clear();
-  _astDispCache.set(key, out);
-  return out;
-}
 
 const shipHullTex = gl.createTexture();
 let shipHullTexReady = false;
@@ -9331,7 +9121,7 @@ function asteroidVertUV(vx, vy, r, id) {
   return [(vx / rr) * tile * 0.5 + ox, (vy / rr) * tile * 0.5 + oy];
 }
 
-function drawAsteroidFaceTex(xy, mv, f, radius, id, tint, alpha, tintPow, emit, faceN, lightDir) {
+function drawAsteroidFaceTex(xy, mv, f, radius, id, tint, alpha, tintPow, emit) {
   const m = _astTexMesh;
   for (let i = 0; i < 3; i++) {
     const vi = f[i];
@@ -9350,10 +9140,6 @@ function drawAsteroidFaceTex(xy, mv, f, radius, id, tint, alpha, tintPow, emit, 
   gl.uniform1f(astTUTintPow, tintPow != null ? tintPow : 0.7);
   gl.uniform1f(astTUEmit, emit != null ? emit : 0);
   gl.uniform1f(astTUAlpha, alpha);
-  if (faceN && lightDir && asteroidMapsReady) {
-    gl.uniform3f(astTUFaceN, faceN[0], faceN[1], faceN[2]);
-    gl.uniform3f(astTULDir, lightDir[0], lightDir[1], lightDir[2]);
-  }
   gl.drawArrays(gl.TRIANGLES, 0, 3);
 }
 
@@ -9638,8 +9424,6 @@ function astFaceScreenArea(xy, f) {
 /** Lambertian shade: ship radial on the local player (same R as grid light). */
 const _astShadeCol = [1, 1, 1];
 const _astNeutralCol = [0.72, 0.72, 0.72];
-const _astFaceNScratch = [0, 0, 1];
-const _astLDirScratch = [0, 0, 1];
 const AST_LIGHT_Z = 80 * RES_SCALE;
 /** Match grid bake / SCENE_LIGHT softShipRad ease. */
 function softShipRadAtten(d, R) {
@@ -9677,8 +9461,6 @@ function asteroidFaceShade(wx, wy, wz, f, cx, cy, lightX, lightY, lightZ) {
   // Sum every torus image in range: near an edge, direct + wrap both light
   // the rock (often opposite faces) — one ship, two radial sources.
   let lit = 0;
-  let bestAtten = -1;
-  let blx = 0, bly = 0, blz = 1;
   for (let ox = -W; ox <= W; ox += W) {
     for (let oy = -H; oy <= H; oy += H) {
       const dx = (lightX + ox) - mx;
@@ -9689,28 +9471,16 @@ function asteroidFaceShade(wx, wy, wz, f, cx, cy, lightX, lightY, lightZ) {
       const llen = Math.sqrt(lx * lx + ly * ly + lz * lz) || 1;
       lx /= llen; ly /= llen; lz /= llen;
       lit += atten * Math.max(0, nx * lx + ny * ly + nz * lz);
-      if (atten > bestAtten) {
-        bestAtten = atten;
-        blx = lx; bly = ly; blz = lz;
-      }
     }
   }
   if (lit > 1) lit = 1;
-  return {
-    shade: 0.18 + 0.82 * lit,
-    nx, ny, nz,
-    lx: blx, ly: bly, lz: blz
-  };
+  return 0.18 + 0.82 * lit;
 }
 
-function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, specialTint) {
+function drawAsteroid3D(cx, cy, angle, id, radius, color, size, specialTint) {
   const mesh = getAsteroidWireMesh(id, radius, size);
   const osc = asteroidOscAngles(id);
-  const mvSrc = mesh.verts;
-  const mapsOk = !!detailMaps && asteroidMapsReady;
-  const mv = mapsOk
-    ? asteroidHeightDisplaceVerts(mvSrc, radius, id)
-    : mvSrc;
+  const mv = mesh.verts;
   const { xy, depth, wx, wy, wz } = projectAsteroidMesh3D(
     mv, cx, cy, angle, osc.pitch, osc.roll, asteroidZScale(id)
   );
@@ -9731,11 +9501,10 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
   const emitPow = Math.max(0, Number(cv('cl_ast_emit')) || 0);
   const outlineEmitPow = Math.max(0, Number(cv('cl_ast_outline_emit')) || 0);
   const bindTex = (faceTexOn && faceA > 0.001) || (outlineTexOn && outlineA > 0.001);
-  const useMaps = faceTexOn && mapsOk;
-  // Hue tint off → natural albedo (lighting only). Meteor/golden always tint.
+  // Hue tint off → natural albedo × face shade. Meteor/golden always tint.
   const hueTintOn = (cv('cl_ast_hue_tint') | 0) !== 0;
   const noHueTint = faceTexOn && !specialTint && !hueTintOn;
-  if (noHueTint) faceTintPow = useMaps ? 0 : 1;
+  if (noHueTint) faceTintPow = 1;
 
   // Always draw the mesh's built-in top half (local Z >= 0). Independent of wobble.
   const order = _astFaceScratch;
@@ -9756,8 +9525,8 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
     }
     if (area < 1e-6) continue;
     const zAvg = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
-    const lit = asteroidFaceShade(wx, wy, wz, fMesh, cx, cy, lightX, lightY, lightZ);
-    order.push({ f, zAvg, lit });
+    const sVal = asteroidFaceShade(wx, wy, wz, fMesh, cx, cy, lightX, lightY, lightZ);
+    order.push({ f, zAvg, sVal });
     if (needEdges) {
       for (let e = 0; e < 3; e++) {
         const a = f[e];
@@ -9772,7 +9541,7 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
           info = { shade: 0, z: (depth[lo] + depth[hi]) * 0.5 };
           edgeInfo.set(key, info);
         }
-        if (lit.shade > info.shade) info.shade = lit.shade;
+        if (sVal > info.shade) info.shade = sVal;
       }
     }
   }
@@ -9780,8 +9549,6 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
 
   const tri = _astTriScratch;
   const shadeCol = _astShadeCol;
-  const _faceN = _astFaceNScratch;
-  const _lDir = _astLDirScratch;
   if (bindTex) {
     gl.useProgram(astTexProg);
     gl.enableVertexAttribArray(astTAPos);
@@ -9790,8 +9557,6 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
     gl.bindTexture(gl.TEXTURE_2D, asteroidFaceTex);
     gl.uniform1i(astTUTex, 0);
     gl.uniform2f(astTURes, W, H);
-    if (useMaps) bindAstTexMapsOn();
-    else bindAstTexMapsOff();
     bindSceneLightUniforms(astTexLightU);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -9799,10 +9564,8 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
   if (faceA > 0.001) {
     for (let o = 0; o < order.length; o++) {
       const f = order[o].f;
-      const lit = order[o].lit;
-      const s = useMaps ? 1 : lit.shade;
+      const s = order[o].sVal;
       if (noHueTint) {
-        // Lighting only (grayscale); albedo stays rock-colored.
         shadeCol[0] = s;
         shadeCol[1] = s;
         shadeCol[2] = s;
@@ -9812,13 +9575,7 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
         shadeCol[2] = Math.min(1, color[2] * s);
       }
       if (faceTexOn) {
-        if (useMaps) {
-          _faceN[0] = lit.nx; _faceN[1] = lit.ny; _faceN[2] = lit.nz;
-          _lDir[0] = lit.lx; _lDir[1] = lit.ly; _lDir[2] = lit.lz;
-          drawAsteroidFaceTex(xy, mv, f, radius, id, shadeCol, faceA, faceTintPow, emitPow, _faceN, _lDir);
-        } else {
-          drawAsteroidFaceTex(xy, mv, f, radius, id, shadeCol, faceA, faceTintPow, emitPow);
-        }
+        drawAsteroidFaceTex(xy, mv, f, radius, id, shadeCol, faceA, faceTintPow, emitPow);
       } else {
         tri[0] = xy[f[0] * 2]; tri[1] = xy[f[0] * 2 + 1];
         tri[2] = xy[f[1] * 2]; tri[3] = xy[f[1] * 2 + 1];
@@ -9874,7 +9631,6 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
     }
     const glowA = emitSolid ? Math.min(1, outlineA * outlineEmitPow * 0.55) : 0;
     const glowW = outlineW + 2;
-    if (outlineTexOn && bindTex) bindAstTexMapsOff();
     for (let i = 0; i < nEq; i++) {
       const j = (i + 1) % nEq;
       if (outlineTexOn) {
@@ -15617,7 +15373,6 @@ function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
     gl.bindTexture(gl.TEXTURE_2D, hullTex);
     gl.uniform1i(astTUTex, 0);
     gl.uniform2f(astTURes, W, H);
-    bindAstTexMapsOff();
     bindSceneLightUniforms(astTexLightU);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -19050,10 +18805,6 @@ const GRID_PANEL_AST = [
   { name: 'cl_ast_hue_tint', min: 0, max: 1, step: 1 },
   { name: 'cl_ast_face_alpha', min: 0, max: 1, step: 0.01 },
   { name: 'cl_ast_face_tint', min: 0, max: 1, step: 0.01 },
-  { name: 'cl_ast_height', min: 0, max: 0.5, step: 0.01 },
-  { name: 'cl_ast_bump', min: 0, max: 12, step: 0.25 },
-  { name: 'cl_ast_parallax', min: 0, max: 0.15, step: 0.005 },
-  { name: 'cl_ast_rough', min: 0, max: 1, step: 0.01 },
   { name: 'cl_ast_wire_width', min: 0.5, max: 8, step: 0.25 },
   { name: 'cl_ast_wire_alpha', min: 0, max: 1, step: 0.01 },
   { name: 'cl_ast_z_min', min: 0.1, max: 3, step: 0.01 },
@@ -19477,7 +19228,6 @@ function formatGridCvarValue(name, v) {
     || name === 'cl_grid_alpha'
     || name === 'cl_ast_outline_alpha' || name === 'cl_ast_face_alpha'
     || name === 'cl_ast_face_tint' || name === 'cl_ast_wire_width' || name === 'cl_ast_wire_alpha'
-    || name === 'cl_ast_height' || name === 'cl_ast_parallax' || name === 'cl_ast_rough' || name === 'cl_ast_bump'
     || name === 'cl_ast_z_min' || name === 'cl_ast_z_max'
     || name === 'cl_ast_emit' || name === 'cl_ship_emit' || name === 'cl_ast_outline_emit'
     || name === 'cl_grid_color_r' || name === 'cl_grid_color_g' || name === 'cl_grid_color_b'
