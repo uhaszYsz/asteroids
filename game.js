@@ -15038,8 +15038,8 @@ function enemyBankSmoothed(id, angle, dt) {
     turnRate = prev.rate != null ? prev.rate * 0.72 + inst * 0.28 : inst;
   }
   enemyAngHist.set(key, { ang: angle, t: now, rate: turnRate });
-  // ~1 rad/s turn → strong bank; clamp to ship bank max.
-  const target = Math.max(-SHIP_BANK_MAX, Math.min(SHIP_BANK_MAX, -turnRate * 0.7));
+  // ~1 rad/s turn → strong bank; 60% stronger than prior 0.7 gain; clamp to ship bank max.
+  const target = Math.max(-SHIP_BANK_MAX, Math.min(SHIP_BANK_MAX, -turnRate * 0.7 * 1.6));
   let cur = enemyBankSmooth.get(key);
   if (cur == null || !Number.isFinite(cur)) cur = target;
   const k = 1 - Math.exp(-12 * Math.max(0.001, dt || 0.016));
