@@ -9666,8 +9666,27 @@ function rotateShipMeshYaw90(def) {
   }
   return Object.assign({}, def, { verts, nose });
 }
+/** Yaw mesh 180° around +Z: (x,y,z)→(-x,-y,z). */
+function rotateShipMeshYaw180(def) {
+  const verts = (def.verts || []).map((v) => [-v[0], -v[1], v[2]]);
+  let nose = 0;
+  let best = -Infinity;
+  for (let i = 0; i < verts.length; i++) {
+    if (verts[i][0] > best) {
+      best = verts[i][0];
+      nose = i;
+    }
+  }
+  return Object.assign({}, def, { verts, nose });
+}
+function isTexturedShipDef(def) {
+  return !!(def && (def.source === 'ships' || def.kind === 'textured' || def.texture));
+}
+function orientTexturedShipDef(def) {
+  return rotateShipMeshYaw180(def);
+}
 function scaleShipMeshDef(def) {
-  const s = SHIP_MESH_SCALE;
+  const s = SHIP_MESH_SCALE * (isTexturedShipDef(def) ? 2 : 1);
   return {
     id: def.id,
     name: def.name || def.id,
@@ -9703,11 +9722,11 @@ const SHIP_MESHES = (() => {
     if (!d) continue;
     kept.push(d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d);
   }
-  // FBX pack from ships/ships (source: ships) — yaw 90° so nose points +X.
+  // FBX pack from ships/ships — 180° yaw + 2× scale (applied in scaleShipMeshDef).
   for (const d of _shipMeshRawDefs) {
     if (!d || d.source !== 'ships') continue;
     if (kept.some((k) => k.id === d.id)) continue;
-    kept.push(rotateShipMeshYaw90(d));
+    kept.push(orientTexturedShipDef(d));
   }
   return kept.map(scaleShipMeshDef);
 })();
@@ -9769,7 +9788,10 @@ function appendShipMeshDefs(defs) {
   for (const d of defs) {
     if (!d || !d.id) continue;
     if (SHIP_OPTIONS.some((m) => m.id === d.id)) continue;
-    const scaled = scaleShipMeshDef(d);
+    const oriented = (d.source === 'ships' || d.kind === 'textured' || d.texture)
+      ? rotateShipMeshYaw90(d)
+      : d;
+    const scaled = scaleShipMeshDef(oriented);
     SHIP_MESHES.push(scaled);
     SHIP_OPTIONS.push(scaled);
     n++;
