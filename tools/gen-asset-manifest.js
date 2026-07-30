@@ -16,18 +16,12 @@ const INCLUDE_DIRS = [
   'textures',
   'sounds',
   'music',
-  'lib',
-  'models',
-  'ships'
+  'lib'
 ];
 const INCLUDE_ROOT_FILES = [
   'game.js',
   'music.js',
   'config.js',
-  'ship-meshes.js',
-  'alien-ship-meshes.js',
-  'ships-voxel-meshes.js',
-  'ships-fbx-meshes.js',
   'demo-recorder.js'
 ];
 const INCLUDE_EXTS = new Set([

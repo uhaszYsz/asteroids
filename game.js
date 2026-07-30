@@ -9662,71 +9662,15 @@ function asteroidShapeId(a) {
   return a.aid | 0;
 }
 
-/* ========== 3D wireframe player ship (selectable Elite / FE2 hulls) ========== */
+/* ========== Player ship: default Arrow mesh + sprite hulls ========== */
 /** 2D silhouette kept for muzzle / legacy helpers (nose, wings). */
 const shipShape = [9 * RES_SCALE, 0, -6 * RES_SCALE, 5 * RES_SCALE, -6 * RES_SCALE, -5 * RES_SCALE];
-/** Unit-normalized defs from ship-meshes.js → scaled local meshes. */
+/** Unit-normalized Arrow tetrahedron → scaled local mesh. */
 const SHIP_MESH_SCALE = 9 * RES_SCALE;
 const SHIP_MESH_LS_KEY = 'asteroids_ship_mesh';
-/** Player-selectable hulls only (Elite + a few alien). */
-const SHIP_MESH_KEEP_IDS = [
-  'arrow', 'transporter', 'python', 'boa', 'krait', 'adder', 'gecko', 'worm',
-  'cobra_mk_3', 'alien_claw', 'alien_saucer', 'alien_crab', 'alien_wraith'
-];
-/** Yaw mesh 90° around +Z: (x,y,z)→(y,-x,z) so a wide hull becomes long/“vertical”. */
-function rotateShipMeshYaw90(def) {
-  const verts = (def.verts || []).map((v) => [v[1], -v[0], v[2]]);
-  let nose = 0;
-  let best = -Infinity;
-  for (let i = 0; i < verts.length; i++) {
-    if (verts[i][0] > best) {
-      best = verts[i][0];
-      nose = i;
-    }
-  }
-  return Object.assign({}, def, { verts, nose });
-}
-/** Yaw −90° around +Z (counterclockwise / “left”): (x,y,z)→(−y,x,z). */
-function rotateShipMeshYawNeg90(def) {
-  const verts = (def.verts || []).map((v) => [-v[1], v[0], v[2]]);
-  let nose = 0;
-  let best = -Infinity;
-  for (let i = 0; i < verts.length; i++) {
-    if (verts[i][0] > best) {
-      best = verts[i][0];
-      nose = i;
-    }
-  }
-  return Object.assign({}, def, { verts, nose });
-}
-/** Yaw mesh 180° around +Z: (x,y,z)→(-x,-y,z). */
-function rotateShipMeshYaw180(def) {
-  const verts = (def.verts || []).map((v) => [-v[0], -v[1], v[2]]);
-  let nose = 0;
-  let best = -Infinity;
-  for (let i = 0; i < verts.length; i++) {
-    if (verts[i][0] > best) {
-      best = verts[i][0];
-      nose = i;
-    }
-  }
-  return Object.assign({}, def, { verts, nose });
-}
-function isTexturedShipDef(def) {
-  return !!(def && (def.source === 'ships' || def.source === 'voxels' || def.kind === 'textured' || def.texture));
-}
-function orientTexturedShipDef(def) {
-  // FBX pack needed extra yaw; MagicaVoxel: +90° left from generator pose.
-  if (def && def.source === 'ships') {
-    return rotateShipMeshYaw180(rotateShipMeshYaw90(def));
-  }
-  if (def && def.source === 'voxels') {
-    return rotateShipMeshYawNeg90(def);
-  }
-  return def;
-}
+
 function scaleShipMeshDef(def) {
-  const s = SHIP_MESH_SCALE * (isTexturedShipDef(def) ? 2 : 1);
+  const s = SHIP_MESH_SCALE;
   return {
     id: def.id,
     name: def.name || def.id,
@@ -9740,36 +9684,18 @@ function scaleShipMeshDef(def) {
     edges: (def.edges || []).map((e) => e.slice())
   };
 }
-const _shipMeshRawDefs = (typeof SHIP_MESH_DEFS !== 'undefined' && Array.isArray(SHIP_MESH_DEFS) && SHIP_MESH_DEFS.length
-  ? SHIP_MESH_DEFS
-  : [{
-      id: 'arrow',
-      name: 'Arrow',
-      source: 'local',
-      nose: 0,
-      verts: [[1, 0, 0], [-0.6667, 0.6111, 0], [-0.6667, -0.6111, 0], [-0.1667, 0, 0.5778]],
-      faces: [[0, 1, 2], [0, 2, 3], [0, 3, 1], [2, 1, 3]],
-      edges: [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]]
-    }]);
-const SHIP_MESHES = (() => {
-  const byId = new Map();
-  for (const d of _shipMeshRawDefs) {
-    if (d && d.id) byId.set(d.id, d);
-  }
-  const kept = [];
-  for (const id of SHIP_MESH_KEEP_IDS) {
-    const d = byId.get(id);
-    if (!d) continue;
-    kept.push(d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d);
-  }
-  // Textured packs (MagicaVoxel / legacy FBX) — 2× scale in scaleShipMeshDef.
-  for (const d of _shipMeshRawDefs) {
-    if (!d || (d.source !== 'voxels' && d.source !== 'ships')) continue;
-    if (kept.some((k) => k.id === d.id)) continue;
-    kept.push(orientTexturedShipDef(d));
-  }
-  return kept.map(scaleShipMeshDef);
-})();
+
+/** Only the classic triangle / tetrahedron rocket (no Elite/FE2/alien/FBX/voxel packs). */
+const ARROW_SHIP_DEF = {
+  id: 'arrow',
+  name: 'Arrow',
+  source: 'local',
+  nose: 0,
+  verts: [[1, 0, 0], [-0.6667, 0.6111, 0], [-0.6667, -0.6111, 0], [-0.1667, 0, 0.5778]],
+  faces: [[0, 1, 2], [0, 2, 3], [0, 3, 1], [2, 1, 3]],
+  edges: [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]]
+};
+const SHIP_MESHES = [scaleShipMeshDef(ARROW_SHIP_DEF)];
 
 let selectedShipMeshId = 'arrow';
 try {
@@ -9921,55 +9847,6 @@ function makeSpriteShipOption(spec, source) {
 const SPRITE_SHIP_OPTIONS = TINY_SHIP_SPECS.map((s) => makeSpriteShipOption(s, 'tiny'))
   .concat(ENEMY_SPRITE_SPECS.map((s) => makeSpriteShipOption(s, 'enemies')));
 const SHIP_OPTIONS = SHIP_MESHES.concat(SPRITE_SHIP_OPTIONS);
-
-/** Late-register hulls (e.g. FBX pack) into the F1 picker. */
-function appendShipMeshDefs(defs) {
-  if (!Array.isArray(defs) || !defs.length) return 0;
-  let n = 0;
-  for (const d of defs) {
-    if (!d || !d.id) continue;
-    if (SHIP_OPTIONS.some((m) => m.id === d.id)) continue;
-    const oriented = isTexturedShipDef(d) ? orientTexturedShipDef(d) : d;
-    const scaled = scaleShipMeshDef(oriented);
-    SHIP_MESHES.push(scaled);
-    SHIP_OPTIONS.push(scaled);
-    n++;
-  }
-  if (n) {
-    try { buildShipMeshUi(); } catch (_) { /* UI may not exist yet */ }
-  }
-  return n;
-}
-
-/** Voxel / textured pack: use sync global if present, otherwise fetch the script. */
-function ensureTexturedShipPack() {
-  if (SHIP_OPTIONS.some((m) => m && (m.source === 'voxels' || m.source === 'ships'))) return;
-  const fromVoxel = (typeof VOXEL_SHIP_MESH_DEFS !== 'undefined' && Array.isArray(VOXEL_SHIP_MESH_DEFS))
-    ? VOXEL_SHIP_MESH_DEFS
-    : null;
-  if (fromVoxel && fromVoxel.length) {
-    appendShipMeshDefs(fromVoxel);
-    return;
-  }
-  if (typeof SHIP_MESH_DEFS !== 'undefined' && Array.isArray(SHIP_MESH_DEFS)) {
-    const late = SHIP_MESH_DEFS.filter((d) => d && (d.source === 'voxels' || d.source === 'ships'));
-    if (late.length) {
-      appendShipMeshDefs(late);
-      return;
-    }
-  }
-  const s = document.createElement('script');
-  s.src = 'ships-voxel-meshes.js?v=1';
-  s.async = true;
-  s.onload = () => {
-    if (typeof VOXEL_SHIP_MESH_DEFS !== 'undefined') appendShipMeshDefs(VOXEL_SHIP_MESH_DEFS);
-    else if (typeof SHIP_MESH_DEFS !== 'undefined') {
-      appendShipMeshDefs(SHIP_MESH_DEFS.filter((d) => d && (d.source === 'voxels' || d.source === 'ships')));
-    }
-  };
-  s.onerror = () => console.error('Failed to load ships-voxel-meshes.js');
-  document.head.appendChild(s);
-}
 
 function spriteShipDir(spec) {
   if (!spec) return TINY_SHIP_DIR;
@@ -10674,15 +10551,6 @@ function drawShip3D(x, y, angle, av, color, id, dt, moving) {
   }
   const mesh = getActiveShipMesh();
   const bank = shipBankSmoothed(id, av, dt);
-  if (mesh.kind === 'textured' || mesh.texture) {
-    drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, {
-      noOutline: true,
-      noTint: true,
-      noEmit: mesh.source === 'voxels',
-      strongEmit: mesh.source !== 'voxels'
-    });
-    return;
-  }
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank);
 
   drawShipMeshFacesTex(xy, depth, mesh, color, id);
@@ -15345,9 +15213,7 @@ const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_COMMON_MESH = (() => {
-  const src = getShipMeshById('voxel_redfighter');
-  const fallback = (!src || src.id !== 'voxel_redfighter') ? getShipMeshById('adder') : src;
-  return cloneShipMeshScaled(fallback, ENEMY_COMMON_SCALE);
+  return cloneShipMeshScaled(SHIP_MESHES[0], ENEMY_COMMON_SCALE);
 })();
 
 /** UFO = Heavy 370 sprite. */
@@ -15369,13 +15235,7 @@ function ufoTurretSideY(ufoOpt, side) {
   return Math.max(1, halfW * ENEMY_UFO_TURRET_SIDE_FRAC) * (side < 0 ? -1 : 1);
 }
 const ENEMY_UFO_MESH = (() => {
-  const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_transtellar');
-  if (raw) {
-    // Skip orientTexturedShipDef yaw — UFO keeps generator orientation.
-    return cloneShipMeshScaled(scaleShipMeshDef(raw), ENEMY_UFO_SCALE);
-  }
-  const src = getShipMeshById('adder');
-  return cloneShipMeshScaled(src, ENEMY_UFO_SCALE);
+  return cloneShipMeshScaled(SHIP_MESHES[0], ENEMY_UFO_SCALE);
 })();
 
 /** Silhouette edges only (front-facing boundary) — not full wireframe.
@@ -18960,11 +18820,6 @@ function syncGridShapeUi() {
 }
 
 function shipMeshSourceLabel(src) {
-  if (src === 'elite') return 'Elite';
-  if (src === 'fe2') return 'Frontier / FE2';
-  if (src === 'alien') return 'Alien';
-  if (src === 'voxels') return 'Voxel ships';
-  if (src === 'ships') return 'Ships pack';
   if (src === 'tiny') return 'Tiny sprites';
   if (src === 'enemies') return 'Enemy sprites';
   return 'Default';
@@ -18972,22 +18827,12 @@ function shipMeshSourceLabel(src) {
 
 function shipMeshSectionOrder(src) {
   if (src === 'local') return 0;
-  if (src === 'elite') return 1;
-  if (src === 'fe2') return 2;
-  if (src === 'alien') return 3;
-  if (src === 'voxels') return 4;
-  if (src === 'ships') return 5;
-  if (src === 'tiny') return 6;
-  if (src === 'enemies') return 7;
+  if (src === 'tiny') return 1;
+  if (src === 'enemies') return 2;
   return 9;
 }
 
 function shipMeshSectionTitle(src) {
-  if (src === 'elite') return 'Elite';
-  if (src === 'fe2') return 'Frontier / FE2';
-  if (src === 'alien') return 'Alien ships';
-  if (src === 'voxels') return 'Voxel ships (textured)';
-  if (src === 'ships') return '3D ships (textured)';
   if (src === 'tiny') return 'Tiny sprite ships';
   if (src === 'enemies') return 'Enemy sprites';
   return 'Default';
@@ -19241,9 +19086,9 @@ function syncShipMeshUi() {
       meta.textContent = `${opt.name} · ${pack} · ${s.fw}×${s.fh}` +
         (s.single ? '' : ` · ${s.states.join('/')}`);
     } else if (opt.kind === 'textured' || opt.texture) {
-      meta.textContent = `${opt.name} · ${shipMeshSourceLabel(opt.source)} · textured · ${opt.verts.length}v / ${opt.faces.length}f`;
+      meta.textContent = `${opt.name} · textured`;
     } else {
-      meta.textContent = `${opt.name} · ${shipMeshSourceLabel(opt.source)} · ${opt.verts.length}v / ${opt.edges.length}e`;
+      meta.textContent = `${opt.name} · Arrow`;
     }
   }
   if (!wrap) return;
@@ -19618,7 +19463,6 @@ function copyGridSettings() {
 
 if (gridPanelEl) {
   buildShipMeshUi();
-  ensureTexturedShipPack();
   for (const row of GRID_PANEL_CVARS) {
     const input = gridPanelEl.querySelector(`input[data-cvar="${row.name}"]`);
     if (!input) continue;
