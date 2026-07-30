@@ -10125,6 +10125,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
   if (!entry || !entry.ready || !entry.tex) return;
 
   const bank = shipBankSmoothed(id, av, dt) * 0.5;
+  const halfL = 7.5 * RES_SCALE;
   const halfW = halfL * (spec.fw / Math.max(1, spec.fh));
   const cp = Math.cos(SPRITE_ROOF_PITCH);
   const sp = Math.sin(SPRITE_ROOF_PITCH);
