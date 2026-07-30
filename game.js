@@ -8893,10 +8893,11 @@ const astTexFS = `
     vec4 t = texture2D(uTex, vUV);
     vec3 tint = mix(vec3(1.0), uTint, clamp(uTintPow, 0.0, 1.0));
     vec3 albedo = t.rgb * tint;
-    // Godot-style emission: tint × bright albedo × energy (single pass, no bloom).
+    // Godot-style emission: bright texels glow. Untinted hulls emit in texture color.
     float lum = dot(t.rgb, vec3(0.299, 0.587, 0.114));
     float emitMask = smoothstep(0.12, 0.72, lum);
-    vec3 rgb = albedo + uTint * emitMask * max(0.0, uEmit);
+    vec3 emitCol = mix(albedo, uTint, step(0.01, uTintPow));
+    vec3 rgb = albedo + emitCol * emitMask * max(0.0, uEmit);
     gl_FragColor = applyNightLit(rgb, uAlpha, vWorld);
   }
 `;
@@ -10226,7 +10227,7 @@ function drawShip3D(x, y, angle, av, color, id, dt, moving) {
   const bank = shipBankSmoothed(id, av, dt);
   if (mesh.kind === 'textured' || mesh.texture) {
     drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, {
-      silhouetteOnly: true,
+      noOutline: true,
       noTint: true,
       strongEmit: true
     });
@@ -14624,7 +14625,7 @@ function drawMeshSilhouetteEdges(xy, mesh, color) {
 
 /**
  * Textured hull (ship.png or mesh.texture).
- * opts: silhouetteOnly, noTint, strongEmit
+ * opts: silhouetteOnly, noOutline, noTint, strongEmit
  */
 function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank || 0);
@@ -14643,7 +14644,7 @@ function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
     const uvScale = shipMeshUvScale(mv);
     const baseEmit = Math.max(0, Number(cv('cl_ship_emit')) || 0);
     const emitPow = o.strongEmit ? Math.max(1.55, baseEmit * 3) : baseEmit;
-    // noTint: keep albedo as texture; emission uses white so it doesn't recolor the hull.
+    // noTint: keep albedo as texture; emission uses white so bright texels glow without recoloring.
     const tintPow = o.noTint ? 0 : 0.7;
     const tint = o.noTint ? [1, 1, 1] : (color || COL.enemy);
     const faceA = 1;
@@ -14662,8 +14663,13 @@ function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
   } else {
     drawShipMeshFacesTex(xy, depth, mesh, color, id != null ? id : 0);
   }
-  if (o.silhouetteOnly) drawMeshSilhouetteEdges(xy, mesh, color);
-  else drawShipOutlineEdges(xy, mesh, color, -1, 0);
+  if (o.noOutline) {
+    /* textured player hulls: albedo + emission only */
+  } else if (o.silhouetteOnly) {
+    drawMeshSilhouetteEdges(xy, mesh, color);
+  } else {
+    drawShipOutlineEdges(xy, mesh, color, -1, 0);
+  }
 }
 
 /** Bank from heading change rate (enemies have no av). */
