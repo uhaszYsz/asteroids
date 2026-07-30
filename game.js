@@ -8922,6 +8922,46 @@ const astTAUV = gl.getAttribLocation(astTexProg, 'aUV');
 const astTexBuf = gl.createBuffer();
 /** Face: 3 verts; edge quad: 6 verts × (x,y,u,v). */
 const _astTexMesh = new Float32Array(6 * 4);
+let _astTexBatch = new Float32Array(4096 * 12);
+
+function ensureAstTexBatch(triCount) {
+  const need = triCount * 12;
+  if (_astTexBatch.length < need) {
+    let n = _astTexBatch.length;
+    while (n < need) n *= 2;
+    _astTexBatch = new Float32Array(n);
+  }
+  return _astTexBatch;
+}
+
+function drawEnemyHullFacesBatched(xy, mv, faces, order, uvScale, id, tint, alpha, tintPow, emit, meshUvs) {
+  const n = order.length;
+  if (!n) return;
+  const m = ensureAstTexBatch(n);
+  let o = 0;
+  for (let oi = 0; oi < n; oi++) {
+    const f = faces[order[oi].i];
+    for (let i = 0; i < 3; i++) {
+      const vi = f[i];
+      const uv = (meshUvs && meshUvs[vi])
+        ? meshUvs[vi]
+        : shipVertUV(mv[vi][0], mv[vi][1], uvScale, id);
+      m[o++] = xy[vi * 2];
+      m[o++] = xy[vi * 2 + 1];
+      m[o++] = uv[0];
+      m[o++] = uv[1];
+    }
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, astTexBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, m.subarray(0, o), gl.DYNAMIC_DRAW);
+  gl.vertexAttribPointer(astTAPos, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(astTAUV, 2, gl.FLOAT, false, 16, 8);
+  gl.uniform3f(astTUTint, tint[0], tint[1], tint[2]);
+  gl.uniform1f(astTUTintPow, tintPow != null ? tintPow : 0.7);
+  gl.uniform1f(astTUEmit, emit != null ? emit : 0);
+  gl.uniform1f(astTUAlpha, alpha);
+  gl.drawArrays(gl.TRIANGLES, 0, n * 3);
+}
 
 const asteroidFaceTex = gl.createTexture();
 let asteroidFaceTexReady = false;
@@ -8959,6 +8999,30 @@ let shipHullTexReady = false;
   img.src = 'textures/ship.png';
 })();
 
+/** GL textures for ships/ships pack (and any mesh.texture path). */
+const shipPackTexCache = new Map(); // path -> { tex, ready }
+function getShipPackGlTexture(path) {
+  if (!path) return null;
+  let e = shipPackTexCache.get(path);
+  if (e) return e.ready ? e.tex : null;
+  e = { tex: gl.createTexture(), ready: false };
+  shipPackTexCache.set(path, e);
+  const img = new Image();
+  img.onload = () => {
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    e.ready = true;
+  };
+  img.onerror = () => console.error('Failed to load ship texture', path);
+  img.src = path;
+  return null;
+}
+
 /** Planar UVs from local mesh XY (tiled + per-id offset). */
 function shipMeshUvScale(verts) {
   let m = 0;
@@ -8976,11 +9040,13 @@ function shipVertUV(vx, vy, uvScale, id) {
   return [(vx / uvScale) * tile * 0.5 + ox, (vy / uvScale) * tile * 0.5 + oy];
 }
 
-function drawEnemyHullFaceTex(xy, mv, f, uvScale, id, tint, alpha, tintPow, emit) {
+function drawEnemyHullFaceTex(xy, mv, f, uvScale, id, tint, alpha, tintPow, emit, meshUvs) {
   const m = _astTexMesh;
   for (let i = 0; i < 3; i++) {
     const vi = f[i];
-    const uv = shipVertUV(mv[vi][0], mv[vi][1], uvScale, id);
+    const uv = (meshUvs && meshUvs[vi])
+      ? [meshUvs[vi][0], meshUvs[vi][1]]
+      : shipVertUV(mv[vi][0], mv[vi][1], uvScale, id);
     const o = i * 4;
     m[o] = xy[vi * 2];
     m[o + 1] = xy[vi * 2 + 1];
@@ -9605,8 +9671,11 @@ function scaleShipMeshDef(def) {
     id: def.id,
     name: def.name || def.id,
     source: def.source || 'local',
+    kind: def.kind || null,
+    texture: def.texture || null,
     nose: Math.max(0, Math.min((def.verts && def.verts.length ? def.verts.length : 1) - 1, def.nose | 0)),
     verts: (def.verts || []).map((v) => [v[0] * s, v[1] * s, v[2] * s]),
+    uvs: def.uvs ? def.uvs.map((u) => [u[0], u[1]]) : null,
     faces: (def.faces || []).map((f) => f.slice()),
     edges: (def.edges || []).map((e) => e.slice())
   };
@@ -9632,6 +9701,12 @@ const SHIP_MESHES = (() => {
     const d = byId.get(id);
     if (!d) continue;
     kept.push(d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d);
+  }
+  // FBX pack from ships/ships (source: ships).
+  for (const d of _shipMeshRawDefs) {
+    if (!d || d.source !== 'ships') continue;
+    if (kept.some((k) => k.id === d.id)) continue;
+    kept.push(d);
   }
   return kept.map(scaleShipMeshDef);
 })();
@@ -9685,6 +9760,54 @@ const SPRITE_SHIP_OPTIONS = TINY_SHIP_SPECS.map((s) => ({
   edges: []
 }));
 const SHIP_OPTIONS = SHIP_MESHES.concat(SPRITE_SHIP_OPTIONS);
+
+/** Late-register hulls (e.g. FBX pack) into the F1 picker. */
+function appendShipMeshDefs(defs) {
+  if (!Array.isArray(defs) || !defs.length) return 0;
+  let n = 0;
+  for (const d of defs) {
+    if (!d || !d.id) continue;
+    if (SHIP_OPTIONS.some((m) => m.id === d.id)) continue;
+    const scaled = scaleShipMeshDef(d);
+    SHIP_MESHES.push(scaled);
+    SHIP_OPTIONS.push(scaled);
+    n++;
+  }
+  if (n) {
+    try { buildShipMeshUi(); } catch (_) { /* UI may not exist yet */ }
+  }
+  return n;
+}
+
+/** FBX pack: use sync global if present, otherwise fetch the script. */
+function ensureFbxShipPack() {
+  if (SHIP_OPTIONS.some((m) => m && m.source === 'ships')) return;
+  const fromGlobal = (typeof FBX_SHIP_MESH_DEFS !== 'undefined' && Array.isArray(FBX_SHIP_MESH_DEFS))
+    ? FBX_SHIP_MESH_DEFS
+    : null;
+  if (fromGlobal && fromGlobal.length) {
+    appendShipMeshDefs(fromGlobal);
+    return;
+  }
+  if (typeof SHIP_MESH_DEFS !== 'undefined' && Array.isArray(SHIP_MESH_DEFS)) {
+    const late = SHIP_MESH_DEFS.filter((d) => d && d.source === 'ships');
+    if (late.length) {
+      appendShipMeshDefs(late);
+      return;
+    }
+  }
+  const s = document.createElement('script');
+  s.src = 'ships-fbx-meshes.js?v=2';
+  s.async = true;
+  s.onload = () => {
+    if (typeof FBX_SHIP_MESH_DEFS !== 'undefined') appendShipMeshDefs(FBX_SHIP_MESH_DEFS);
+    else if (typeof SHIP_MESH_DEFS !== 'undefined') {
+      appendShipMeshDefs(SHIP_MESH_DEFS.filter((d) => d && d.source === 'ships'));
+    }
+  };
+  s.onerror = () => console.error('Failed to load ships-fbx-meshes.js');
+  document.head.appendChild(s);
+}
 
 function loadSpriteShipTexture(spec) {
   if (spriteShipTexById.has(spec.id)) return spriteShipTexById.get(spec.id);
@@ -10101,6 +10224,14 @@ function drawShip3D(x, y, angle, av, color, id, dt, moving) {
   }
   const mesh = getActiveShipMesh();
   const bank = shipBankSmoothed(id, av, dt);
+  if (mesh.kind === 'textured' || mesh.texture) {
+    drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, {
+      silhouetteOnly: true,
+      noTint: true,
+      strongEmit: true
+    });
+    return;
+  }
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank);
 
   drawShipMeshFacesTex(xy, depth, mesh, color, id);
@@ -14448,11 +14579,18 @@ const ENEMY_UFO_MESH = (() => {
   };
 })();
 
-/** Silhouette edges only (front-facing boundary) — not full wireframe. */
+/** Silhouette edges only (front-facing boundary) — not full wireframe.
+ *  Keys by quantized position so UV-expanded meshes (unique verts per corner) still weld. */
 function drawMeshSilhouetteEdges(xy, mesh, color) {
   const faces = mesh.faces || [];
-  if (!faces.length) return;
+  const mv = mesh.verts || [];
+  if (!faces.length || !mv.length) return;
+  const posKeyOf = (i) => {
+    const v = mv[i];
+    return ((v[0] * 500) | 0) + ',' + ((v[1] * 500) | 0) + ',' + ((v[2] * 500) | 0);
+  };
   const edgeCount = new Map();
+  const edgeEnds = new Map(); // key -> [i0, i1] sample indices for xy
   for (let fi = 0; fi < faces.length; fi++) {
     const f = faces[fi];
     if (!f || f.length < 3) continue;
@@ -14460,18 +14598,22 @@ function drawMeshSilhouetteEdges(xy, mesh, color) {
     for (let i = 0; i < f.length; i++) {
       const a = f[i];
       const b = f[(i + 1) % f.length];
-      const lo = a < b ? a : b;
-      const hi = a < b ? b : a;
-      const key = lo * 100000 + hi;
+      const ka = posKeyOf(a);
+      const kb = posKeyOf(b);
+      if (ka === kb) continue;
+      const key = ka < kb ? ka + '|' + kb : kb + '|' + ka;
       edgeCount.set(key, (edgeCount.get(key) || 0) + 1);
+      if (!edgeEnds.has(key)) edgeEnds.set(key, [a, b]);
     }
   }
   const edgeW = 2;
   const col = color || COL.enemyUfo;
   for (const [key, n] of edgeCount) {
     if (n !== 1) continue;
-    const lo = (key / 100000) | 0;
-    const hi = key - lo * 100000;
+    const ends = edgeEnds.get(key);
+    if (!ends) continue;
+    const lo = ends[0];
+    const hi = ends[1];
     drawThickSegment(
       xy[lo * 2], xy[lo * 2 + 1],
       xy[hi * 2], xy[hi * 2 + 1],
@@ -14481,7 +14623,7 @@ function drawMeshSilhouetteEdges(xy, mesh, color) {
 }
 
 /**
- * Textured enemy hull (ship.png).
+ * Textured hull (ship.png or mesh.texture).
  * opts: silhouetteOnly, noTint, strongEmit
  */
 function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
@@ -14489,7 +14631,10 @@ function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
   const faces = mesh.faces || [];
   const mv = mesh.verts || [];
   const o = opts || {};
-  if (shipHullTexReady && faces.length && mv.length) {
+  const packTex = mesh.texture ? getShipPackGlTexture(mesh.texture) : null;
+  const hullTex = packTex || (shipHullTexReady ? shipHullTex : null);
+  const meshUvs = (mesh.uvs && mesh.uvs.length === mv.length) ? mesh.uvs : null;
+  if (hullTex && faces.length && mv.length) {
     const order = faces.map((f, i) => {
       const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
       return { i, z };
@@ -14506,15 +14651,13 @@ function drawEnemyShipMesh(mesh, x, y, angle, color, bank, id, opts) {
     gl.enableVertexAttribArray(astTAPos);
     gl.enableVertexAttribArray(astTAUV);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, shipHullTex);
+    gl.bindTexture(gl.TEXTURE_2D, hullTex);
     gl.uniform1i(astTUTex, 0);
     gl.uniform2f(astTURes, W, H);
     bindSceneLightUniforms(astTexLightU);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    for (let oi = 0; oi < order.length; oi++) {
-      drawEnemyHullFaceTex(xy, mv, faces[order[oi].i], uvScale, id | 0, tint, faceA, tintPow, emitPow);
-    }
+    drawEnemyHullFacesBatched(xy, mv, faces, order, uvScale, id | 0, tint, faceA, tintPow, emitPow, meshUvs);
     gl.disableVertexAttribArray(astTAUV);
   } else {
     drawShipMeshFacesTex(xy, depth, mesh, color, id != null ? id : 0);
@@ -17806,6 +17949,7 @@ function shipMeshSourceLabel(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien';
+  if (src === 'ships') return 'Ships pack';
   if (src === 'tiny') return 'Tiny sprites';
   return 'Default';
 }
@@ -17815,7 +17959,8 @@ function shipMeshSectionOrder(src) {
   if (src === 'elite') return 1;
   if (src === 'fe2') return 2;
   if (src === 'alien') return 3;
-  if (src === 'tiny') return 4;
+  if (src === 'ships') return 4;
+  if (src === 'tiny') return 5;
   return 9;
 }
 
@@ -17823,6 +17968,7 @@ function shipMeshSectionTitle(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien ships';
+  if (src === 'ships') return '3D ships (textured)';
   if (src === 'tiny') return 'Tiny sprite ships';
   return 'Default';
 }
@@ -17917,7 +18063,9 @@ function drawShipMeshPreview(ctx, mesh, w, h, t) {
 
   const faces = mesh.faces || [];
   const order = [];
-  for (let i = 0; i < faces.length; i++) {
+  // Dense FBX hulls: subsample faces so F1 thumbnails stay cheap.
+  const faceStep = faces.length > 2500 ? Math.ceil(faces.length / 900) : 1;
+  for (let i = 0; i < faces.length; i += faceStep) {
     const f = faces[i];
     if (!f || f.length < 3) continue;
     let z = 0;
@@ -17944,18 +18092,20 @@ function drawShipMeshPreview(ctx, mesh, w, h, t) {
     ctx.fill();
   }
 
-  ctx.strokeStyle = `rgba(${Math.min(255, (col[0] * 255 + 40) | 0)},${Math.min(255, (col[1] * 255 + 40) | 0)},${Math.min(255, (col[2] * 255 + 40) | 0)},0.95)`;
-  ctx.lineWidth = 1.15;
-  ctx.lineJoin = 'round';
   const edges = mesh.edges || [];
-  for (let i = 0; i < edges.length; i++) {
-    const e = edges[i];
-    const a = e[0];
-    const b = e[1];
-    ctx.beginPath();
-    ctx.moveTo(xy[a * 2] * sc + ox, xy[a * 2 + 1] * sc + oy);
-    ctx.lineTo(xy[b * 2] * sc + ox, xy[b * 2 + 1] * sc + oy);
-    ctx.stroke();
+  if (edges.length && edges.length <= 600) {
+    ctx.strokeStyle = `rgba(${Math.min(255, (col[0] * 255 + 40) | 0)},${Math.min(255, (col[1] * 255 + 40) | 0)},${Math.min(255, (col[2] * 255 + 40) | 0)},0.95)`;
+    ctx.lineWidth = 1.15;
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i];
+      const a = e[0];
+      const b = e[1];
+      ctx.beginPath();
+      ctx.moveTo(xy[a * 2] * sc + ox, xy[a * 2 + 1] * sc + oy);
+      ctx.lineTo(xy[b * 2] * sc + ox, xy[b * 2 + 1] * sc + oy);
+      ctx.stroke();
+    }
   }
 }
 
@@ -17968,6 +18118,8 @@ function syncShipMeshUi() {
     if (opt.kind === 'sprite' && opt.sprite) {
       const s = opt.sprite;
       meta.textContent = `${opt.name} · Tiny sprites · ${s.fw}×${s.fh} · ${s.states.join('/')}`;
+    } else if (opt.kind === 'textured' || opt.texture) {
+      meta.textContent = `${opt.name} · ${shipMeshSourceLabel(opt.source)} · textured · ${opt.verts.length}v / ${opt.faces.length}f`;
     } else {
       meta.textContent = `${opt.name} · ${shipMeshSourceLabel(opt.source)} · ${opt.verts.length}v / ${opt.edges.length}e`;
     }
@@ -18350,6 +18502,7 @@ function copyGridSettings() {
 
 if (gridPanelEl) {
   buildShipMeshUi();
+  ensureFbxShipPack();
   for (const row of GRID_PANEL_CVARS) {
     const input = gridPanelEl.querySelector(`input[data-cvar="${row.name}"]`);
     if (!input) continue;
