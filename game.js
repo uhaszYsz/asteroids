@@ -8384,7 +8384,8 @@ function drawSceneLines(dt) {
     const col = asteroidColor(a);
     const size = a.size || (a.big ? 'big' : 'medium');
     const sid = asteroidShapeId(a);
-    drawAsteroid2D(ax, ay, p.angle, sid, a.r || 16, col, size, asteroidUsesDetailMaps(a));
+    const specialTint = !!(a.playerShot || a.special === 'meteor' || a.special === 'golden');
+    drawAsteroid2D(ax, ay, p.angle, sid, a.r || 16, col, size, asteroidUsesDetailMaps(a), specialTint);
     if ((a.special === 'meteor' || a.playerShot) && !deathSpectating) {
       const boost = (a._meteorBurnBoostUntil && performance.now() < a._meteorBurnBoostUntil) ? 3 : 1;
       emitMeteorBurnFx(
@@ -8901,8 +8902,8 @@ function asteroidUsesDetailMaps(a) {
 }
 
 /** Draw jagged asteroid: perspective 3D mesh (fill + wire + equator outline). */
-function drawAsteroid2D(cx, cy, angle, id, radius, color, size, detailMaps) {
-  drawAsteroid3D(cx, cy, angle, id, radius, color, size || 'medium', detailMaps);
+function drawAsteroid2D(cx, cy, angle, id, radius, color, size, detailMaps, specialTint) {
+  drawAsteroid3D(cx, cy, angle, id, radius, color, size || 'medium', detailMaps, specialTint);
 }
 
 /**
@@ -9581,6 +9582,7 @@ function astFaceScreenArea(xy, f) {
 
 /** Lambertian shade: ship radial on the local player (same R as grid light). */
 const _astShadeCol = [1, 1, 1];
+const _astNeutralCol = [0.72, 0.72, 0.72];
 const _astFaceNScratch = [0, 0, 1];
 const _astLDirScratch = [0, 0, 1];
 const AST_LIGHT_Z = 80 * RES_SCALE;
@@ -9646,7 +9648,7 @@ function asteroidFaceShade(wx, wy, wz, f, cx, cy, lightX, lightY, lightZ) {
   };
 }
 
-function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps) {
+function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, specialTint) {
   const mesh = getAsteroidWireMesh(id, radius, size);
   const osc = asteroidOscAngles(id);
   const mvSrc = mesh.verts;
@@ -9665,7 +9667,7 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps) {
 
   const faceA = Math.max(0, Math.min(1, Number(cv('cl_ast_face_alpha'))));
   const faceTexOn = (cv('cl_ast_face_tex') | 0) !== 0 && asteroidFaceTexReady;
-  const faceTintPow = Math.max(0, Math.min(1, Number(cv('cl_ast_face_tint'))));
+  let faceTintPow = Math.max(0, Math.min(1, Number(cv('cl_ast_face_tint'))));
   const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
   const outlineTexOn = (cv('cl_ast_outline_tex') | 0) !== 0 && asteroidFaceTexReady;
   const wireA = Math.max(0, Math.min(1, Number(cv('cl_ast_wire_alpha'))));
@@ -9675,6 +9677,9 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps) {
   const outlineEmitPow = Math.max(0, Number(cv('cl_ast_outline_emit')) || 0);
   const bindTex = (faceTexOn && faceA > 0.001) || (outlineTexOn && outlineA > 0.001);
   const useMaps = faceTexOn && mapsOk;
+  // Textured normals: show albedo as-is (no hue). Meteor/golden keep tint.
+  const noHueTint = faceTexOn && !specialTint;
+  if (noHueTint) faceTintPow = useMaps ? 0 : 1;
 
   // Always draw the mesh's built-in top half (local Z >= 0). Independent of wobble.
   const order = _astFaceScratch;
@@ -9740,9 +9745,16 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps) {
       const f = order[o].f;
       const lit = order[o].lit;
       const s = useMaps ? 1 : lit.shade;
-      shadeCol[0] = Math.min(1, color[0] * s);
-      shadeCol[1] = Math.min(1, color[1] * s);
-      shadeCol[2] = Math.min(1, color[2] * s);
+      if (noHueTint) {
+        // Lighting only (grayscale); albedo stays rock-colored.
+        shadeCol[0] = s;
+        shadeCol[1] = s;
+        shadeCol[2] = s;
+      } else {
+        shadeCol[0] = Math.min(1, color[0] * s);
+        shadeCol[1] = Math.min(1, color[1] * s);
+        shadeCol[2] = Math.min(1, color[2] * s);
+      }
       if (faceTexOn) {
         if (useMaps) {
           _faceN[0] = lit.nx; _faceN[1] = lit.ny; _faceN[2] = lit.nz;
@@ -9761,6 +9773,7 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps) {
   }
 
   const wire = _astWireColScratch;
+  const lineCol = noHueTint ? _astNeutralCol : color;
   if (wireA > 0.001) {
     const keys = _astEdgeKeys;
     keys.length = 0;
@@ -9772,9 +9785,9 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps) {
       const lo = (key / 100000) | 0;
       const hi = key - lo * 100000;
       const s = info.shade;
-      wire[0] = Math.min(1, color[0] * s);
-      wire[1] = Math.min(1, color[1] * s);
-      wire[2] = Math.min(1, color[2] * s);
+      wire[0] = Math.min(1, lineCol[0] * s);
+      wire[1] = Math.min(1, lineCol[1] * s);
+      wire[2] = Math.min(1, lineCol[2] * s);
       drawThickSegment(
         xy[lo * 2], xy[lo * 2 + 1],
         xy[hi * 2], xy[hi * 2 + 1],
@@ -9786,22 +9799,22 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps) {
   if (outlineA > 0.001) {
     const nEq = mesh.n | 0;
     const outlineW = 2;
-    wire[0] = Math.min(1, color[0]);
-    wire[1] = Math.min(1, color[1]);
-    wire[2] = Math.min(1, color[2]);
+    wire[0] = Math.min(1, lineCol[0]);
+    wire[1] = Math.min(1, lineCol[1]);
+    wire[2] = Math.min(1, lineCol[2]);
     // Untextured solid lines: Godot emission = albedo + tint×energy.
     const emitSolid = !outlineTexOn && outlineEmitPow > 0.001;
     if (emitSolid) {
       const e = outlineEmitPow;
-      wire[0] = Math.min(1, color[0] + color[0] * e);
-      wire[1] = Math.min(1, color[1] + color[1] * e);
-      wire[2] = Math.min(1, color[2] + color[2] * e);
+      wire[0] = Math.min(1, lineCol[0] + lineCol[0] * e);
+      wire[1] = Math.min(1, lineCol[1] + lineCol[1] * e);
+      wire[2] = Math.min(1, lineCol[2] + lineCol[2] * e);
     }
     const emitGlow = _astEmitColScratch;
     if (emitSolid) {
-      emitGlow[0] = color[0];
-      emitGlow[1] = color[1];
-      emitGlow[2] = color[2];
+      emitGlow[0] = lineCol[0];
+      emitGlow[1] = lineCol[1];
+      emitGlow[2] = lineCol[2];
     }
     const glowA = emitSolid ? Math.min(1, outlineA * outlineEmitPow * 0.55) : 0;
     const glowW = outlineW + 2;
