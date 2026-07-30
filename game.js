@@ -10740,8 +10740,8 @@ const WEAPON_MAX_LEVEL = 3;
 let selectedWeapon = 1; // 1 default … 8 asteroidgun
 /** Mirror of server WEAPONS — used only to gate local muzzle/fake shot FX. */
 const WEAPONS = {
-  default: { ammo: 3, cooldown: 2, reload: Math.round(1.25 * TPS), speed: 8 * RES_SCALE },
-  rocket: { ammo: 1, cooldown: 3, reload: 38, speed: 8 * RES_SCALE },
+  default: { ammo: 3, cooldown: 2, reload: Math.round(1.25 * TPS), speed: 8 * RES_SCALE * 1.15 },
+  rocket: { ammo: 1, cooldown: 3, reload: 38, speed: 8 * RES_SCALE * 0.85 },
   laser: { ammo: 30, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
   shotgun: {
     ammo: 2,
