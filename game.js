@@ -9015,12 +9015,12 @@ function getShipPackGlTexture(path) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     e.ready = true;
   };
   img.onerror = () => console.error('Failed to load ship texture', path);
-  img.src = path;
+  img.src = path.split('/').map(encodeURIComponent).join('/');
   return null;
 }
 
@@ -9680,11 +9680,14 @@ function rotateShipMeshYaw180(def) {
   return Object.assign({}, def, { verts, nose });
 }
 function isTexturedShipDef(def) {
-  return !!(def && (def.source === 'ships' || def.kind === 'textured' || def.texture));
+  return !!(def && (def.source === 'ships' || def.source === 'voxels' || def.kind === 'textured' || def.texture));
 }
 function orientTexturedShipDef(def) {
-  // Prior pose was +90° Z; user asked +180° from that → +270° from raw mesh.
-  return rotateShipMeshYaw180(rotateShipMeshYaw90(def));
+  // FBX pack needed extra yaw; MagicaVoxel meshes are already nose-aligned in the generator.
+  if (def && def.source === 'ships') {
+    return rotateShipMeshYaw180(rotateShipMeshYaw90(def));
+  }
+  return def;
 }
 function scaleShipMeshDef(def) {
   const s = SHIP_MESH_SCALE * (isTexturedShipDef(def) ? 2 : 1);
@@ -9723,9 +9726,9 @@ const SHIP_MESHES = (() => {
     if (!d) continue;
     kept.push(d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d);
   }
-  // FBX pack from ships/ships — 180° yaw + 2× scale (applied in scaleShipMeshDef).
+  // Textured packs (MagicaVoxel / legacy FBX) — 2× scale in scaleShipMeshDef.
   for (const d of _shipMeshRawDefs) {
-    if (!d || d.source !== 'ships') continue;
+    if (!d || (d.source !== 'voxels' && d.source !== 'ships')) continue;
     if (kept.some((k) => k.id === d.id)) continue;
     kept.push(orientTexturedShipDef(d));
   }
@@ -9801,33 +9804,33 @@ function appendShipMeshDefs(defs) {
   return n;
 }
 
-/** FBX pack: use sync global if present, otherwise fetch the script. */
-function ensureFbxShipPack() {
-  if (SHIP_OPTIONS.some((m) => m && m.source === 'ships')) return;
-  const fromGlobal = (typeof FBX_SHIP_MESH_DEFS !== 'undefined' && Array.isArray(FBX_SHIP_MESH_DEFS))
-    ? FBX_SHIP_MESH_DEFS
+/** Voxel / textured pack: use sync global if present, otherwise fetch the script. */
+function ensureTexturedShipPack() {
+  if (SHIP_OPTIONS.some((m) => m && (m.source === 'voxels' || m.source === 'ships'))) return;
+  const fromVoxel = (typeof VOXEL_SHIP_MESH_DEFS !== 'undefined' && Array.isArray(VOXEL_SHIP_MESH_DEFS))
+    ? VOXEL_SHIP_MESH_DEFS
     : null;
-  if (fromGlobal && fromGlobal.length) {
-    appendShipMeshDefs(fromGlobal);
+  if (fromVoxel && fromVoxel.length) {
+    appendShipMeshDefs(fromVoxel);
     return;
   }
   if (typeof SHIP_MESH_DEFS !== 'undefined' && Array.isArray(SHIP_MESH_DEFS)) {
-    const late = SHIP_MESH_DEFS.filter((d) => d && d.source === 'ships');
+    const late = SHIP_MESH_DEFS.filter((d) => d && (d.source === 'voxels' || d.source === 'ships'));
     if (late.length) {
       appendShipMeshDefs(late);
       return;
     }
   }
   const s = document.createElement('script');
-  s.src = 'ships-fbx-meshes.js?v=2';
+  s.src = 'ships-voxel-meshes.js?v=1';
   s.async = true;
   s.onload = () => {
-    if (typeof FBX_SHIP_MESH_DEFS !== 'undefined') appendShipMeshDefs(FBX_SHIP_MESH_DEFS);
+    if (typeof VOXEL_SHIP_MESH_DEFS !== 'undefined') appendShipMeshDefs(VOXEL_SHIP_MESH_DEFS);
     else if (typeof SHIP_MESH_DEFS !== 'undefined') {
-      appendShipMeshDefs(SHIP_MESH_DEFS.filter((d) => d && d.source === 'ships'));
+      appendShipMeshDefs(SHIP_MESH_DEFS.filter((d) => d && (d.source === 'voxels' || d.source === 'ships')));
     }
   };
-  s.onerror = () => console.error('Failed to load ships-fbx-meshes.js');
+  s.onerror = () => console.error('Failed to load ships-voxel-meshes.js');
   document.head.appendChild(s);
 }
 
@@ -14621,19 +14624,19 @@ function pickForwardGunLocals(mesh) {
   return [left.slice(), right.slice()];
 }
 
-/** Common enemy = Corvette 05 (textured), slightly smaller than player pack scale. */
+/** Common enemy = MicroRecon voxel (textured), half player pack scale. */
 const ENEMY_COMMON_SCALE = 0.5;
 const ENEMY_COMMON_MESH = (() => {
-  const src = getShipMeshById('fbx_corvette_05');
-  const fallback = (!src || src.id !== 'fbx_corvette_05') ? getShipMeshById('adder') : src;
+  const src = getShipMeshById('voxel_microrecon');
+  const fallback = (!src || src.id !== 'voxel_microrecon') ? getShipMeshById('adder') : src;
   return cloneShipMeshScaled(fallback, ENEMY_COMMON_SCALE);
 })();
 
-/** UFO = Frigate 05 (textured), a bit larger than commons. */
+/** UFO = Warship voxel (textured), a bit larger than commons. */
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_MESH = (() => {
-  const src = getShipMeshById('fbx_frigate_05');
-  const fallback = (!src || src.id !== 'fbx_frigate_05') ? getShipMeshById('adder') : src;
+  const src = getShipMeshById('voxel_warship');
+  const fallback = (!src || src.id !== 'voxel_warship') ? getShipMeshById('adder') : src;
   return cloneShipMeshScaled(fallback, ENEMY_UFO_SCALE);
 })();
 
@@ -18009,6 +18012,7 @@ function shipMeshSourceLabel(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien';
+  if (src === 'voxels') return 'Voxel ships';
   if (src === 'ships') return 'Ships pack';
   if (src === 'tiny') return 'Tiny sprites';
   return 'Default';
@@ -18019,8 +18023,9 @@ function shipMeshSectionOrder(src) {
   if (src === 'elite') return 1;
   if (src === 'fe2') return 2;
   if (src === 'alien') return 3;
-  if (src === 'ships') return 4;
-  if (src === 'tiny') return 5;
+  if (src === 'voxels') return 4;
+  if (src === 'ships') return 5;
+  if (src === 'tiny') return 6;
   return 9;
 }
 
@@ -18028,6 +18033,7 @@ function shipMeshSectionTitle(src) {
   if (src === 'elite') return 'Elite';
   if (src === 'fe2') return 'Frontier / FE2';
   if (src === 'alien') return 'Alien ships';
+  if (src === 'voxels') return 'Voxel ships (textured)';
   if (src === 'ships') return '3D ships (textured)';
   if (src === 'tiny') return 'Tiny sprite ships';
   return 'Default';
@@ -18562,7 +18568,7 @@ function copyGridSettings() {
 
 if (gridPanelEl) {
   buildShipMeshUi();
-  ensureFbxShipPack();
+  ensureTexturedShipPack();
   for (const row of GRID_PANEL_CVARS) {
     const input = gridPanelEl.querySelector(`input[data-cvar="${row.name}"]`);
     if (!input) continue;

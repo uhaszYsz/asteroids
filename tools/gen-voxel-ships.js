@@ -1,0 +1,188 @@
+/**
+ * Convert models/voxels ship Package OBJ+PNG folders into ships-voxel-meshes.js
+ * Usage: node tools/gen-voxel-ships.js
+ */
+const fs = require('fs');
+const path = require('path');
+
+const root = path.join(__dirname, '..');
+const voxelsDir = path.join(root, 'models', 'voxels');
+const outPath = path.join(root, 'ships-voxel-meshes.js');
+
+function normalize(verts, target = 1) {
+  let m = 0;
+  for (const v of verts) {
+    m = Math.max(m, Math.abs(v[0]), Math.abs(v[1]), Math.abs(v[2]));
+  }
+  const s = m > 0 ? target / m : 1;
+  return verts.map((v) => [+(v[0] * s).toFixed(5), +(v[1] * s).toFixed(5), +(v[2] * s).toFixed(5)]);
+}
+
+function center(verts) {
+  let cx = 0, cy = 0, cz = 0;
+  for (const v of verts) {
+    cx += v[0]; cy += v[1]; cz += v[2];
+  }
+  const n = verts.length || 1;
+  cx /= n; cy /= n; cz /= n;
+  return verts.map((v) => [v[0] - cx, v[1] - cy, v[2] - cz]);
+}
+
+/** MagicaVoxel Y-up → game +Z up, try to put length along +X (nose). */
+function remapMagicaToGame(verts) {
+  // (x,y,z)_mv → (z, x, y)_game : MV depth → nose axis, MV X → starboard, MV Y → up
+  return verts.map((v) => [v[2], v[0], v[1]]);
+}
+
+function yaw90(v) {
+  return [v[1], -v[0], v[2]];
+}
+
+function alignLongAxisToX(verts) {
+  let best = verts;
+  let bestSpan = -1;
+  let cur = verts;
+  for (let k = 0; k < 4; k++) {
+    let minX = Infinity, maxX = -Infinity;
+    for (const v of cur) {
+      if (v[0] < minX) minX = v[0];
+      if (v[0] > maxX) maxX = v[0];
+    }
+    const span = maxX - minX;
+    if (span > bestSpan) {
+      bestSpan = span;
+      best = cur;
+    }
+    cur = cur.map(yaw90);
+  }
+  return best;
+}
+
+function findNose(verts) {
+  let nose = 0;
+  let best = -1e9;
+  for (let i = 0; i < verts.length; i++) {
+    if (verts[i][0] > best) {
+      best = verts[i][0];
+      nose = i;
+    }
+  }
+  return nose;
+}
+
+function parseObj(filePath) {
+  const text = fs.readFileSync(filePath, 'utf8');
+  const positions = [];
+  const uvs = [];
+  const facesRaw = []; // { corners: [{vi, ti}, ...] }
+
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('v ')) {
+      const p = line.split(/\s+/);
+      positions.push([Number(p[1]), Number(p[2]), Number(p[3])]);
+    } else if (line.startsWith('vt ')) {
+      const p = line.split(/\s+/);
+      uvs.push([Number(p[1]), Number(p[2])]);
+    } else if (line.startsWith('f ')) {
+      const parts = line.trim().split(/\s+/).slice(1);
+      const corners = parts.map((tok) => {
+        const bits = tok.split('/');
+        return {
+          vi: (Number(bits[0]) | 0) - 1,
+          ti: bits[1] ? (Number(bits[1]) | 0) - 1 : -1
+        };
+      });
+      if (corners.length >= 3) facesRaw.push(corners);
+    }
+  }
+
+  const outVerts = [];
+  const outUvs = [];
+  const faces = [];
+
+  for (const corners of facesRaw) {
+    const poly = [];
+    for (const c of corners) {
+      const p = positions[c.vi];
+      if (!p) continue;
+      const uv = c.ti >= 0 && uvs[c.ti] ? uvs[c.ti] : [0, 0];
+      outVerts.push(p.slice());
+      outUvs.push([+uv[0].toFixed(5), +uv[1].toFixed(5)]);
+      poly.push(outVerts.length - 1);
+    }
+    if (poly.length >= 3) {
+      for (let t = 1; t + 1 < poly.length; t++) {
+        faces.push([poly[0], poly[t], poly[t + 1]]);
+      }
+    }
+  }
+
+  let verts = remapMagicaToGame(outVerts);
+  verts = center(verts);
+  verts = alignLongAxisToX(verts);
+  verts = normalize(verts, 1);
+  // Keep UVs aligned 1:1 with expanded verts (same order through transforms).
+  const nose = findNose(verts);
+
+  return { verts, uvs: outUvs, faces, edges: [], nose };
+}
+
+function titleFromDir(dir) {
+  return String(dir)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function idFromDir(dir) {
+  return 'voxel_' + String(dir)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '');
+}
+
+const ships = [];
+const dirs = fs.readdirSync(voxelsDir).sort((a, b) => a.localeCompare(b));
+for (const dir of dirs) {
+  const pkg = path.join(voxelsDir, dir, 'Package');
+  if (!fs.existsSync(pkg) || !fs.statSync(pkg).isDirectory()) continue;
+  const objName = fs.readdirSync(pkg).find((f) => /\.obj$/i.test(f));
+  const pngName = fs.readdirSync(pkg).find((f) => /\.png$/i.test(f));
+  if (!objName || !pngName) {
+    console.warn('SKIP', dir, '(need obj+png)');
+    continue;
+  }
+  const objPath = path.join(pkg, objName);
+  try {
+    const mesh = parseObj(objPath);
+    const texture = path.join('models', 'voxels', dir, 'Package', pngName).replace(/\\/g, '/');
+    ships.push({
+      id: idFromDir(dir),
+      name: titleFromDir(dir),
+      source: 'voxels',
+      kind: 'textured',
+      texture,
+      nose: mesh.nose,
+      verts: mesh.verts,
+      uvs: mesh.uvs,
+      faces: mesh.faces,
+      edges: []
+    });
+    console.log('OK', dir, mesh.verts.length + 'v', mesh.faces.length + 'f', texture);
+  } catch (e) {
+    console.error('FAIL', dir, e.message);
+  }
+}
+
+const body = `/* Auto-generated from models/voxels — do not edit by hand.
+ * Regenerated by: node tools/gen-voxel-ships.js
+ */
+(function (root) {
+  const VOXEL_SHIP_MESH_DEFS = ${JSON.stringify(ships)};
+  root.VOXEL_SHIP_MESH_DEFS = VOXEL_SHIP_MESH_DEFS;
+  root.SHIP_MESH_DEFS = (root.SHIP_MESH_DEFS || []).concat(VOXEL_SHIP_MESH_DEFS);
+})(typeof window !== 'undefined' ? window : globalThis);
+`;
+
+fs.writeFileSync(outPath, body);
+console.log('Wrote', ships.length, 'ships →', path.relative(root, outPath), '(' + (fs.statSync(outPath).size / 1024).toFixed(0) + ' KB)');
