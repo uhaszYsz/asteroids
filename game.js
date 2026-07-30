@@ -15458,6 +15458,17 @@ function ufoTurretAimAngle(mountX, mountY, shipAngle, side, target) {
   return clampAimToShipSide(aim, shipAngle, side);
 }
 
+/** Flank that currently faces the player (same 180° split as turret aim). */
+function ufoActiveTurretSide(shipX, shipY, shipAngle, target) {
+  if (!target) return 1;
+  const aim = Math.atan2(
+    shortestWrapDelta(shipY, target.y, H),
+    shortestWrapDelta(shipX, target.x, W)
+  );
+  const d = angleDeltaSigned(shipAngle || 0, aim);
+  return d < 0 ? -1 : 1;
+}
+
 function localToWorldBanked(lx, ly, lz, cx, cy, yaw, bank) {
   const ca = Math.cos(yaw);
   const sa = Math.sin(yaw);
