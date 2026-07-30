@@ -367,6 +367,9 @@ const ENEMY_WANDER_SPEED = 1.35 * RES_SCALE;
 const ENEMY_ARRIVE_R = 10 * RES_SCALE;
 /** Max turn toward wander target per sim tick (destinationSmooth). */
 const ENEMY_TURN_MAX = (2 * Math.PI) / 180;
+/** Retarget wander even if not arrived (orbiting) — random seconds per leg. */
+const ENEMY_WANDER_RETARGET_MIN_S = 7;
+const ENEMY_WANDER_RETARGET_MAX_S = 20;
 const ENEMY_MOVE_DESTINATION = 'destination';
 const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 /** Full enemy pose broadcast interval. */
@@ -1616,6 +1619,7 @@ function placeEnemyOffscreenEntry(e) {
   e.spawnY = spawn.y;
   e.tx = target.x;
   e.ty = target.y;
+  rollEnemyWanderTimer(e);
   const ang = Math.atan2(target.y - spawn.y, target.x - spawn.x);
   e.angle = ang;
   e.dir = ang;
@@ -2044,10 +2048,18 @@ function enemyTryFire(room, e) {
   e.fireCd = ENEMY_COMMON_RELOAD;
 }
 
+function rollEnemyWanderTimer(e) {
+  const lo = ENEMY_WANDER_RETARGET_MIN_S;
+  const hi = ENEMY_WANDER_RETARGET_MAX_S;
+  const sec = lo + Math.random() * (hi - lo);
+  e.wanderLeft = Math.max(1, Math.round(sec * TPS));
+}
+
 function pickEnemyWanderTarget(e) {
   const t = randomWanderPoint();
   e.tx = t.x;
   e.ty = t.y;
+  rollEnemyWanderTimer(e);
   if (enemyMoveType(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
     if (e.dir == null || !Number.isFinite(e.dir)) e.dir = e.angle || 0;
     e.vx = Math.cos(e.dir) * enemySpeed(e);
@@ -2134,7 +2146,11 @@ function updateEnemies(room) {
       emitEnemyCharge(room, e);
     }
 
-    if (stepEnemyMovement(e)) {
+    if (e.wanderLeft == null || !Number.isFinite(e.wanderLeft)) rollEnemyWanderTimer(e);
+    if ((e.wanderLeft | 0) > 0) e.wanderLeft--;
+    const arrived = stepEnemyMovement(e);
+    const timedOut = (e.wanderLeft | 0) <= 0;
+    if (arrived || timedOut) {
       pickEnemyWanderTarget(e);
       emitEnemyUpdate(room, e);
     }
