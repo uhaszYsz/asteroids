@@ -15155,6 +15155,16 @@ const ENEMY_UFO_TURRET_COL = 2;
 const ENEMY_UFO_TURRET_ROW = 3;
 const ENEMY_UFO_TURRET_SCALE = 0.42;
 const ENEMY_UFO_TURRET_Z = -10;
+/** Inset from wing tip toward hull center, as a fraction of full plane width (fw). */
+const ENEMY_UFO_TURRET_INSET_FRAC = 0.2;
+
+function ufoTurretSideY(ufoOpt, side) {
+  const ufoSpec = ufoOpt && ufoOpt.sprite;
+  const halfW = Math.max(1, (ufoSpec && ufoSpec.fw) || 52) * 0.5 * ENEMY_UFO_SPRITE_SCALE;
+  const fullW = halfW * 2;
+  const inset = fullW * ENEMY_UFO_TURRET_INSET_FRAC;
+  return Math.max(1, halfW - inset) * (side < 0 ? -1 : 1);
+}
 const ENEMY_UFO_MESH = (() => {
   const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_transtellar');
   if (raw) {
