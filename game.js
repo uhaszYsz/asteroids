@@ -10213,15 +10213,19 @@ function tinyShipDesiredState(spec, moving, attacking) {
   return spec.states[0] || 'idle';
 }
 
-/** Sprite cut vertically onto a pitched roof (two faces meeting at the keel ridge). */
-function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color) {
+/** Sprite cut vertically onto a pitched roof (two faces meeting at the keel ridge).
+ *  bankOverride: use enemy bank instead of player av smoothing.
+ *  sizeScale: plane half-length multiplier (default 1). */
+function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale) {
   const spec = opt && opt.sprite;
   if (!spec) return;
   const entry = spriteShipTexById.get(spec.id);
   if (!entry || !entry.ready || !entry.tex) return;
 
-  const bank = shipBankSmoothed(id, av, dt) * 0.5;
-  const halfL = 7.5 * RES_SCALE;
+  const bank = (bankOverride != null && Number.isFinite(bankOverride))
+    ? bankOverride * 0.5
+    : shipBankSmoothed(id, av, dt) * 0.5;
+  const halfL = 7.5 * RES_SCALE * (sizeScale > 0 ? sizeScale : 1);
   const halfW = halfL * (spec.fw / Math.max(1, spec.fh));
   const cp = Math.cos(SPRITE_ROOF_PITCH);
   const sp = Math.sin(SPRITE_ROOF_PITCH);
@@ -14754,16 +14758,20 @@ function pickForwardGunLocals(mesh) {
   return [left.slice(), right.slice()];
 }
 
-/** Common enemy = RedFighter voxel (textured), 35% smaller than previous 0.9 player scale. */
+/** Common enemy = Scout 4 sprite; mesh kept only as charge-gun fallback. */
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
+const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
+const ENEMY_COMMON_SPRITE_SCALE = 0.95;
 const ENEMY_COMMON_MESH = (() => {
   const src = getShipMeshById('voxel_redfighter');
   const fallback = (!src || src.id !== 'voxel_redfighter') ? getShipMeshById('adder') : src;
   return cloneShipMeshScaled(fallback, ENEMY_COMMON_SCALE);
 })();
 
-/** UFO = Transtellar voxel (textured), unrotated vs player picker pose. */
+/** UFO = Heavy 370 sprite. */
 const ENEMY_UFO_SCALE = 1.05;
+const ENEMY_UFO_SPRITE_ID = 'enemy_370';
+const ENEMY_UFO_SPRITE_SCALE = 1.45;
 const ENEMY_UFO_MESH = (() => {
   const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_transtellar');
   if (raw) {
@@ -14904,12 +14912,20 @@ function clearEnemyBank(id) {
 
 function drawEnemyCommon(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
-  drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank, id, {
-    noOutline: true,
-    noTint: true,
-    noEmit: true,
-    strongEmit: false
-  });
+  const opt = getShipOptionById(ENEMY_COMMON_SPRITE_ID);
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(
+      x, y, angle, 0, id, dt, opt, true, color,
+      bank, ENEMY_COMMON_SPRITE_SCALE
+    );
+  } else {
+    drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank, id, {
+      noOutline: true,
+      noTint: true,
+      noEmit: true,
+      strongEmit: false
+    });
+  }
   return bank;
 }
 
@@ -14975,8 +14991,11 @@ function buildChargeSphereMesh(lonSeg, latSeg) {
 }
 
 const ENEMY_CHARGE_SPHERE = buildChargeSphereMesh(8, 5);
-/** Forward hardpoints on the common-enemy hull (Corvette 05). */
-const ENEMY_COMMON_GUNS = pickForwardGunLocals(ENEMY_COMMON_MESH);
+/** Forward hardpoints for common-enemy charge orbs (sprite nose). */
+const ENEMY_COMMON_GUNS = [
+  [7 * RES_SCALE, 2.4 * RES_SCALE, 0],
+  [7 * RES_SCALE, -2.4 * RES_SCALE, 0]
+];
 const COL_CHARGE_RED = [1.0, 0.12, 0.1];
 const enemyCharges = new Map(); // id -> { start, until, ms }
 /** Last bank used while drawing commons — charge orbs match hull roll. */
@@ -15120,12 +15139,20 @@ function drawEnemyCommonCharges() {
 
 function drawEnemyUfo(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
-  drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
-    noOutline: true,
-    noTint: true,
-    noEmit: true,
-    strongEmit: false
-  });
+  const opt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(
+      x, y, angle, 0, id, dt, opt, true, color,
+      bank, ENEMY_UFO_SPRITE_SCALE
+    );
+  } else {
+    drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
+      noOutline: true,
+      noTint: true,
+      noEmit: true,
+      strongEmit: false
+    });
+  }
 }
 
 function carrierWeaponColor(weapon) {
