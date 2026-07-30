@@ -15750,7 +15750,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
       x, y, angle, 0, id, dt, opt, true, color,
       bank, ENEMY_UFO_SPRITE_SCALE, COL.self
     );
-    drawEnemyUfoSideTurrets(x, y, angle, bank * 0.5, opt);
+    drawEnemyUfoSideTurrets(x, y, angle, bank * 0.5, opt, color);
   } else {
     drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
       noOutline: true,
@@ -15761,8 +15761,9 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
   }
 }
 
-/** Flat z=-10 turrets — visual only; each aims player in its 180° flank arc. */
-function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt) {
+/** Flat z=-10 turrets — visual only; each aims player in its 180° flank arc.
+ *  emitTint: same sprite-plane emission tint as the UFO body (cl_ship_emit × bright texels). */
+function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt, emitTint) {
   const sheet = TURRET_SHEETS[ENEMY_UFO_TURRET_SHEET];
   const entry = turretTexById.get(sheet.id);
   if (!entry || !entry.ready) return;
@@ -15771,12 +15772,13 @@ function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt) {
   const tSc = ENEMY_UFO_TURRET_SCALE;
   const halfL = cell * 0.5 * tSc;
   const halfW = cell * 0.5 * tSc;
+  const tint = emitTint || COL.enemyUfo;
   const target = ufoAimTargetPose();
   for (const side of [-1, 1]) {
     const sideY = ufoTurretSideY(ufoOpt, side);
     const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, x, y, angle, bank);
     const aim = ufoTurretAimAngle(mount.x, mount.y, angle, side, target);
-    drawFlatSpriteQuad(mount.x, mount.y, aim, bank, entry, uv, halfL, halfW, 0, COL_WHITE, {
+    drawFlatSpriteQuad(mount.x, mount.y, aim, bank, entry, uv, halfL, halfW, 0, tint, {
       src: SPRITE_REMAP_HULL_RED,
       dst: COL.self,
       range: SPRITE_REMAP_HULL_RANGE
