@@ -9898,7 +9898,8 @@ function invalidateShipMeshPreviews() {
   }
 }
 
-/** Rotate source image 90° clockwise into a canvas (w/h swap). */
+/** Rotate source image 270° clockwise into a canvas (w/h swap).
+ *  Enemy art faces "up"; planes need nose along +X — was +90°, then +180 more. */
 function rotateImageCW90(src) {
   const sw = src.naturalWidth || src.width | 0;
   const sh = src.naturalHeight || src.height | 0;
@@ -9907,8 +9908,8 @@ function rotateImageCW90(src) {
   cnv.height = sw;
   const ctx = cnv.getContext('2d');
   ctx.imageSmoothingEnabled = false;
-  ctx.translate(sh, 0);
-  ctx.rotate(Math.PI * 0.5);
+  ctx.translate(0, sw);
+  ctx.rotate(Math.PI * 1.5); // 270° CW = prior 90° CW + 180°
   ctx.drawImage(src, 0, 0);
   return cnv;
 }
@@ -9919,7 +9920,7 @@ function loadSpriteShipTexture(spec) {
   spriteShipTexById.set(spec.id, entry);
   const img = new Image();
   img.onload = () => {
-    // Enemy craft art faces "up" in the PNG; planes expect nose along +X — CW 90°.
+    // Enemy craft art faces "up" in the PNG; planes expect nose along +X — 270° CW.
     const upload = (spec.single || spec.rotateCw90) ? rotateImageCW90(img) : img;
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
