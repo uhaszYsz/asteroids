@@ -939,7 +939,7 @@ const CVARS = {
   cl_hitbox: {
     value: 0,
     def: 0,
-    help: 'Draw collision hitboxes (0/1). Asteroids = filled poly, ships = circles.'
+    help: 'Draw collision hitboxes (0/1). Asteroids = filled poly, players = dual circles, enemies = radius circle.'
   },
   cl_hitscan: {
     value: 0,
@@ -15242,6 +15242,7 @@ function drawEnemyCarrier(x, y, angle, weapon) {
 
 function drawEnemies(dt) {
   enemyDrawBank.clear();
+  const showHit = cv('cl_hitbox') > 0;
   for (const e of enemies.values()) {
     const p = enemyAt(e);
     const id = e.id | 0;
@@ -15254,6 +15255,7 @@ function drawEnemies(dt) {
       const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
     }
+    if (showHit) drawHitCircle(x, y, enemyHitR(e), COL.debug);
   }
   drawEnemyCommonCharges();
 }
@@ -16682,30 +16684,33 @@ function ellipseVerts(x, y, rx, ry, ang, segments) {
   return need === ellipseVertScratch.length ? ellipseVertScratch : ellipseVertScratch.subarray(0, need);
 }
 
+/** Filled + thick outline hit circle (cl_hitbox). */
+function drawHitCircle(cx, cy, r, color) {
+  const outlineW = 2 * Math.max(1, getRenderScale());
+  const v = circleVerts(cx, cy, r, 20);
+  drawFilledPoly(v, color, 0.5);
+  const n = (v.length / 2) | 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    drawThickSegment(v[i * 2], v[i * 2 + 1], v[j * 2], v[j * 2 + 1], outlineW, color, 0.85);
+  }
+}
+
 /** Server hit volumes: two circles along facing (front + back). */
 function drawCollisionRing(x, y, angle, color) {
   const c = Math.cos(angle);
   const s = Math.sin(angle);
-  // Typical hitbox stroke was ~1× render scale; draw 2× thicker via quads.
-  const outlineW = 2 * Math.max(1, getRenderScale());
-  function oneCircle(cx, cy, r) {
-    const v = circleVerts(cx, cy, r, 20);
-    drawFilledPoly(v, color, 0.5);
-    const n = (v.length / 2) | 0;
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      drawThickSegment(v[i * 2], v[i * 2 + 1], v[j * 2], v[j * 2 + 1], outlineW, color, 0.85);
-    }
-  }
-  oneCircle(
+  drawHitCircle(
     x + c * PLAYER_HIT_OFFSET_FRONT,
     y + s * PLAYER_HIT_OFFSET_FRONT,
-    PLAYER_HIT_R_FRONT
+    PLAYER_HIT_R_FRONT,
+    color
   );
-  oneCircle(
+  drawHitCircle(
     x - c * PLAYER_HIT_OFFSET_BACK,
     y - s * PLAYER_HIT_OFFSET_BACK,
-    PLAYER_HIT_R_BACK
+    PLAYER_HIT_R_BACK,
+    color
   );
 }
 
