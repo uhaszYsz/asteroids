@@ -10037,16 +10037,17 @@ function turretCellUV(entry, col, row) {
 }
 
 /**
- * Flat z=0 textured quad in ship local space (no roof pitch).
+ * Flat textured quad (no roof pitch). Oriented by yaw; optional localZ (default 0).
  * Nose along +X matches turret art "up". Banks with the host ship.
  */
-function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localX, localY, tint) {
+function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, tint) {
   if (!entry || !entry.ready || !entry.tex || !uv) return;
+  const z = localZ != null ? localZ : 0;
   const verts = [
-    [localX + halfL, localY - halfW, 0],
-    [localX + halfL, localY + halfW, 0],
-    [localX - halfL, localY + halfW, 0],
-    [localX - halfL, localY - halfW, 0]
+    [halfL, -halfW, z],
+    [halfL, halfW, z],
+    [-halfL, halfW, z],
+    [-halfL, -halfW, z]
   ];
   const uvs = [
     [uv.u0, uv.v0],
@@ -15041,6 +15042,7 @@ const ENEMY_UFO_TURRET_SHEET = 'medium';
 const ENEMY_UFO_TURRET_COL = 2;
 const ENEMY_UFO_TURRET_ROW = 3;
 const ENEMY_UFO_TURRET_SCALE = 0.42;
+const ENEMY_UFO_TURRET_Z = -10;
 const ENEMY_UFO_MESH = (() => {
   const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_transtellar');
   if (raw) {
@@ -15266,18 +15268,74 @@ const ENEMY_COMMON_GUNS = [
   [7 * RES_SCALE, -2.4 * RES_SCALE, 0]
 ];
 const COL_CHARGE_RED = [1.0, 0.12, 0.1];
-const enemyCharges = new Map(); // id -> { start, until, ms }
-/** Last bank used while drawing commons — charge orbs match hull roll. */
+const enemyCharges = new Map(); // id -> { start, until, ms, side, kind }
+/** Last bank used while drawing commons / UFOs — charge orbs match hull roll. */
 const enemyDrawBank = new Map();
 
-function beginEnemyCharge(id, ms) {
+function beginEnemyCharge(id, ms, side, kind) {
   const dur = Math.max(200, ms | 0 || 1000);
   const now = performance.now();
-  enemyCharges.set(id | 0, { start: now, until: now + dur, ms: dur });
+  enemyCharges.set(id | 0, {
+    start: now,
+    until: now + dur,
+    ms: dur,
+    side: side | 0,
+    kind: kind === 'ufo' ? 'ufo' : 'common'
+  });
 }
 
 function clearEnemyCharge(id) {
   enemyCharges.delete(id | 0);
+}
+
+function shipLocalToWorldLift(lx, ly, lz, cx, cy, yaw, bank, lift) {
+  const ca = Math.cos(yaw);
+  const sa = Math.sin(yaw);
+  const cb = Math.cos(bank || 0);
+  const sb = Math.sin(bank || 0);
+  const y1 = ly * cb - lz * sb;
+  const z1 = ly * sb + lz * cb;
+  const L = lift != null ? lift : SPRITE_ROOF_LIFT;
+  return {
+    x: cx + lx * ca - y1 * sa,
+    y: cy + lx * sa + y1 * ca - z1 * L
+  };
+}
+
+function angleDeltaSigned(from, to) {
+  let d = to - from;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+function clampAimToShipSide(aim, shipAngle, side) {
+  const d = angleDeltaSigned(shipAngle, aim);
+  if (side < 0) {
+    if (d > 0) return shipAngle;
+    if (d < -Math.PI) return shipAngle - Math.PI;
+    return shipAngle + d;
+  }
+  if (d < 0) return shipAngle;
+  if (d > Math.PI) return shipAngle + Math.PI;
+  return shipAngle + d;
+}
+
+function ufoAimTargetPose() {
+  if (player && (player.hp | 0) > 0) {
+    const me = localView();
+    return { x: me.x, y: me.y, vx: me.vx || 0, vy: me.vy || 0 };
+  }
+  return null;
+}
+
+function ufoTurretAimAngle(mountX, mountY, shipAngle, side, target) {
+  if (!target) return shipAngle + (side < 0 ? -Math.PI * 0.5 : Math.PI * 0.5);
+  const aim = Math.atan2(
+    shortestWrapDelta(mountY, target.y, H),
+    shortestWrapDelta(mountX, target.x, W)
+  );
+  return clampAimToShipSide(aim, shipAngle, side);
 }
 
 function localToWorldBanked(lx, ly, lz, cx, cy, yaw, bank) {
@@ -15353,7 +15411,20 @@ function drawEnemyCommonCharges() {
       continue;
     }
     const e = enemies.get(id);
-    if (!e || e.kind !== 'common' || (e.hp | 0) <= 0) {
+    if (!e || (e.hp | 0) <= 0) {
+      enemyCharges.delete(id);
+      continue;
+    }
+    const kind = ch.kind || e.kind;
+    if (kind !== 'common' && kind !== 'ufo') {
+      enemyCharges.delete(id);
+      continue;
+    }
+    if (kind === 'ufo' && e.kind !== 'ufo') {
+      enemyCharges.delete(id);
+      continue;
+    }
+    if (kind === 'common' && e.kind !== 'common') {
       enemyCharges.delete(id);
       continue;
     }
@@ -15373,6 +15444,40 @@ function drawEnemyCommonCharges() {
     }
     const alpha = 0.22 + 0.55 * t;
     const spin = now * 0.007 + id * 1.7;
+
+    if (kind === 'ufo') {
+      const side = (ch.side | 0) || 1;
+      const ufoOpt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
+      const ufoSpec = ufoOpt && ufoOpt.sprite;
+      const sideY = Math.max(1, (ufoSpec && ufoSpec.fw) || 52) * 0.5 * ENEMY_UFO_SPRITE_SCALE * side;
+      const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, p.x, p.y, p.angle, bank);
+      const target = ufoAimTargetPose();
+      const aim = ufoTurretAimAngle(mount.x, mount.y, p.angle, side, target);
+      const muzzle = ENEMY_UFO_TURRET_SCALE * 64 * 0.5;
+      let w = {
+        x: mount.x + Math.cos(aim) * muzzle,
+        y: mount.y + Math.sin(aim) * muzzle
+      };
+      if (shake > 0) {
+        const ph = now * 0.055 + id * 2.1;
+        w = {
+          x: w.x + Math.cos(ph) * shake,
+          y: w.y + Math.sin(ph * 1.37) * shake
+        };
+      }
+      drawEnemyChargeSphere(w.x, w.y, r, aim, spin, COL_CHARGE_RED, alpha);
+      if (t > 0.75) {
+        const flash = (t - 0.75) / 0.25;
+        drawFilledPoly(
+          circleVerts(w.x, w.y, (1.2 + flash * 2.2) * RES_SCALE, 16),
+          COL_CHARGE_RED,
+          0.2 + flash * 0.55,
+          true
+        );
+      }
+      continue;
+    }
+
     for (let g = 0; g < ENEMY_COMMON_GUNS.length; g++) {
       const gun = ENEMY_COMMON_GUNS[g];
       let w = localToWorldBanked(gun[0], gun[1], gun[2], p.x, p.y, p.angle, bank);
@@ -15408,6 +15513,7 @@ function drawEnemyCommonCharges() {
 
 function drawEnemyUfo(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
+  enemyDrawBank.set(id | 0, bank * 0.5);
   const opt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
@@ -15425,7 +15531,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
   }
 }
 
-/** Two flat z=0 turret quads on UFO wings (mid-length, ±side). */
+/** Flat z=-10 turrets on UFO wings; each aims player in its 180° side arc. */
 function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt) {
   const sheet = TURRET_SHEETS[ENEMY_UFO_TURRET_SHEET];
   const entry = turretTexById.get(sheet.id);
@@ -15435,13 +15541,15 @@ function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt) {
   const tSc = ENEMY_UFO_TURRET_SCALE;
   const halfL = cell * 0.5 * tSc;
   const halfW = cell * 0.5 * tSc;
-  // UFO half-width from its sprite plane (fw after 270° rotate).
   const ufoSpec = ufoOpt && ufoOpt.sprite;
   const ufoHalfW = Math.max(1, (ufoSpec && ufoSpec.fw) || 52) * 0.5 * ENEMY_UFO_SPRITE_SCALE;
-  const sideY = ufoHalfW;
-  // Same bank scale as drawSpriteShipPlane's bankOverride path.
-  drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, 0, -sideY, COL_WHITE);
-  drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, 0, sideY, COL_WHITE);
+  const target = ufoAimTargetPose();
+  for (const side of [-1, 1]) {
+    const sideY = ufoHalfW * side;
+    const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, x, y, angle, bank);
+    const aim = ufoTurretAimAngle(mount.x, mount.y, angle, side, target);
+    drawFlatSpriteQuad(mount.x, mount.y, aim, bank, entry, uv, halfL, halfW, 0, COL_WHITE);
+  }
 }
 
 function carrierWeaponColor(weapon) {
@@ -17791,7 +17899,7 @@ async function connect() {
       return;
     }
     if (msg.t === 'ech' && inGame) {
-      beginEnemyCharge(msg.id | 0, msg.ms | 0);
+      beginEnemyCharge(msg.id | 0, msg.ms | 0, msg.side | 0, msg.kind);
       return;
     }
     if (msg.t === 'ef' && inGame && msg.e) {
