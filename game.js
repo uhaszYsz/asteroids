@@ -10096,8 +10096,9 @@ function turretCellUV(entry, col, row) {
  * Flat textured quad (no roof pitch). Oriented by yaw; optional localZ (default 0).
  * Nose along +X matches turret art "up". Banks with the host ship.
  * remap: optional { src, dst, range } — universal source→target color remapping.
+ * outlineColor / outlineId: same 8-dir silhouette outline as sprite ship planes.
  */
-function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, tint, remap) {
+function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, tint, remap, outlineColor, outlineId) {
   if (!entry || !entry.ready || !entry.tex || !uv) return;
   const z = localZ != null ? localZ : 0;
   const verts = [
@@ -10135,17 +10136,9 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, 16, 8);
   gl.uniform2f(ssURes, W, H);
   bindSceneLightUniforms(spriteShipLightU);
-  gl.uniform3f(ssUTint, col[0], col[1], col[2]);
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, Math.max(0, Number(cv('cl_ship_emit')) || 0));
-  gl.uniform1f(ssUOutline, 0);
-  gl.uniform1f(ssUAlpha, 1);
-  gl.uniform2f(ssUOffset, 0, 0);
-  if (remap && remap.range > 0) {
-    bindSpriteColorRemap(remap.src, remap.dst, remap.range);
-  } else {
-    bindSpriteColorRemap(null, null, 0);
-  }
+  bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -10154,6 +10147,31 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
+
+  const outlineA = outlineColor
+    ? Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))))
+    : 0;
+  if (outlineA > 0.001) {
+    const outlineW = spriteShipOutlineWidth(outlineId);
+    gl.uniform3f(ssUTint, outlineColor[0], outlineColor[1], outlineColor[2]);
+    gl.uniform1f(ssUOutline, 1);
+    gl.uniform1f(ssUAlpha, outlineA);
+    for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
+      const dir = SPRITE_SHIP_OUTLINE_DIRS[d];
+      gl.uniform2f(ssUOffset, dir[0] * outlineW, dir[1] * outlineW);
+      gl.drawArrays(gl.TRIANGLES, 0, 12);
+    }
+  }
+
+  gl.uniform3f(ssUTint, col[0], col[1], col[2]);
+  gl.uniform1f(ssUOutline, 0);
+  gl.uniform1f(ssUAlpha, 1);
+  gl.uniform2f(ssUOffset, 0, 0);
+  if (remap && remap.range > 0) {
+    bindSpriteColorRemap(remap.src, remap.dst, remap.range);
+  } else {
+    bindSpriteColorRemap(null, null, 0);
+  }
   gl.drawArrays(gl.TRIANGLES, 0, 12);
   bindSpriteColorRemap(null, null, 0);
   gl.disableVertexAttribArray(ssAUV);
@@ -15750,7 +15768,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
       x, y, angle, 0, id, dt, opt, true, color,
       bank, ENEMY_UFO_SPRITE_SCALE, COL.self
     );
-    drawEnemyUfoSideTurrets(x, y, angle, bank * 0.5, opt, color);
+    drawEnemyUfoSideTurrets(x, y, angle, bank * 0.5, opt, color, id);
   } else {
     drawEnemyShipMesh(ENEMY_UFO_MESH, x, y, angle, color, bank, id, {
       noOutline: true,
@@ -15762,8 +15780,9 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
 }
 
 /** Flat z=-10 turrets — visual only; each aims player in its 180° flank arc.
- *  emitTint: same sprite-plane emission tint as the UFO body (cl_ship_emit × bright texels). */
-function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt, emitTint) {
+ *  emitTint: same sprite-plane emission tint as the UFO body (cl_ship_emit × bright texels).
+ *  outline uses COL.self + host id pulse — same silhouette as UFO sprite planes. */
+function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt, emitTint, outlineId) {
   const sheet = TURRET_SHEETS[ENEMY_UFO_TURRET_SHEET];
   const entry = turretTexById.get(sheet.id);
   if (!entry || !entry.ready) return;
@@ -15774,15 +15793,19 @@ function drawEnemyUfoSideTurrets(x, y, angle, bank, ufoOpt, emitTint) {
   const halfW = cell * 0.5 * tSc;
   const tint = emitTint || COL.enemyUfo;
   const target = ufoAimTargetPose();
+  const remap = {
+    src: SPRITE_REMAP_HULL_RED,
+    dst: COL.self,
+    range: SPRITE_REMAP_HULL_RANGE
+  };
   for (const side of [-1, 1]) {
     const sideY = ufoTurretSideY(ufoOpt, side);
     const mount = shipLocalToWorldLift(0, sideY, ENEMY_UFO_TURRET_Z, x, y, angle, bank);
     const aim = ufoTurretAimAngle(mount.x, mount.y, angle, side, target);
-    drawFlatSpriteQuad(mount.x, mount.y, aim, bank, entry, uv, halfL, halfW, 0, tint, {
-      src: SPRITE_REMAP_HULL_RED,
-      dst: COL.self,
-      range: SPRITE_REMAP_HULL_RANGE
-    });
+    drawFlatSpriteQuad(
+      mount.x, mount.y, aim, bank, entry, uv, halfL, halfW, 0, tint, remap,
+      COL.self, outlineId
+    );
   }
 }
 
