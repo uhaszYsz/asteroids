@@ -8384,7 +8384,7 @@ function drawSceneLines(dt) {
     const col = asteroidColor(a);
     const size = a.size || (a.big ? 'big' : 'medium');
     const sid = asteroidShapeId(a);
-    drawAsteroid2D(ax, ay, p.angle, sid, a.r || 16, col, size);
+    drawAsteroid2D(ax, ay, p.angle, sid, a.r || 16, col, size, asteroidUsesDetailMaps(a));
     if ((a.special === 'meteor' || a.playerShot) && !deathSpectating) {
       const boost = (a._meteorBurnBoostUntil && performance.now() < a._meteorBurnBoostUntil) ? 3 : 1;
       emitMeteorBurnFx(
@@ -8892,9 +8892,17 @@ function asteroidCollisionPts(a) {
   return a._silPts;
 }
 
+/** Height/normal strip maps: medium / big / huge only (not small, meteor, golden). */
+function asteroidUsesDetailMaps(a) {
+  if (!a) return false;
+  if (a.playerShot || a.special === 'meteor' || a.special === 'golden') return false;
+  const size = a.size || (a.big ? 'big' : 'medium');
+  return size === 'medium' || size === 'big' || size === 'huge';
+}
+
 /** Draw jagged asteroid: perspective 3D mesh (fill + wire + equator outline). */
-function drawAsteroid2D(cx, cy, angle, id, radius, color, size) {
-  drawAsteroid3D(cx, cy, angle, id, radius, color, size || 'medium');
+function drawAsteroid2D(cx, cy, angle, id, radius, color, size, detailMaps) {
+  drawAsteroid3D(cx, cy, angle, id, radius, color, size || 'medium', detailMaps);
 }
 
 /**
@@ -9638,11 +9646,12 @@ function asteroidFaceShade(wx, wy, wz, f, cx, cy, lightX, lightY, lightZ) {
   };
 }
 
-function drawAsteroid3D(cx, cy, angle, id, radius, color, size) {
+function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps) {
   const mesh = getAsteroidWireMesh(id, radius, size);
   const osc = asteroidOscAngles(id);
   const mvSrc = mesh.verts;
-  const mv = asteroidMapsReady
+  const mapsOk = !!detailMaps && asteroidMapsReady;
+  const mv = mapsOk
     ? asteroidHeightDisplaceVerts(mvSrc, radius, id)
     : mvSrc;
   const { xy, depth, wx, wy, wz } = projectAsteroidMesh3D(
@@ -9665,7 +9674,7 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size) {
   const emitPow = Math.max(0, Number(cv('cl_ast_emit')) || 0);
   const outlineEmitPow = Math.max(0, Number(cv('cl_ast_outline_emit')) || 0);
   const bindTex = (faceTexOn && faceA > 0.001) || (outlineTexOn && outlineA > 0.001);
-  const useMaps = faceTexOn && asteroidMapsReady;
+  const useMaps = faceTexOn && mapsOk;
 
   // Always draw the mesh's built-in top half (local Z >= 0). Independent of wobble.
   const order = _astFaceScratch;
