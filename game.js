@@ -9703,11 +9703,11 @@ const SHIP_MESHES = (() => {
     if (!d) continue;
     kept.push(d.id === 'cobra_mk_3' ? rotateShipMeshYaw90(d) : d);
   }
-  // FBX pack from ships/ships (source: ships).
+  // FBX pack from ships/ships (source: ships) — yaw 90° so nose points +X.
   for (const d of _shipMeshRawDefs) {
     if (!d || d.source !== 'ships') continue;
     if (kept.some((k) => k.id === d.id)) continue;
-    kept.push(d);
+    kept.push(rotateShipMeshYaw90(d));
   }
   return kept.map(scaleShipMeshDef);
 })();
