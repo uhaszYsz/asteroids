@@ -1108,6 +1108,11 @@ const CVARS = {
     def: 0.7,
     help: 'Face texture tint strength (0 = albedo only, 1 = full asteroid color).'
   },
+  cl_ast_hue_tint: {
+    value: 1,
+    def: 1,
+    help: '1 = hue-tint textured asteroids (cl_ast_face_tint). 0 = natural albedo. Meteor/golden always tint.'
+  },
   cl_ast_height: {
     value: 0.16,
     def: 0.16,
@@ -1238,6 +1243,7 @@ function setCvar(name, raw) {
   }
   if (name === 'cl_bg_layer' || name === 'cl_bg_dir_invert'
     || name === 'cl_ast_outline_tex' || name === 'cl_ast_face_tex'
+    || name === 'cl_ast_hue_tint'
     || name === 'cl_grid_aliasing') {
     c.value = (n | 0) !== 0 ? 1 : 0;
   }
@@ -9674,8 +9680,9 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
   const outlineEmitPow = Math.max(0, Number(cv('cl_ast_outline_emit')) || 0);
   const bindTex = (faceTexOn && faceA > 0.001) || (outlineTexOn && outlineA > 0.001);
   const useMaps = faceTexOn && mapsOk;
-  // Textured normals: show albedo as-is (no hue). Meteor/golden keep tint.
-  const noHueTint = faceTexOn && !specialTint;
+  // Hue tint off → natural albedo (lighting only). Meteor/golden always tint.
+  const hueTintOn = (cv('cl_ast_hue_tint') | 0) !== 0;
+  const noHueTint = faceTexOn && !specialTint && !hueTintOn;
   if (noHueTint) faceTintPow = useMaps ? 0 : 1;
 
   // Always draw the mesh's built-in top half (local Z >= 0). Independent of wobble.
@@ -18988,6 +18995,7 @@ const GRID_PANEL_AST = [
   { name: 'cl_ast_outline_tex', min: 0, max: 1, step: 1 },
   { name: 'cl_ast_outline_alpha', min: 0, max: 1, step: 0.01 },
   { name: 'cl_ast_face_tex', min: 0, max: 1, step: 1 },
+  { name: 'cl_ast_hue_tint', min: 0, max: 1, step: 1 },
   { name: 'cl_ast_face_alpha', min: 0, max: 1, step: 0.01 },
   { name: 'cl_ast_face_tint', min: 0, max: 1, step: 0.01 },
   { name: 'cl_ast_height', min: 0, max: 0.5, step: 0.01 },
