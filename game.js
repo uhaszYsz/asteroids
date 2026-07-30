@@ -20597,6 +20597,7 @@ function runConsole(line) {
       conPrint('passwords do not match', 'err');
       return;
     }
+    pendingAdminLoginPw = next;
     ws.send(JSON.stringify({ t: 'adminPassword', pw: next, repeat }));
     return;
   }
