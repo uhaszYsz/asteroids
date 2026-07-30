@@ -10233,9 +10233,13 @@ function tinyShipDesiredState(spec, moving, attacking) {
   return spec.states[0] || 'idle';
 }
 
+/** World units per sprite pixel (half-extent = px * 0.5 * this).
+ *  ~30px-tall frames match the old fixed halfL (7.5×RES_SCALE). */
+const SPRITE_SHIP_PX_SCALE = 1;
+
 /** Sprite cut vertically onto a pitched roof (two faces meeting at the keel ridge).
  *  bankOverride: use enemy bank instead of player av smoothing.
- *  sizeScale: plane half-length multiplier (default 1). */
+ *  sizeScale: extra multiplier (default 1). Plane size follows sprite fw×fh. */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale) {
   const spec = opt && opt.sprite;
   if (!spec) return;
@@ -10245,8 +10249,10 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const bank = (bankOverride != null && Number.isFinite(bankOverride))
     ? bankOverride * 0.5
     : shipBankSmoothed(id, av, dt) * 0.5;
-  const halfL = 7.5 * RES_SCALE * (sizeScale > 0 ? sizeScale : 1);
-  const halfW = halfL * (spec.fw / Math.max(1, spec.fh));
+  const sc = SPRITE_SHIP_PX_SCALE * (sizeScale > 0 ? sizeScale : 1);
+  // Nose–tail from frame height; wing span from frame width — true pixel proportions.
+  const halfL = Math.max(1, spec.fh) * 0.5 * sc;
+  const halfW = Math.max(1, spec.fw) * 0.5 * sc;
   const cp = Math.cos(SPRITE_ROOF_PITCH);
   const sp = Math.sin(SPRITE_ROOF_PITCH);
   const wingY = halfW * cp;
@@ -14781,7 +14787,7 @@ function pickForwardGunLocals(mesh) {
 /** Common enemy = Scout 4 sprite; mesh kept only as charge-gun fallback. */
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
-const ENEMY_COMMON_SPRITE_SCALE = 0.95;
+const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_COMMON_MESH = (() => {
   const src = getShipMeshById('voxel_redfighter');
   const fallback = (!src || src.id !== 'voxel_redfighter') ? getShipMeshById('adder') : src;
@@ -14791,7 +14797,7 @@ const ENEMY_COMMON_MESH = (() => {
 /** UFO = Heavy 370 sprite. */
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_SPRITE_ID = 'enemy_370';
-const ENEMY_UFO_SPRITE_SCALE = 1.45;
+const ENEMY_UFO_SPRITE_SCALE = 1;
 const ENEMY_UFO_MESH = (() => {
   const raw = _shipMeshRawDefs.find((d) => d && d.id === 'voxel_transtellar');
   if (raw) {
