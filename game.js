@@ -9789,11 +9789,31 @@ const TINY_SHIP_FPS = 10;
 
 /**
  * Static enemy / craft sprites (single frame each — full PNG is the ship).
- * Paths under sprites/enemies/; fw/fh = full image size.
+ * Paths under sprites/enemies/; fw/fh = full image size (updated on load).
  */
 const ENEMY_SHIP_DIR = 'sprites/enemies/';
 const ENEMY_SPRITE_SPECS = [
   { id: 'enemy_4', name: 'Scout 4', file: 'Spaceship (4).png', fw: 36, fh: 36, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_6', name: 'Craft 6', file: 'Spaceship (6).png', fw: 79, fh: 56, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_7', name: 'Craft 7', file: 'Spaceship (7).png', fw: 71, fh: 62, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_8', name: 'Craft 8', file: 'Spaceship (8).png', fw: 94, fh: 40, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_9', name: 'Craft 9', file: 'Spaceship (9).png', fw: 63, fh: 56, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_10', name: 'Craft 10', file: 'Spaceship (10).png', fw: 67, fh: 62, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_13', name: 'Craft 13', file: 'Spaceship (13).png', fw: 107, fh: 57, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_16', name: 'Craft 16', file: 'Spaceship (16).png', fw: 78, fh: 61, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_17', name: 'Craft 17', file: 'Spaceship (17).png', fw: 71, fh: 59, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_18', name: 'Craft 18', file: 'Spaceship (18).png', fw: 110, fh: 61, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_19', name: 'Craft 19', file: 'Spaceship (19).png', fw: 66, fh: 47, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_20', name: 'Craft 20', file: 'Spaceship (20).png', fw: 86, fh: 37, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_21', name: 'Craft 21', file: 'Spaceship (21).png', fw: 82, fh: 56, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_22', name: 'Craft 22', file: 'Spaceship (22).png', fw: 93, fh: 48, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_23', name: 'Craft 23', file: 'Spaceship (23).png', fw: 84, fh: 56, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_24', name: 'Craft 24', file: 'Spaceship (24).png', fw: 81, fh: 58, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_26', name: 'Craft 26', file: 'Spaceship (26).png', fw: 58, fh: 56, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_27', name: 'Craft 27', file: 'Spaceship (27).png', fw: 55, fh: 56, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_28', name: 'Craft 28', file: 'Spaceship (28).png', fw: 73, fh: 52, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_29', name: 'Craft 29', file: 'Spaceship (29).png', fw: 64, fh: 52, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_30', name: 'Craft 30', file: 'Spaceship (30).png', fw: 82, fh: 44, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_35', name: 'Fighter 35', file: 'Spaceship (35).png', fw: 89, fh: 49, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_39', name: 'Fighter 39', file: 'Spaceship (39).png', fw: 78, fh: 59, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_116', name: 'Gunship 116', file: 'Spaceship (116).png', fw: 81, fh: 58, states: ['idle'], frames: [1], single: true },
