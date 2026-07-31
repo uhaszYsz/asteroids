@@ -17045,10 +17045,10 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
   return bank;
 }
 
-/** Low-poly unit sphere for common-enemy muzzle charge orbs. */
+/** Low-poly unit sphere for enemy muzzle charge orbs (PSX-style). */
 function buildChargeSphereMesh(lonSeg, latSeg) {
-  const lonN = Math.max(6, lonSeg | 0);
-  const latN = Math.max(4, latSeg | 0);
+  const lonN = Math.max(4, lonSeg | 0);
+  const latN = Math.max(3, latSeg | 0);
   const verts = [[0, 0, 1], [0, 0, -1]];
   for (let la = 1; la < latN; la++) {
     const v = (la / latN) * Math.PI;
@@ -17106,7 +17106,8 @@ function buildChargeSphereMesh(lonSeg, latSeg) {
   return { verts, faces, edges };
 }
 
-const ENEMY_CHARGE_SPHERE = buildChargeSphereMesh(8, 5);
+/** ~24 tris — 6 lon × 3 lat. Readable PSX blob, not a dense sphere. */
+const ENEMY_CHARGE_SPHERE = buildChargeSphereMesh(6, 3);
 /** Forward hardpoints for common-enemy charge orbs (sprite nose). */
 const ENEMY_COMMON_GUNS = [
   [7 * RES_SCALE, 2.4 * RES_SCALE, 0],
@@ -17312,34 +17313,67 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const oz = opts && opts.localZ != null ? +opts.localZ : 0;
   const lift = opts && opts.lift != null ? opts.lift : SHIP3D_LIFT;
   const depthParts = opts && opts.depthParts;
-  const verts = mesh.verts.map((v) => [v[0] * s + ox, v[1] * s + oy, v[2] * s + oz]);
-  const { xy, depth } = projectMesh3D(verts, cx, cy, yaw, spin, lift);
+  const src = mesh.verts;
+  const n = src.length;
+  // Banked world positions (pre-lift) for correct 3D facing — screen-space cull
+  // breaks when lift ≠ 0 (worm tip), leaving wireframe-only.
+  const bx = new Float64Array(n);
+  const by = new Float64Array(n);
+  const bz = new Float64Array(n);
+  const ca = Math.cos(yaw);
+  const sa = Math.sin(yaw);
+  const cb = Math.cos(spin || 0);
+  const sb = Math.sin(spin || 0);
+  const L = lift != null ? lift : SHIP3D_LIFT;
+  const xy = new Float64Array(n * 2);
+  const depth = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const lx = src[i][0] * s + ox;
+    const ly = src[i][1] * s + oy;
+    const lz = src[i][2] * s + oz;
+    const y1 = ly * cb - lz * sb;
+    const z1 = ly * sb + lz * cb;
+    const wx = lx * ca - y1 * sa;
+    const wy = lx * sa + y1 * ca;
+    bx[i] = wx;
+    by[i] = wy;
+    bz[i] = z1;
+    xy[i * 2] = cx + wx;
+    xy[i * 2 + 1] = cy + wy - z1 * L;
+    depth[i] = z1;
+  }
   const faces = mesh.faces;
   const faceItems = [];
   let zMin = Infinity, zMax = -Infinity;
   for (let i = 0; i < faces.length; i++) {
     const f = faces[i];
-    const ax = xy[f[1] * 2] - xy[f[0] * 2];
-    const ay = xy[f[1] * 2 + 1] - xy[f[0] * 2 + 1];
-    const bx = xy[f[2] * 2] - xy[f[0] * 2];
-    const by = xy[f[2] * 2 + 1] - xy[f[0] * 2 + 1];
-    if (ax * by - ay * bx >= 0) continue;
-    const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
+    const i0 = f[0], i1 = f[1], i2 = f[2];
+    const ax = bx[i1] - bx[i0];
+    const ay = by[i1] - by[i0];
+    const az = bz[i1] - bz[i0];
+    const px = bx[i2] - bx[i0];
+    const py = by[i2] - by[i0];
+    const pz = bz[i2] - bz[i0];
+    // Outward normal; higher world-Z is closer → keep faces with +Z normal.
+    const nz = ax * py - ay * px;
+    if (nz <= 0) continue;
+    const z = (depth[i0] + depth[i1] + depth[i2]) / 3;
     if (z < zMin) zMin = z;
     if (z > zMax) zMax = z;
     faceItems.push({
       kind: 'face',
       z,
       poly: [
-        xy[f[0] * 2], xy[f[0] * 2 + 1],
-        xy[f[1] * 2], xy[f[1] * 2 + 1],
-        xy[f[2] * 2], xy[f[2] * 2 + 1]
+        xy[i0 * 2], xy[i0 * 2 + 1],
+        xy[i1 * 2], xy[i1 * 2 + 1],
+        xy[i2 * 2], xy[i2 * 2 + 1]
       ]
     });
   }
   const zSpan = Math.max(1e-4, zMax - zMin);
   const base = color || COL_CHARGE_RED;
-  const fillA = alpha == null ? 0.35 : alpha;
+  // Solid filled body (not wireframe-dominated).
+  const fillA = Math.min(1, Math.max(0.62, alpha == null ? 0.7 : alpha));
   const emitPow = 0.5;
 
   // Painter's: sphere faces + optional suck particles share one depth order.
@@ -17366,10 +17400,10 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
     drawFilledPoly(it.poly, col, fillA, false);
     drawFilledPoly(it.poly, base, fillA * emitPow * 0.55, true);
   }
-  // Wireframe after fills (silhouette on top of occluded parts).
-  const edgeW = 3;
+  // Light wireframe accent on top of solid fill.
+  const edgeW = 2;
   const edgeCol = [1, 0.2, 0.15];
-  const edgeA = Math.min(1, fillA + 0.45);
+  const edgeA = Math.min(1, fillA * 0.85);
   for (const e of mesh.edges) {
     drawThickSegment(
       xy[e[0] * 2], xy[e[0] * 2 + 1],
@@ -17379,7 +17413,7 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
     drawThickSegment(
       xy[e[0] * 2], xy[e[0] * 2 + 1],
       xy[e[1] * 2], xy[e[1] * 2 + 1],
-      edgeW + 2, edgeCol, edgeA * emitPow * 0.55, true
+      edgeW + 1, edgeCol, edgeA * emitPow * 0.4, true
     );
   }
 }
