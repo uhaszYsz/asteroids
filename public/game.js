@@ -26,6 +26,10 @@ const sbFoeDeltaEl = document.getElementById('sb-foe-delta');
 const sbLimitEl = document.getElementById('sb-limit');
 const sbHeadlineEl = document.getElementById('sb-headline');
 const sbFinalNoteEl = document.getElementById('sb-final-note');
+const sbMmrEl = document.getElementById('sb-mmr');
+const sbMmrValEl = document.getElementById('sb-mmr-val');
+const sbMmrDeltaEl = document.getElementById('sb-mmr-delta');
+let mmrAnimTimer = 0;
 const bcastFxCanvas = document.getElementById('bcast-fx');
 const bcastFxCtx = bcastFxCanvas ? bcastFxCanvas.getContext('2d') : null;
 let introHideTimer = 0;
@@ -11763,6 +11767,53 @@ function animateScoreNum(el, from, to, scored) {
   setTimeout(bump, 420);
 }
 
+function clearMmrAnim() {
+  if (mmrAnimTimer) {
+    cancelAnimationFrame(mmrAnimTimer);
+    mmrAnimTimer = 0;
+  }
+  if (sbMmrEl) sbMmrEl.classList.remove('show');
+  if (sbMmrDeltaEl) {
+    sbMmrDeltaEl.classList.remove('pop', 'up', 'down');
+    sbMmrDeltaEl.textContent = '';
+  }
+}
+
+/** Chess.com-style rating tick after a PvP final. */
+function playMmrReveal(mmr) {
+  clearMmrAnim();
+  if (!mmr || !sbMmrEl || !sbMmrValEl) return;
+  const before = mmr.before | 0;
+  const after = mmr.after | 0;
+  const delta = mmr.delta != null ? (mmr.delta | 0) : (after - before);
+  sbMmrEl.classList.add('show');
+  sbMmrValEl.textContent = String(before);
+  if (sbMmrDeltaEl) {
+    sbMmrDeltaEl.textContent = '';
+    sbMmrDeltaEl.classList.remove('pop', 'up', 'down');
+  }
+
+  const startAt = performance.now() + 900;
+  const dur = 1100;
+  const tick = (now) => {
+    const t = Math.max(0, Math.min(1, (now - startAt) / dur));
+    const eased = 1 - Math.pow(1 - t, 3);
+    const cur = Math.round(before + (after - before) * eased);
+    sbMmrValEl.textContent = String(cur);
+    if (t < 1) {
+      mmrAnimTimer = requestAnimationFrame(tick);
+      return;
+    }
+    mmrAnimTimer = 0;
+    sbMmrValEl.textContent = String(after);
+    if (sbMmrDeltaEl && delta) {
+      sbMmrDeltaEl.textContent = (delta > 0 ? '+' : '') + delta;
+      sbMmrDeltaEl.classList.add('pop', delta > 0 ? 'up' : 'down');
+    }
+  };
+  mmrAnimTimer = requestAnimationFrame(tick);
+}
+
 function showScoreBoard(opts) {
   if (!scoreBoardEl || practiceMode) return;
   hideMatchIntro(true);
@@ -11777,7 +11828,8 @@ function showScoreBoard(opts) {
     newFoe = foeScore(),
     iScored = false,
     final = false,
-    won = false
+    won = false,
+    mmr = null
   } = opts || {};
 
   if (sbMeNameEl) sbMeNameEl.textContent = myCallsign();
@@ -11795,6 +11847,7 @@ function showScoreBoard(opts) {
     sbFoeDeltaEl.classList.remove('show', 'neg');
     sbFoeDeltaEl.textContent = '';
   }
+  clearMmrAnim();
 
   if (final) {
     if (sbTagEl) {
@@ -11819,6 +11872,7 @@ function showScoreBoard(opts) {
       sbFoeScoreEl.textContent = String(newFoe);
       if (!won) sbFoeScoreEl.classList.add('scored');
     }
+    if (mmr) playMmrReveal(mmr);
   } else {
     scoreBoardEl.classList.remove('final');
     const meGot = newMe > oldMe;
@@ -11958,7 +12012,7 @@ const accountRegisterBtn = document.getElementById('account-register-btn');
 const accountLoginBtn = document.getElementById('account-login-btn');
 const accountCloseBtn = document.getElementById('account-close-btn');
 const accountStatusEl = document.getElementById('account-status');
-const accountWinsEl = document.getElementById('account-wins');
+const accountMmrEl = document.getElementById('account-mmr');
 const accountMsgEl = document.getElementById('account-msg');
 const accountPlayerColorEl = document.getElementById('account-player-color');
 const accountShootColorEl = document.getElementById('account-shoot-color');
@@ -11986,6 +12040,8 @@ let accountSession = {
   playerColor: DEFAULT_PLAYER_COLOR_HEX,
   shootColor: DEFAULT_SHOOT_COLOR_HEX,
   shipId: 'tiny_1',
+  mmr: 1200,
+  mmrGames: 0,
   friends: []
 };
 /** Draft ship while account panel is open (committed on Confirm). */
@@ -12541,6 +12597,8 @@ function applyAccountSession(msg) {
     matchesWon: msg.matchesWon | 0,
     bestWaves: msg.bestWaves | 0,
     bestWavesDuo: msg.bestWavesDuo | 0,
+    mmr: msg.mmr != null ? (msg.mmr | 0) : (accountSession.mmr | 0) || 1200,
+    mmrGames: msg.mmrGames != null ? (msg.mmrGames | 0) : (accountSession.mmrGames | 0),
     hasSnapshot: !!(msg.hasSnapshot || soloSnapshot),
     playerColor: normalizeColorHex(msg.playerColor) || accountSession.playerColor || DEFAULT_PLAYER_COLOR_HEX,
     shootColor: normalizeColorHex(msg.shootColor) || accountSession.shootColor || DEFAULT_SHOOT_COLOR_HEX,
@@ -12563,11 +12621,8 @@ function applyAccountSession(msg) {
       ? (accountSession.steam ? 'Steam' : 'Registered')
       : 'Guest';
   }
-  if (accountWinsEl) {
-    accountWinsEl.textContent =
-      (accountSession.matchesWon | 0) + ' wins · best ' +
-      (accountSession.bestWaves | 0) + ' / duo ' +
-      (accountSession.bestWavesDuo | 0);
+  if (accountMmrEl) {
+    accountMmrEl.textContent = String(accountSession.mmr | 0);
   }
   if (accountRegisterBtn) {
     accountRegisterBtn.style.display = (accountSession.registered || accountSession.steam) ? 'none' : '';
@@ -18329,6 +18384,12 @@ function handleWsMessage(e) {
       if (msg.names) applyNames(msg.names);
       if (msg.scoreToWin != null) setScoreToWin(msg.scoreToWin);
       const won = (msg.winner | 0) === myId;
+      const mmr = msg.mmr && typeof msg.mmr === 'object' ? msg.mmr : null;
+      if (mmr) {
+        accountSession.mmr = mmr.after | 0;
+        if (mmr.games != null) accountSession.mmrGames = mmr.games | 0;
+        if (accountMmrEl) accountMmrEl.textContent = String(accountSession.mmr | 0);
+      }
       deathSpectating = false;
       deathSeq = null;
       deathFreezeAt = 0;
@@ -18346,17 +18407,19 @@ function handleWsMessage(e) {
         newMe: myScore(),
         newFoe: foeScore(),
         final: true,
-        won
+        won,
+        mmr
       });
       setTimeout(() => {
         hideScoreBoard(false);
+        clearMmrAnim();
         returnToLobby();
         showMenu();
         if (waitBannerEl) {
           waitBannerEl.classList.add('hidden');
           waitBannerEl.textContent = 'Waiting for player...';
         }
-      }, 4200);
+      }, mmr ? 5600 : 4200);
       return;
     }
     if (msg.t === 'queued') {

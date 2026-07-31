@@ -17,6 +17,12 @@ const JSON_LEGACY = path.join(__dirname, 'accounts.json');
 const DEFAULT_PLAYER_COLOR = '#59D9FF';
 const DEFAULT_SHOOT_COLOR = '#59F2FF';
 const DEFAULT_SHIP_ID = 'tiny_1';
+/** Chess.com Intermediate / classic starting Elo. */
+const DEFAULT_MMR = 1200;
+const MMR_K_PROVISIONAL = 40;
+const MMR_K_STABLE = 20;
+const MMR_PROVISIONAL_GAMES = 20;
+const MMR_FLOOR = 100;
 
 /** Accept ship id like tiny_1 / arrow — alphanumeric + underscore, max 32. */
 function normalizeShipId(raw) {
@@ -61,6 +67,10 @@ function migrateUser(u) {
   if (u.matchesWon == null) u.matchesWon = 0;
   if (u.bestWaves == null) u.bestWaves = 0;
   if (u.bestWavesDuo == null) u.bestWavesDuo = 0;
+  if (u.mmr == null || !Number.isFinite(Number(u.mmr))) u.mmr = DEFAULT_MMR;
+  else u.mmr = Math.max(MMR_FLOOR, Math.round(Number(u.mmr)));
+  if (u.mmrGames == null || !Number.isFinite(Number(u.mmrGames))) u.mmrGames = 0;
+  else u.mmrGames = Math.max(0, u.mmrGames | 0);
   if (!Array.isArray(u.friends)) u.friends = [];
   u.playerColor = normalizeColor(u.playerColor) || DEFAULT_PLAYER_COLOR;
   u.shootColor = normalizeColor(u.shootColor) || DEFAULT_SHOOT_COLOR;
@@ -108,6 +118,8 @@ function rowToUser(row) {
     playerColor: row.player_color,
     shootColor: row.shoot_color,
     shipId: row.ship_id,
+    mmr: row.mmr,
+    mmrGames: row.mmr_games,
     createdAt: row.created_at || undefined,
     lastSteamLoginAt: row.last_steam_login_at || undefined
   });
@@ -128,6 +140,8 @@ function userToParams(username, u) {
     u.playerColor || DEFAULT_PLAYER_COLOR,
     u.shootColor || DEFAULT_SHOOT_COLOR,
     u.shipId || DEFAULT_SHIP_ID,
+    u.mmr | 0,
+    u.mmrGames | 0,
     u.createdAt || null,
     u.lastSteamLoginAt || null
   ];
@@ -137,8 +151,9 @@ const UPSERT_SQL = `
 INSERT INTO users (
   username, pin_hash, salt, steam_id, display_name,
   matches_won, best_waves, best_waves_duo, friends,
-  player_color, shoot_color, ship_id, created_at, last_steam_login_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  player_color, shoot_color, ship_id, mmr, mmr_games,
+  created_at, last_steam_login_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(username) DO UPDATE SET
   pin_hash = excluded.pin_hash,
   salt = excluded.salt,
@@ -151,6 +166,8 @@ ON CONFLICT(username) DO UPDATE SET
   player_color = excluded.player_color,
   shoot_color = excluded.shoot_color,
   ship_id = excluded.ship_id,
+  mmr = excluded.mmr,
+  mmr_games = excluded.mmr_games,
   created_at = excluded.created_at,
   last_steam_login_at = excluded.last_steam_login_at
 `;
@@ -269,6 +286,8 @@ async function init() {
       player_color TEXT NOT NULL DEFAULT '#59D9FF',
       shoot_color TEXT NOT NULL DEFAULT '#59F2FF',
       ship_id TEXT NOT NULL DEFAULT 'tiny_1',
+      mmr INTEGER NOT NULL DEFAULT 1200,
+      mmr_games INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER,
       last_steam_login_at INTEGER
     )
@@ -276,6 +295,12 @@ async function init() {
 
   try {
     await runAsync(`ALTER TABLE users ADD COLUMN ship_id TEXT NOT NULL DEFAULT 'tiny_1'`);
+  } catch (_) { /* column already exists */ }
+  try {
+    await runAsync(`ALTER TABLE users ADD COLUMN mmr INTEGER NOT NULL DEFAULT 1200`);
+  } catch (_) { /* column already exists */ }
+  try {
+    await runAsync(`ALTER TABLE users ADD COLUMN mmr_games INTEGER NOT NULL DEFAULT 0`);
   } catch (_) { /* column already exists */ }
 
   const countRows = await allAsync('SELECT COUNT(*) AS n FROM users');
@@ -329,6 +354,8 @@ function upsertSteamUser(steamId, personaName) {
     playerColor: DEFAULT_PLAYER_COLOR,
     shootColor: DEFAULT_SHOOT_COLOR,
     shipId: DEFAULT_SHIP_ID,
+    mmr: DEFAULT_MMR,
+    mmrGames: 0,
     createdAt: Date.now(),
     lastSteamLoginAt: Date.now()
   };
@@ -359,6 +386,8 @@ function createUser(username, pin) {
     playerColor: DEFAULT_PLAYER_COLOR,
     shootColor: DEFAULT_SHOOT_COLOR,
     shipId: DEFAULT_SHIP_ID,
+    mmr: DEFAULT_MMR,
+    mmrGames: 0,
     createdAt: Date.now()
   };
   persistUser(username, data.users[username]);
@@ -384,6 +413,72 @@ function addWin(username) {
   u.matchesWon = (u.matchesWon | 0) + 1;
   persistUser(username, u);
   return u.matchesWon | 0;
+}
+
+function eloExpected(rating, oppRating) {
+  return 1 / (1 + Math.pow(10, ((oppRating | 0) - (rating | 0)) / 400));
+}
+
+function eloNext(rating, oppRating, score, gamesPlayed) {
+  const games = Math.max(0, gamesPlayed | 0);
+  const k = games < MMR_PROVISIONAL_GAMES ? MMR_K_PROVISIONAL : MMR_K_STABLE;
+  const exp = eloExpected(rating, oppRating);
+  const next = Math.round((rating | 0) + k * (Number(score) - exp));
+  return Math.max(MMR_FLOOR, next);
+}
+
+/**
+ * Persist one player's new rating after a rated PvP result.
+ * @returns {{ before: number, after: number, delta: number, games: number } | null}
+ */
+function applyRatedResult(username, oppRating, won) {
+  ensureReady();
+  const u = data.users[username];
+  if (!u) return null;
+  migrateUser(u);
+  const before = u.mmr | 0;
+  const games = u.mmrGames | 0;
+  const after = eloNext(before, oppRating, won ? 1 : 0, games);
+  u.mmr = after;
+  u.mmrGames = games + 1;
+  persistUser(username, u);
+  return { before, after, delta: after - before, games: u.mmrGames };
+}
+
+/**
+ * Apply Chess.com-style Elo to winner + loser account keys.
+ * Pass null keys for guests (caller handles session-only).
+ */
+function applyMatchMmr(winnerKey, loserKey, winnerRating, loserRating, winnerGames, loserGames) {
+  ensureReady();
+  const wr = winnerRating != null ? (winnerRating | 0) : DEFAULT_MMR;
+  const lr = loserRating != null ? (loserRating | 0) : DEFAULT_MMR;
+  const wg = winnerGames | 0;
+  const lg = loserGames | 0;
+  let winner = {
+    before: wr,
+    after: eloNext(wr, lr, 1, wg),
+    delta: 0,
+    games: wg + 1
+  };
+  winner.delta = winner.after - winner.before;
+  let loser = {
+    before: lr,
+    after: eloNext(lr, wr, 0, lg),
+    delta: 0,
+    games: lg + 1
+  };
+  loser.delta = loser.after - loser.before;
+
+  if (winnerKey && data.users[winnerKey]) {
+    const saved = applyRatedResult(winnerKey, lr, true);
+    if (saved) winner = saved;
+  }
+  if (loserKey && data.users[loserKey]) {
+    const saved = applyRatedResult(loserKey, wr, false);
+    if (saved) loser = saved;
+  }
+  return { winner, loser };
 }
 
 function setBestWaves(username, wave) {
@@ -538,12 +633,15 @@ module.exports = {
   DEFAULT_PLAYER_COLOR,
   DEFAULT_SHOOT_COLOR,
   DEFAULT_SHIP_ID,
+  DEFAULT_MMR,
   getUser,
   createUser,
   verifyUser,
   steamAccountKey,
   upsertSteamUser,
   addWin,
+  applyMatchMmr,
+  eloNext,
   setBestWaves,
   setBestWavesDuo,
   setColors,

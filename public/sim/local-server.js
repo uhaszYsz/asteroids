@@ -71,6 +71,24 @@
       setBestWavesDuo() { return 0; },
       setColors() { return { ok: 0, err: 'offline' }; },
       setShip() { return { ok: 0, err: 'offline' }; },
+      applyMatchMmr(winnerKey, loserKey, wr, lr, wg, lg) {
+        function elo(r, o, score, games) {
+          const k = (games | 0) < 20 ? 40 : 20;
+          const exp = 1 / (1 + Math.pow(10, ((o | 0) - (r | 0)) / 400));
+          return Math.max(100, Math.round((r | 0) + k * (score - exp)));
+        }
+        const wAfter = elo(wr, lr, 1, wg);
+        const lAfter = elo(lr, wr, 0, lg);
+        return {
+          winner: { before: wr | 0, after: wAfter, delta: wAfter - (wr | 0), games: (wg | 0) + 1 },
+          loser: { before: lr | 0, after: lAfter, delta: lAfter - (lr | 0), games: (lg | 0) + 1 }
+        };
+      },
+      eloNext(r, o, score, games) {
+        const k = (games | 0) < 20 ? 40 : 20;
+        const exp = 1 / (1 + Math.pow(10, ((o | 0) - (r | 0)) / 400));
+        return Math.max(100, Math.round((r | 0) + k * (score - exp)));
+      },
       renameUser() { return { ok: 1 }; },
       listFriends() { return []; },
       addFriend() { return { ok: 0, err: 'offline' }; },
@@ -81,7 +99,8 @@
         if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(s)) return null;
         return s;
       },
-      DEFAULT_SHIP_ID: 'tiny_1'
+      DEFAULT_SHIP_ID: 'tiny_1',
+      DEFAULT_MMR: 1200
     };
   }
 
@@ -316,7 +335,7 @@
 
       const texts = [];
       for (let i = 0; i < SIM_PARTS.length; i++) {
-        const url = simBase + SIM_PARTS[i] + '?v=4';
+        const url = simBase + SIM_PARTS[i] + '?v=5';
         const res = await fetch(url, { cache: 'no-cache' });
         if (!res.ok) throw new Error('Failed to load ' + SIM_PARTS[i] + ' (' + res.status + ')');
         texts.push(await res.text());

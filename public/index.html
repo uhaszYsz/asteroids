@@ -1399,6 +1399,51 @@
     #score-board.show.final .sb-final-note {
       animation: bcastFadeUp 0.4s ease 0.7s forwards;
     }
+    #score-board .sb-mmr {
+      display: none;
+      margin-top: 18px;
+      text-align: center;
+      opacity: 0;
+    }
+    #score-board.show.final .sb-mmr.show {
+      display: block;
+      animation: bcastFadeUp 0.45s ease 0.85s forwards;
+    }
+    #score-board .sb-mmr-label {
+      font: 11px Consolas, "Courier New", monospace;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: #7a9bb0;
+      margin-bottom: 6px;
+    }
+    #score-board .sb-mmr-row {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 14px;
+    }
+    #score-board .sb-mmr-val {
+      font: 700 clamp(28px, 5.5vw, 44px) Consolas, "Courier New", monospace;
+      color: #e8f6ff;
+      letter-spacing: 0.04em;
+      text-shadow: 0 0 18px rgba(100, 200, 255, 0.35);
+      min-width: 3ch;
+    }
+    #score-board .sb-mmr-delta {
+      font: 700 clamp(18px, 3.5vw, 28px) Consolas, "Courier New", monospace;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      transform: translateY(8px) scale(0.85);
+    }
+    #score-board .sb-mmr-delta.pop {
+      animation: mmrDeltaPop 0.55s cubic-bezier(0.2, 1.4, 0.4, 1) forwards;
+    }
+    #score-board .sb-mmr-delta.up { color: #8dffb0; text-shadow: 0 0 16px rgba(120, 255, 160, 0.4); }
+    #score-board .sb-mmr-delta.down { color: #ff8a9a; text-shadow: 0 0 16px rgba(255, 100, 120, 0.35); }
+    @keyframes mmrDeltaPop {
+      0% { opacity: 0; transform: translateY(10px) scale(0.7); }
+      60% { opacity: 1; transform: translateY(-2px) scale(1.12); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
 
     @keyframes slideInL {
       to { opacity: 1; transform: translateX(0); }
@@ -1597,6 +1642,13 @@
     </div>
     <div class="sb-headline" id="sb-headline">YOU SCORE</div>
     <div class="sb-final-note" id="sb-final-note">MATCH COMPLETE</div>
+    <div class="sb-mmr" id="sb-mmr">
+      <div class="sb-mmr-label">Rating</div>
+      <div class="sb-mmr-row">
+        <span class="sb-mmr-val" id="sb-mmr-val">1200</span>
+        <span class="sb-mmr-delta" id="sb-mmr-delta"></span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1976,7 +2028,7 @@
     </div>
     <div class="ac-meta">
       <span>Status <b id="account-status">Guest</b></span>
-      <span>Wins <b id="account-wins">0</b></span>
+      <span>Rating <b id="account-mmr">1200</b></span>
     </div>
     <div class="ac-colors">
       <label class="sp-label" for="account-player-color">Player color</label>
@@ -2139,7 +2191,7 @@
 <script src="lib/bassoonplayer.js"></script>
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
-<script src="sim/local-server.js?v=4"></script>
-<script src="game.js?v=695"></script>
+<script src="sim/local-server.js?v=5"></script>
+<script src="game.js?v=696"></script>
 </body>
 </html>

@@ -3001,13 +3001,32 @@ function endMatch(room, winner) {
       if (ws.playerId === winner.id) recordMatchWin(ws);
     }
   }
+
+  let mmrByWs = new Map();
+  if (winner && !room.practice && !room.coop) {
+    let winnerWs = null;
+    let loserWs = null;
+    for (const ws of clients) {
+      if (ws.playerId === winner.id) winnerWs = ws;
+      else if (ws.playerId != null) loserWs = ws;
+    }
+    if (winnerWs && loserWs) mmrByWs = applyPvpMmrResults(winnerWs, loserWs);
+  }
+
   for (const ws of clients) {
+    const mmr = mmrByWs.get(ws) || null;
     send(ws, {
       t: 'over',
       winner: winner ? winner.id : 0,
       scores,
       names: packRosterNames(room),
-      scoreToWin: SCORE_TO_WIN
+      scoreToWin: SCORE_TO_WIN,
+      mmr: mmr ? {
+        before: mmr.before | 0,
+        after: mmr.after | 0,
+        delta: mmr.delta | 0,
+        games: mmr.games | 0
+      } : null
     });
   }
   for (const ws of clients) {

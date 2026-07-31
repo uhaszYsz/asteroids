@@ -38,6 +38,8 @@ function sessionFields(ws) {
     matchesWon: ws.matchesWon | 0,
     bestWaves: ws.bestWaves | 0,
     bestWavesDuo: ws.bestWavesDuo | 0,
+    mmr: ws.mmr != null ? (ws.mmr | 0) : accountsDb.DEFAULT_MMR,
+    mmrGames: ws.mmrGames | 0,
     hasSnapshot: !!ws.soloSnapshot,
     playerColor: ws.playerColor || accountsDb.DEFAULT_PLAYER_COLOR,
     shootColor: ws.shootColor || accountsDb.DEFAULT_SHOOT_COLOR,
@@ -61,6 +63,8 @@ function initGuestSession(ws) {
   ws.matchesWon = 0;
   ws.bestWaves = 0;
   ws.bestWavesDuo = 0;
+  ws.mmr = accountsDb.DEFAULT_MMR;
+  ws.mmrGames = 0;
   ws.soloSnapshot = null;
   ws.queueMode = null;
   ws.playerColor = accountsDb.DEFAULT_PLAYER_COLOR;
@@ -179,6 +183,8 @@ async function handleSteamLogin(ws, ticketHex, ticketIdentity, personaName) {
   ws.matchesWon = u.matchesWon | 0;
   ws.bestWaves = u.bestWaves | 0;
   ws.bestWavesDuo = u.bestWavesDuo | 0;
+  ws.mmr = u.mmr != null ? (u.mmr | 0) : accountsDb.DEFAULT_MMR;
+  ws.mmrGames = u.mmrGames | 0;
   ws.playerColor = u.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = u.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
   ws.shipId = accountsDb.normalizeShipId(u.shipId) || accountsDb.DEFAULT_SHIP_ID;
@@ -208,12 +214,24 @@ function handleRegister(ws, pin, pinConfirm, rawName) {
   ws.matchesWon = 0;
   ws.bestWaves = 0;
   ws.bestWavesDuo = 0;
+  // Keep guest PvP rating progress if they already played; else Chess.com start.
+  const keepMmr = (ws.mmrGames | 0) > 0;
+  const keepRating = keepMmr ? (ws.mmr | 0) : accountsDb.DEFAULT_MMR;
+  const keepGames = keepMmr ? (ws.mmrGames | 0) : 0;
+  ws.mmr = keepRating;
+  ws.mmrGames = keepGames;
   // Keep current session colors / ship on the new account.
   ws.playerColor = accountsDb.normalizeColor(ws.playerColor) || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = accountsDb.normalizeColor(ws.shootColor) || accountsDb.DEFAULT_SHOOT_COLOR;
   ws.shipId = accountsDb.normalizeShipId(ws.shipId) || accountsDb.DEFAULT_SHIP_ID;
   accountsDb.setColors(name, ws.playerColor, ws.shootColor);
   accountsDb.setShip(name, ws.shipId);
+  const u = accountsDb.getUser(name);
+  if (u) {
+    u.mmr = ws.mmr | 0;
+    u.mmrGames = ws.mmrGames | 0;
+    accountsDb.setColors(name, ws.playerColor, ws.shootColor);
+  }
   applyDisplayNameToRoom(ws, name);
   applyColorsToRoom(ws);
   return { ok: 1 };
@@ -231,6 +249,8 @@ function handleLogin(ws, rawName, pin) {
   ws.matchesWon = verified.user.matchesWon | 0;
   ws.bestWaves = verified.user.bestWaves | 0;
   ws.bestWavesDuo = verified.user.bestWavesDuo | 0;
+  ws.mmr = verified.user.mmr != null ? (verified.user.mmr | 0) : accountsDb.DEFAULT_MMR;
+  ws.mmrGames = verified.user.mmrGames | 0;
   ws.playerColor = verified.user.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = verified.user.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
   ws.shipId = accountsDb.normalizeShipId(verified.user.shipId) || accountsDb.DEFAULT_SHIP_ID;
@@ -243,6 +263,37 @@ function recordMatchWin(ws) {
   if (!ws || !ws.registered || !ws.accountKey) return;
   ws.matchesWon = accountsDb.addWin(ws.accountKey);
   sendSession(ws);
+}
+
+/**
+ * Chess.com-style Elo for a finished PvP match. Matchmaking ignores MMR.
+ * Updates session ratings for guests; persists for registered accounts.
+ * @returns {Map<WebSocket, {before,after,delta,games}>}
+ */
+function applyPvpMmrResults(winnerWs, loserWs) {
+  const out = new Map();
+  if (!winnerWs || !loserWs || winnerWs === loserWs) return out;
+  const wr = winnerWs.mmr != null ? (winnerWs.mmr | 0) : accountsDb.DEFAULT_MMR;
+  const lr = loserWs.mmr != null ? (loserWs.mmr | 0) : accountsDb.DEFAULT_MMR;
+  const wg = winnerWs.mmrGames | 0;
+  const lg = loserWs.mmrGames | 0;
+  const result = accountsDb.applyMatchMmr(
+    winnerWs.registered ? winnerWs.accountKey : null,
+    loserWs.registered ? loserWs.accountKey : null,
+    wr,
+    lr,
+    wg,
+    lg
+  );
+  winnerWs.mmr = result.winner.after;
+  winnerWs.mmrGames = result.winner.games;
+  loserWs.mmr = result.loser.after;
+  loserWs.mmrGames = result.loser.games;
+  out.set(winnerWs, result.winner);
+  out.set(loserWs, result.loser);
+  if (winnerWs.readyState === 1) sendSession(winnerWs);
+  if (loserWs.readyState === 1) sendSession(loserWs);
+  return out;
 }
 
 function recordBestWaves(ws, wave, duo) {
