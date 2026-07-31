@@ -118,14 +118,20 @@ wss.on('connection', (ws) => {
       const room = ws.room;
       if (!room || (ws.state !== 'playing' && ws.state !== 'practice')) return;
       if (!ws.__local && !allowAction(ws, 'worldSync', 400)) return;
+      const st = Date.now();
       send(ws, {
         t: 'worldSync',
         tick: room.tick,
-        st: Date.now(),
+        st,
         players: packSnap(room).players,
-        asteroids: room.asteroids.map(packAsteroid),
+        asteroids: room.asteroids.map(a => packAsteroidLive(a, st)),
         bullets: room.bullets.map(packBullet),
-        enemies: (room.enemies || []).filter(enemyIsSpawned).map(packEnemy)
+        enemies: (room.enemies || []).filter(enemyIsSpawned).map(e => {
+          const row = packEnemy(e);
+          // Live pose as spawn origin so client age≈0 after focus.
+          row[2] = e.x; row[3] = e.y; row[6] = st; row[13] = e.x; row[14] = e.y;
+          return row;
+        })
       });
       return;
     }

@@ -382,6 +382,17 @@ function packAsteroid(a) {
   ];
 }
 
+/** Live pose as a fresh spawn origin (focus/worldSync). Does not mutate `a`. */
+function packAsteroidLive(a, st) {
+  const packed = packAsteroid(a);
+  const now = st != null ? st : Date.now();
+  packed[1] = a.x;
+  packed[2] = a.y;
+  packed[5] = a.angle;
+  packed[10] = now;
+  return packed;
+}
+
 function packAsteroidWrap(a) {
   return [
     a.aid, a.spawnX, a.spawnY, a.vx, a.vy, a.spawnAngle, a.spin, a.spawnSt,

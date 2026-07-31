@@ -14475,7 +14475,7 @@ function applyWorldSyncMsg(msg) {
     for (const row of msg.enemies) addEnemy(unpackEnemy(row));
   }
   // #region agent log
-  __agentLog({hypothesisId:'G',location:'game.js:applyWorldSyncMsg',message:'applied worldSync',data:{tick:syncTick|0,asts:(msg.asteroids&&msg.asteroids.length)|0,enys:(msg.enemies&&msg.enemies.length)|0,offline:isOfflineLocalPlay()?1:0},timestamp:Date.now(),runId:'tab-resync'});
+  __agentLog({hypothesisId:'G',location:'game.js:applyWorldSyncMsg',message:'applied worldSync',data:{tick:syncTick|0,asts:(msg.asteroids&&msg.asteroids.length)|0,enys:(msg.enemies&&msg.enemies.length)|0,offline:isOfflineLocalPlay()?1:0,livePack:1,v:730},timestamp:Date.now(),runId:'tab-resync'});
   // #endregion
   predReady = true;
   updateHud();
