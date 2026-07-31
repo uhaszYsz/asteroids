@@ -469,7 +469,15 @@ function enemySpeed(e) {
   if (e && e.kind === 'spinner' && (e.reloadLeft | 0) <= 0 && (e.shootAmmo | 0) > 0) {
     base *= 0.5;
   }
+  // Worm attack 3 (360° shotgun, phases 6–7): dash at 2× wander speed.
+  if (wormIsShotgunRush(e)) base *= 2;
   return base;
+}
+
+function enemyTurnMax(e) {
+  let t = ENEMY_TURN_MAX;
+  if (wormIsShotgunRush(e)) t *= 2;
+  return t;
 }
 
 function enemyMoveType(e) {
@@ -482,6 +490,12 @@ function wormIsHolding(e) {
   // Laser aim/fire/reload holds still. Rocket/shotgun barrages (4–7) keep wandering.
   const p = e && (e.wormPhase | 0);
   return !!(e && e.kind === 'worm' && p >= 1 && p <= 3);
+}
+
+/** Worm 3rd attack: 360° line shotgun while moving (phases 6–7). */
+function wormIsShotgunRush(e) {
+  const p = e && (e.wormPhase | 0);
+  return !!(e && e.kind === 'worm' && p >= 6 && p <= 7);
 }
 
 /**
@@ -924,6 +938,7 @@ function beginWormShotgunAttack(room, e) {
   e.shootAmmo = ENEMY_WORM_SHOTGUN.ammo;
   e.shootCd = 0;
   e.reloadLeft = 0;
+  emitEnemyUpdate(room, e);
 }
 
 function finishWormAttack(room, e) {
@@ -1489,7 +1504,7 @@ function stepEnemyMovement(e) {
 
   if (enemyMoveType(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
     if (e.dir == null || !Number.isFinite(e.dir)) e.dir = e.angle || 0;
-    e.dir = turnAngleToward(e.dir, desired, ENEMY_TURN_MAX);
+    e.dir = turnAngleToward(e.dir, desired, enemyTurnMax(e));
     e.vx = Math.cos(e.dir) * enemySpeed(e);
     e.vy = Math.sin(e.dir) * enemySpeed(e);
     e.x += e.vx;
