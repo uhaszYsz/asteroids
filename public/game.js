@@ -1454,8 +1454,8 @@ const COL = {
   golden: [1.0, 0.84, 0.28],
   bullet: [0.85, 0.95, 1.0],
   rocket: [1.0, 0.45, 0.2],
-  laser: [0.35, 0.95, 1.0],
-  laserHit: [1.0, 0.2, 0.45],
+  laser: [0.1, 0.95, 1.0],
+  laserHit: [0.35, 1.0, 1.0],
   railgun: [1.0, 0.25, 0.95],
   melee: [1.0, 0.9, 0.35],
   plasma: [0.35, 1.0, 0.55],
@@ -11563,7 +11563,7 @@ function tryStartLocalBurst() {
     const perShotTicks = Math.max(1, w.cooldown | 0);
     const shots = Math.max(1, w.ammo | 0);
     const range = w.range != null ? w.range : LASER_RANGE;
-    const col = ownerShootColor(myId);
+    const col = COL.laser;
     startLocalLaserClip(
       Math.round(shots * perShotTicks * tickMs),
       range,
@@ -16304,6 +16304,30 @@ function drawThrustBeams() {
   // Thruster melee no longer draws a ray (see emitThrustFx melee tint).
 }
 
+/** 10 Hz light pulse while any laser beam is active. */
+function laserPulse01() {
+  return 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * 10 * Math.PI * 2);
+}
+
+function laserPulseColor(base) {
+  const b = base || COL.laser;
+  const p = laserPulse01();
+  return [
+    Math.min(1, b[0] * (0.45 + 0.55 * p) + 0.2 * p),
+    Math.min(1, b[1] * (0.55 + 0.5 * p) + 0.15 * p),
+    Math.min(1, b[2] * (0.65 + 0.4 * p) + 0.1 * p)
+  ];
+}
+
+/** Cyan laser segment with 10 Hz brightness / glow pulse. */
+function drawLaserBeamSeg(x0, y0, x1, y1, width, color) {
+  const p = laserPulse01();
+  const col = laserPulseColor(color || COL.laser);
+  const w = Math.max(1, width * (0.82 + 0.35 * p));
+  drawThickSegment(x0, y0, x1, y1, w, col, 0.55 + 0.45 * p, false);
+  drawThickSegment(x0, y0, x1, y1, w * (1.35 + 0.75 * p), col, 0.18 + 0.38 * p, true);
+}
+
 function drawLaserBeams() {
   // Stable width within a frame.
   const width = (2 + ((performance.now() / 40 | 0) % 5)) * RES_SCALE;
@@ -16314,8 +16338,8 @@ function drawLaserBeams() {
     const m = shipMuzzle(me.x, me.y, me.angle);
     const segs = localLaserSegments(m.x, m.y, m.c, m.s, localLaserClip.range);
     for (const s of segs) {
-      const col = ownerHasDamagePowerup(myId) ? damageRainbowColor() : localLaserClip.color;
-      drawThickSegment(s[0], s[1], s[2], s[3], width, col);
+      const col = ownerHasDamagePowerup(myId) ? damageRainbowColor() : COL.laser;
+      drawLaserBeamSeg(s[0], s[1], s[2], s[3], width, col);
     }
     syncLaserSfx(!!localLaserClip.hum);
   } else {
@@ -16324,23 +16348,34 @@ function drawLaserBeams() {
   }
   for (const [owner, rl] of remoteLasers) {
     const beamW = rl.width > 0 ? rl.width : width;
+    const isLaser = !rl.wpn || rl.wpn === 'laser' || rl.wpn === 'wormLaser';
     const col = ownerHasDamagePowerup(owner)
       ? damageRainbowColor()
-      : (owner < 0 ? COL.enemy : ownerShootColor(owner));
+      : (isLaser ? COL.laser : (owner < 0 ? COL.enemy : ownerShootColor(owner)));
     if (rl.wpn === 'wormLaser' && rl.x0 != null) {
-      drawThickSegment(rl.x0, rl.y0, rl.x1, rl.y1, beamW, col);
+      drawLaserBeamSeg(rl.x0, rl.y0, rl.x1, rl.y1, beamW, col);
       continue;
     }
     const pose = resolveFxShooterPose(owner);
     if (!pose) continue;
     const m = shipMuzzle(pose.x, pose.y, pose.angle);
-    drawThickSegment(
-      m.x, m.y,
-      m.x + m.c * rl.len,
-      m.y + m.s * rl.len,
-      beamW,
-      col
-    );
+    if (isLaser) {
+      drawLaserBeamSeg(
+        m.x, m.y,
+        m.x + m.c * rl.len,
+        m.y + m.s * rl.len,
+        beamW,
+        col
+      );
+    } else {
+      drawThickSegment(
+        m.x, m.y,
+        m.x + m.c * rl.len,
+        m.y + m.s * rl.len,
+        beamW,
+        col
+      );
+    }
   }
   drawWormLaserDebug();
   drawRailCharges();
