@@ -17116,8 +17116,9 @@ function spawnWormChargeSuckPart(sphereR) {
   };
 }
 
-/** Keep ~10 local-3D particles sucking into the worm charge tip. */
-function updateAndDrawWormChargeSuck(id, sx, sy, angle, bank, halfL, tipLy, tipLz, sphereR, now, alpha) {
+/** Keep ~10 local-3D particles sucking into the worm charge tip.
+ *  Returns projected draw items (caller depth-sorts with sphere faces). */
+function updateWormChargeSuck(id, sx, sy, angle, bank, halfL, tipLy, tipLz, sphereR, now) {
   let state = wormChargeSuck.get(id | 0);
   if (!state) {
     state = { parts: [], last: now };
@@ -17144,7 +17145,6 @@ function updateAndDrawWormChargeSuck(id, sx, sy, angle, bank, halfL, tipLy, tipL
     }
   }
 
-  // Draw back-to-front by projected depth.
   const drawn = [];
   for (let i = 0; i < parts.length; i++) {
     const pt = parts[i];
@@ -17156,15 +17156,10 @@ function updateAndDrawWormChargeSuck(id, sx, sy, angle, bank, halfL, tipLy, tipL
       x: proj.xy[0],
       y: proj.xy[1],
       z: proj.depth[0],
-      size: pt.size,
-      lifeT: 1 - Math.min(1, pt.age / Math.max(1e-4, pt.life))
+      size: pt.size * (0.55 + 0.45 * (1 - Math.min(1, pt.age / Math.max(1e-4, pt.life))))
     });
   }
-  drawn.sort((a, b) => a.z - b.z);
-  for (const d of drawn) {
-    const s = d.size * (0.55 + 0.45 * d.lifeT);
-    drawFilledPoly(circleVerts(d.x, d.y, s, 8), COL_CHARGE_RED, 1, true);
-  }
+  return drawn;
 }
 
 function beginEnemyCharge(id, ms, side, kind) {
@@ -17273,46 +17268,62 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const oy = opts && opts.localY != null ? +opts.localY : 0;
   const oz = opts && opts.localZ != null ? +opts.localZ : 0;
   const lift = opts && opts.lift != null ? opts.lift : SHIP3D_LIFT;
+  const depthParts = opts && opts.depthParts;
   const verts = mesh.verts.map((v) => [v[0] * s + ox, v[1] * s + oy, v[2] * s + oz]);
   const { xy, depth } = projectMesh3D(verts, cx, cy, yaw, spin, lift);
   const faces = mesh.faces;
-  const order = faces.map((f, i) => {
-    const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
-    return { i, z };
-  });
-  order.sort((a, b) => a.z - b.z);
+  const faceItems = [];
   let zMin = Infinity, zMax = -Infinity;
-  for (const o of order) {
-    if (o.z < zMin) zMin = o.z;
-    if (o.z > zMax) zMax = o.z;
-  }
-  const zSpan = Math.max(1e-4, zMax - zMin);
-  const base = color || COL_CHARGE_RED;
-  const fillA = alpha == null ? 0.35 : alpha;
-  // Emission power 0.5 — solid base + half-strength additive glow.
-  const emitPow = 0.5;
-  for (const o of order) {
-    const f = faces[o.i];
+  for (let i = 0; i < faces.length; i++) {
+    const f = faces[i];
     const ax = xy[f[1] * 2] - xy[f[0] * 2];
     const ay = xy[f[1] * 2 + 1] - xy[f[0] * 2 + 1];
     const bx = xy[f[2] * 2] - xy[f[0] * 2];
     const by = xy[f[2] * 2 + 1] - xy[f[0] * 2 + 1];
     if (ax * by - ay * bx >= 0) continue;
-    const shade = 0.4 + 0.6 * ((o.z - zMin) / zSpan);
+    const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
+    if (z < zMin) zMin = z;
+    if (z > zMax) zMax = z;
+    faceItems.push({
+      kind: 'face',
+      z,
+      poly: [
+        xy[f[0] * 2], xy[f[0] * 2 + 1],
+        xy[f[1] * 2], xy[f[1] * 2 + 1],
+        xy[f[2] * 2], xy[f[2] * 2 + 1]
+      ]
+    });
+  }
+  const zSpan = Math.max(1e-4, zMax - zMin);
+  const base = color || COL_CHARGE_RED;
+  const fillA = alpha == null ? 0.35 : alpha;
+  const emitPow = 0.5;
+
+  // Painter's: sphere faces + optional suck particles share one depth order.
+  const items = faceItems.slice();
+  if (depthParts && depthParts.length) {
+    for (let i = 0; i < depthParts.length; i++) {
+      const p = depthParts[i];
+      items.push({ kind: 'part', z: p.z, x: p.x, y: p.y, size: p.size });
+    }
+  }
+  items.sort((a, b) => a.z - b.z);
+
+  for (const it of items) {
+    if (it.kind === 'part') {
+      drawFilledPoly(circleVerts(it.x, it.y, it.size, 8), COL_CHARGE_RED, 1, true);
+      continue;
+    }
+    const shade = 0.4 + 0.6 * ((it.z - zMin) / zSpan);
     const col = [
       Math.min(1, base[0] * shade + 0.12),
       Math.min(1, base[1] * shade),
       Math.min(1, base[2] * shade)
     ];
-    const poly = [
-      xy[f[0] * 2], xy[f[0] * 2 + 1],
-      xy[f[1] * 2], xy[f[1] * 2 + 1],
-      xy[f[2] * 2], xy[f[2] * 2 + 1]
-    ];
-    drawFilledPoly(poly, col, fillA, false);
-    drawFilledPoly(poly, base, fillA * emitPow * 0.55, true);
+    drawFilledPoly(it.poly, col, fillA, false);
+    drawFilledPoly(it.poly, base, fillA * emitPow * 0.55, true);
   }
-  // Wireframe: solid + half emission glow.
+  // Wireframe after fills (silhouette on top of occluded parts).
   const edgeW = 3;
   const edgeCol = [1, 0.2, 0.15];
   const edgeA = Math.min(1, fillA + 0.45);
@@ -17431,15 +17442,16 @@ function drawEnemyCommonCharges() {
         sy += Math.sin(ph * 1.37) * shake;
       }
       const wr = r * 2;
+      const suckParts = updateWormChargeSuck(
+        id, sx, sy, p.angle, visBank, halfL, tipLy, tipLz, wr, now
+      );
       drawEnemyChargeSphere(sx, sy, wr, p.angle, visBank, COL_CHARGE_RED, alpha, {
         lift: SPRITE_ROOF_LIFT,
         localX: halfL,
         localY: tipLy,
-        localZ: tipLz
+        localZ: tipLz,
+        depthParts: suckParts
       });
-      updateAndDrawWormChargeSuck(
-        id, sx, sy, p.angle, visBank, halfL, tipLy, tipLz, wr, now, alpha
-      );
       if (t > 0.75) {
         const flash = (t - 0.75) / 0.25;
         const tip = projectMesh3D(
