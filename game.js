@@ -974,9 +974,9 @@ const CVARS = {
     help: 'Scale ping-based fire lead (global). 0 = fixed step/angle. Lead ≈ oneWay×scale − cmdDelay (ticks, max 16). Admin only.'
   },
   sv_portal: {
-    value: 1,
-    def: 1,
-    help: '1 = spawn wrap twin before asteroid leaves screen (seamless edge). Admin only.'
+    value: 0,
+    def: 0,
+    help: '1 = spawn wrap twin before asteroid leaves screen (seamless edge). 0 = classic teleport (default, cheaper). Admin only.'
   },
   sv_demo: {
     value: 2,
