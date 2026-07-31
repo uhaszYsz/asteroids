@@ -10840,8 +10840,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const halfL = Math.max(1, spec.fh) * 0.5 * sc;
   const halfW = Math.max(1, spec.fw) * 0.5 * sc;
   const tube = !!(opts && opts.tube);
-  // Worm/tube: half the roof pitch so the diamond cross-section is flatter.
-  const pitch = tube ? SPRITE_ROOF_PITCH * 0.5 : SPRITE_ROOF_PITCH;
+  // Worm bend was half-pitch; 2× that = full SPRITE_ROOF_PITCH.
+  // wingY/drop keep outer edges on z=0 (90° copies → edges on y=0).
+  const pitch = SPRITE_ROOF_PITCH;
   const cp = Math.cos(pitch);
   const sp = Math.sin(pitch);
   const wingY = halfW * cp;
