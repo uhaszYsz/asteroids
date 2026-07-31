@@ -1001,7 +1001,11 @@ function wormCrushAsteroids(room, e) {
   forEachAsteroidNear(room, e.x, e.y, queryR, (a) => {
     if (!a || a.noCollide || a.hp <= 0) return false;
     if (!asteroidOverlapsPlayfield(a)) return false;
-    if (!circleVsAsteroidPoly({ x: e.x, y: e.y, r: er }, a)) return false;
+    let hit = false;
+    for (const cir of enemyHitCircles(e)) {
+      if (circleVsAsteroidPoly(cir, a)) { hit = true; break; }
+    }
+    if (!hit) return false;
     crush.push(a);
     return false;
   });
@@ -1617,6 +1621,27 @@ function enemyUsesRectHit(e) {
   return !!(e && e.kind === 'ufo');
 }
 
+function enemyUsesDualHit(e) {
+  return !!(e && e.kind === 'worm');
+}
+
+/** Hit volumes along facing (worm = two touching circles; others = one at center). */
+function enemyHitCircles(e) {
+  if (!e) return [];
+  if (enemyUsesDualHit(e)) {
+    const c = Math.cos(e.angle || 0);
+    const s = Math.sin(e.angle || 0);
+    const o = ENEMY_WORM_HIT_OFFSET;
+    const r = ENEMY_WORM_HIT_R;
+    return [
+      { x: e.x + c * o, y: e.y + s * o, r },
+      { x: e.x - c * o, y: e.y - s * o, r }
+    ];
+  }
+  const r = e.r || ENEMY_R[e.kind] || ENEMY_R.common || 10;
+  return [{ x: e.x, y: e.y, r }];
+}
+
 /** Local coords of world point relative to enemy center/facing (toroidal). */
 function enemyLocalDelta(e, px, py) {
   const wx = shortestWrapDelta(e.x, px, W);
@@ -1704,8 +1729,12 @@ function distToEnemyHit(px, py, e) {
     const qy = Math.max(-hw, Math.min(hw, ly));
     return Math.hypot(lx - qx, ly - qy);
   }
-  const er = e.r || ENEMY_R.common || 10;
-  return Math.max(0, Math.sqrt(torusDistSq(px, py, e.x, e.y)) - er);
+  let best = Infinity;
+  for (const cir of enemyHitCircles(e)) {
+    const d = Math.max(0, Math.sqrt(torusDistSq(px, py, cir.x, cir.y)) - cir.r);
+    if (d < best) best = d;
+  }
+  return best;
 }
 
 function hitBulletEnemy(b, e) {
@@ -1716,7 +1745,10 @@ function hitBulletEnemy(b, e) {
     if (cfg.col === 'line') br = Math.max(bulletLineWidth(b, cfg) || 2, 2);
     return circleHitsEnemyRect(b.x, b.y, br, e);
   }
-  return hitBulletTarget(b, e.x, e.y, e.r, false);
+  for (const cir of enemyHitCircles(e)) {
+    if (hitBulletTarget(b, cir.x, cir.y, cir.r, false)) return true;
+  }
+  return false;
 }
 
 function beginSoloWave(room, wave, opts) {
@@ -3988,7 +4020,9 @@ function resolvePlayerShotEnemyHits(room) {
       if (!e || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
       const hit = enemyUsesRectHit(e)
         ? circleHitsEnemyRect(shot.x, shot.y, shot.r || 10, e)
-        : circleVsAsteroidPoly({ x: e.x, y: e.y, r: e.r || 10 }, shot);
+        : enemyUsesDualHit(e)
+          ? enemyHitCircles(e).some((cir) => circleVsAsteroidPoly(cir, shot))
+          : circleVsAsteroidPoly({ x: e.x, y: e.y, r: e.r || 10 }, shot);
       if (!hit) continue;
       // Damage only — leave velocities alone (no push / stun).
       shot.enemyHitCd = 6;
@@ -4271,8 +4305,12 @@ function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist) {
     if (enemyUsesRectHit(e)) {
       hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist);
     } else {
-      const er = e.r || ENEMY_R.common || 10;
-      hit = raycastCircleToroidal(ox, oy, dx, dy, e.x, e.y, er, maxDist);
+      let bestHit = null;
+      for (const cir of enemyHitCircles(e)) {
+        const h = raycastCircleToroidal(ox, oy, dx, dy, cir.x, cir.y, cir.r, maxDist);
+        if (h && (!bestHit || h.t < bestHit.t)) bestHit = h;
+      }
+      hit = bestHit;
     }
     if (!hit) continue;
     if (!best || hit.t < best.t) {
@@ -4745,13 +4783,19 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
         if (t != null) hit = { t, x: ox + dx * t, y: oy + dy * t };
       }
     } else {
-      const er = e.r || ENEMY_R.common || 10;
-      if (toroidal) {
-        hit = raycastCircleToroidal(ox, oy, dx, dy, e.x, e.y, er, maxDist);
-      } else {
-        const t = raycastCircle(ox, oy, dx, dy, e.x, e.y, er);
-        if (t != null && t <= maxDist) hit = { t, x: ox + dx * t, y: oy + dy * t };
+      let bestHit = null;
+      for (const cir of enemyHitCircles(e)) {
+        if (toroidal) {
+          const h = raycastCircleToroidal(ox, oy, dx, dy, cir.x, cir.y, cir.r, maxDist);
+          if (h && (!bestHit || h.t < bestHit.t)) bestHit = h;
+        } else {
+          const t = raycastCircle(ox, oy, dx, dy, cir.x, cir.y, cir.r);
+          if (t != null && t <= maxDist && (!bestHit || t < bestHit.t)) {
+            bestHit = { t, x: ox + dx * t, y: oy + dy * t };
+          }
+        }
       }
+      hit = bestHit;
     }
     if (hit) softHits.push({ t: hit.t, x: hit.x, y: hit.y, kind: 'enemy', target: e });
   }

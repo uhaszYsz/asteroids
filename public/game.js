@@ -15753,13 +15753,20 @@ function localLaserSegments(ox, oy, dirX, dirY, maxDist) {
     let t;
     if (enemyUsesRectHit(e)) {
       t = raycastEnemyRectToroidal(ox, oy, dirX, dirY, p, p.angle, best);
+      if (t != null && t < best) {
+        best = t;
+        hitX = ox + dirX * t;
+        hitY = oy + dirY * t;
+      }
     } else {
-      t = raycastCircleToroidal(ox, oy, dirX, dirY, p.x, p.y, enemyHitR(e), best);
-    }
-    if (t != null && t < best) {
-      best = t;
-      hitX = ox + dirX * t;
-      hitY = oy + dirY * t;
+      for (const cir of enemyHitCirclesAt(p.x, p.y, p.angle, e)) {
+        t = raycastCircleToroidal(ox, oy, dirX, dirY, cir.x, cir.y, cir.r, best);
+        if (t != null && t < best) {
+          best = t;
+          hitX = ox + dirX * t;
+          hitY = oy + dirY * t;
+        }
+      }
     }
   }
   for (const a of asteroids.values()) {
@@ -16212,6 +16219,10 @@ const ENEMY_UFO_HIT_LEN = 84;
 const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
+/** Worm: two equal hit circles along facing; centers ±R so they touch midbody. */
+const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
+const ENEMY_WORM_HIT_OFFSET = ENEMY_WORM_HIT_R;
+ENEMY_R.worm = ENEMY_WORM_HIT_OFFSET + ENEMY_WORM_HIT_R;
 
 function enemyWanderSpeedOf(e) {
   const s = e && +e.speed;
@@ -16243,6 +16254,25 @@ function enemyHitR(e) {
 
 function enemyUsesRectHit(e) {
   return !!(e && e.kind === 'ufo');
+}
+
+function enemyUsesDualHit(e) {
+  return !!(e && e.kind === 'worm');
+}
+
+/** Match server enemyHitCircles (pose may be predicted). */
+function enemyHitCirclesAt(x, y, angle, e) {
+  if (enemyUsesDualHit(e)) {
+    const c = Math.cos(angle || 0);
+    const s = Math.sin(angle || 0);
+    const o = ENEMY_WORM_HIT_OFFSET;
+    const r = ENEMY_WORM_HIT_R;
+    return [
+      { x: x + c * o, y: y + s * o, r },
+      { x: x - c * o, y: y - s * o, r }
+    ];
+  }
+  return [{ x, y, r: enemyHitR(e) }];
 }
 
 /** Ray vs oriented AABB in local space; returns t or null. */
@@ -17240,7 +17270,11 @@ function drawEnemies(dt) {
     }
     if (showHit) {
       if (enemyUsesRectHit(e)) drawHitRect(x, y, p.angle, ENEMY_UFO_HIT_LEN, ENEMY_UFO_HIT_WID, COL.debug);
-      else drawHitCircle(x, y, enemyHitR(e), COL.debug);
+      else {
+        for (const cir of enemyHitCirclesAt(x, y, p.angle, e)) {
+          drawHitCircle(cir.x, cir.y, cir.r, COL.debug);
+        }
+      }
     }
   }
   drawEnemyCommonCharges();
@@ -18917,7 +18951,7 @@ function drawBulletHitboxes() {
     if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) continue;
     const r = bulletHitDebugRadius(b);
     if (!(r > 0.05)) continue;
-    drawFilledPoly(circleVerts(p.x, p.y, r, 18), red, 1);
+    drawFilledPoly(circleVerts(p.x, p.y, r, 18), red, 0.7);
   }
 }
 

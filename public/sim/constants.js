@@ -392,6 +392,13 @@ const ENEMY_UFO_HIT_LEN = 84;
 const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
+/**
+ * Worm: two equal hit circles along facing. Centers at ±R so they touch at midbody.
+ * Broadphase e.r covers both from center (offset + radius = 2R).
+ */
+const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
+const ENEMY_WORM_HIT_OFFSET = ENEMY_WORM_HIT_R;
+ENEMY_R.worm = ENEMY_WORM_HIT_OFFSET + ENEMY_WORM_HIT_R;
 const ENEMY_HP = {
   common: 95,
   ufo: 300,
