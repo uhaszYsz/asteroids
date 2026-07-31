@@ -16304,9 +16304,9 @@ function drawThrustBeams() {
   // Thruster melee no longer draws a ray (see emitThrustFx melee tint).
 }
 
-/** 10 Hz light pulse while any laser beam is active. */
+/** 3 Hz light pulse while any laser beam is active. */
 function laserPulse01() {
-  return 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * 10 * Math.PI * 2);
+  return 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * 3 * Math.PI * 2);
 }
 
 /** Dim cyan → hot white-cyan (sphere-style emission pulse). */
