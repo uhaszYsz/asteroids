@@ -10621,7 +10621,7 @@ const SPRITE_SHIP_PX_SCALE = 1;
  *  sizeScale: extra multiplier (default 1). Plane size follows sprite fw×fh.
  *  opts.tube: also draw two mirrored under-planes (4 faces) for a full tube/worm.
  *  opts.flat: single z=0 quad (full sprite) — no roof fold.
- *  opts.hexDome: low-poly hex bulge — 6 tris, rim z=0, center z=domeZ (default 14).
+ *  opts.hexDome: low-poly hex bulge — 6 tris, rim z=0, center z=domeZ (default 22).
  *  opts.tiltXDeg: fixed roll around +X (degrees).
  *  opts.yawSpinDegPerTick: continuous yaw around Z (degrees per sim tick).
  *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
@@ -10686,7 +10686,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     // (inscribed radius = max half-extents; flats don't clip the disc).
     const spriteR = Math.max(halfL, halfW);
     const R = spriteR / Math.cos(Math.PI / 6);
-    const domeZ = (opts.domeZ != null && Number.isFinite(+opts.domeZ)) ? +opts.domeZ : 14;
+    const domeZ = (opts.domeZ != null && Number.isFinite(+opts.domeZ)) ? +opts.domeZ : 22;
     const uHalf = (uv.u1 - uv.u0) * 0.5;
     const vHalf = (uv.v1 - uv.v0) * 0.5;
     // Same mapping as the flat sprite rect — not radial-to-hex (that hex-cuts the art).
@@ -16646,7 +16646,7 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
-      { hexDome: true, domeZ: 14, tiltXDeg: 20, yawSpinDegPerTick: 4 }
+      { hexDome: true, domeZ: 22, tiltXDeg: 20, yawSpinDegPerTick: 4 }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
