@@ -70,11 +70,18 @@
       setBestWaves() { return 0; },
       setBestWavesDuo() { return 0; },
       setColors() { return { ok: 0, err: 'offline' }; },
+      setShip() { return { ok: 0, err: 'offline' }; },
       renameUser() { return { ok: 1 }; },
       listFriends() { return []; },
       addFriend() { return { ok: 0, err: 'offline' }; },
       removeFriend() { return { ok: 0, err: 'offline' }; },
-      listLeaderboard() { return []; }
+      listLeaderboard() { return []; },
+      normalizeShipId(raw) {
+        const s = String(raw == null ? '' : raw).trim().slice(0, 32);
+        if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(s)) return null;
+        return s;
+      },
+      DEFAULT_SHIP_ID: 'tiny_1'
     };
   }
 
@@ -309,7 +316,7 @@
 
       const texts = [];
       for (let i = 0; i < SIM_PARTS.length; i++) {
-        const url = simBase + SIM_PARTS[i] + '?v=2';
+        const url = simBase + SIM_PARTS[i] + '?v=3';
         const res = await fetch(url, { cache: 'no-cache' });
         if (!res.ok) throw new Error('Failed to load ' + SIM_PARTS[i] + ' (' + res.status + ')');
         texts.push(await res.text());

@@ -2112,10 +2112,12 @@ function spawnPlayer(id, name, colors, room) {
   const w = effectiveWeapon({ weapon: wpn, weaponLevels: levels }, wpn);
   const pc = (colors && accountsDb.normalizeColor(colors.playerColor)) || accountsDb.DEFAULT_PLAYER_COLOR;
   const sc = (colors && accountsDb.normalizeColor(colors.shootColor)) || accountsDb.DEFAULT_SHOOT_COLOR;
+  const sid = (colors && accountsDb.normalizeShipId(colors.shipId)) || accountsDb.DEFAULT_SHIP_ID;
   return {
     id, name: sanitizeName(name) || defaultCallsign(id),
     playerColor: pc,
     shootColor: sc,
+    shipId: sid,
     x: pose.x, y: pose.y, vx: 0, vy: 0, angle: pose.angle, hp: MAX_HP,
     prevX: pose.x, prevY: pose.y,
     av: 0, turnDecelStep: 0, turnDecelLeft: 0, turnDecelRev: 0,

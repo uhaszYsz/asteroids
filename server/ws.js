@@ -247,7 +247,7 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.t === 'setColors') {
-      const result = handleSetColors(ws, msg.playerColor, msg.shootColor);
+      const result = handleSetColors(ws, msg.playerColor, msg.shootColor, msg.shipId);
       send(ws, Object.assign({ t: 'setColors' }, result, sessionFields(ws)));
       return;
     }

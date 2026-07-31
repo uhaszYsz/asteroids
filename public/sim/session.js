@@ -41,6 +41,7 @@ function sessionFields(ws) {
     hasSnapshot: !!ws.soloSnapshot,
     playerColor: ws.playerColor || accountsDb.DEFAULT_PLAYER_COLOR,
     shootColor: ws.shootColor || accountsDb.DEFAULT_SHOOT_COLOR,
+    shipId: ws.shipId || accountsDb.DEFAULT_SHIP_ID,
     friends
   };
 }
@@ -64,6 +65,7 @@ function initGuestSession(ws) {
   ws.queueMode = null;
   ws.playerColor = accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = accountsDb.DEFAULT_SHOOT_COLOR;
+  ws.shipId = accountsDb.DEFAULT_SHIP_ID;
   ws.displayName = randomGuestName();
   ws.teamMate = null;
   ws.pendingTeamFrom = null;
@@ -76,6 +78,7 @@ function applyColorsToRoom(ws) {
   if (!p || p.bot) return;
   p.playerColor = ws.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
   p.shootColor = ws.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
+  p.shipId = ws.shipId || accountsDb.DEFAULT_SHIP_ID;
   broadcastPlayerColors(room);
 }
 
@@ -86,7 +89,8 @@ function packPlayerColors(room) {
     rows.push([
       p.id,
       p.playerColor || accountsDb.DEFAULT_PLAYER_COLOR,
-      p.shootColor || accountsDb.DEFAULT_SHOOT_COLOR
+      p.shootColor || accountsDb.DEFAULT_SHOOT_COLOR,
+      p.shipId || accountsDb.DEFAULT_SHIP_ID
     ]);
   }
   return rows;
@@ -97,18 +101,33 @@ function broadcastPlayerColors(room) {
   roomBroadcast(room, { t: 'colors', colors: packPlayerColors(room) });
 }
 
-function handleSetColors(ws, playerColor, shootColor) {
+function handleSetColors(ws, playerColor, shootColor, shipId) {
   const pc = accountsDb.normalizeColor(playerColor);
   const sc = accountsDb.normalizeColor(shootColor);
   if (!pc || !sc) return { ok: 0, err: 'color' };
   ws.playerColor = pc;
   ws.shootColor = sc;
+  let sid = null;
+  if (shipId != null && String(shipId).length) {
+    sid = accountsDb.normalizeShipId(shipId);
+    if (!sid) return { ok: 0, err: 'ship' };
+    ws.shipId = sid;
+  }
   if (ws.registered && ws.accountKey) {
     const saved = accountsDb.setColors(ws.accountKey, pc, sc);
     if (!saved.ok) return { ok: 0, err: saved.err || 'fail' };
+    if (sid) {
+      const shipSaved = accountsDb.setShip(ws.accountKey, sid);
+      if (!shipSaved.ok) return { ok: 0, err: shipSaved.err || 'fail' };
+    }
   }
   applyColorsToRoom(ws);
-  return { ok: 1, playerColor: pc, shootColor: sc };
+  return {
+    ok: 1,
+    playerColor: pc,
+    shootColor: sc,
+    shipId: ws.shipId || accountsDb.DEFAULT_SHIP_ID
+  };
 }
 
 function applyDisplayNameToRoom(ws, name) {
@@ -162,6 +181,7 @@ async function handleSteamLogin(ws, ticketHex, ticketIdentity, personaName) {
   ws.bestWavesDuo = u.bestWavesDuo | 0;
   ws.playerColor = u.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = u.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
+  ws.shipId = accountsDb.normalizeShipId(u.shipId) || accountsDb.DEFAULT_SHIP_ID;
   applyDisplayNameToRoom(ws, ws.displayName);
   applyColorsToRoom(ws);
   return { ok: 1, created: upserted.created ? 1 : 0 };
@@ -188,10 +208,12 @@ function handleRegister(ws, pin, pinConfirm, rawName) {
   ws.matchesWon = 0;
   ws.bestWaves = 0;
   ws.bestWavesDuo = 0;
-  // Keep current session colors on the new account.
+  // Keep current session colors / ship on the new account.
   ws.playerColor = accountsDb.normalizeColor(ws.playerColor) || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = accountsDb.normalizeColor(ws.shootColor) || accountsDb.DEFAULT_SHOOT_COLOR;
+  ws.shipId = accountsDb.normalizeShipId(ws.shipId) || accountsDb.DEFAULT_SHIP_ID;
   accountsDb.setColors(name, ws.playerColor, ws.shootColor);
+  accountsDb.setShip(name, ws.shipId);
   applyDisplayNameToRoom(ws, name);
   applyColorsToRoom(ws);
   return { ok: 1 };
@@ -211,6 +233,7 @@ function handleLogin(ws, rawName, pin) {
   ws.bestWavesDuo = verified.user.bestWavesDuo | 0;
   ws.playerColor = verified.user.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = verified.user.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
+  ws.shipId = accountsDb.normalizeShipId(verified.user.shipId) || accountsDb.DEFAULT_SHIP_ID;
   applyDisplayNameToRoom(ws, name);
   applyColorsToRoom(ws);
   return { ok: 1 };

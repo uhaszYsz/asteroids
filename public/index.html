@@ -345,8 +345,30 @@
     #account-panel .ac-hex {
       color: #9ec8e8; font-size: 12px; letter-spacing: 0.06em;
     }
-    #account-panel #account-colors-btn {
-      margin-top: 2px; margin-bottom: 8px;
+    #account-panel .ac-ship {
+      margin: 0 0 14px; padding-top: 8px;
+      border-top: 1px solid rgba(100, 160, 120, 0.2);
+      display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+    }
+    #account-panel #account-ship-preview {
+      width: 100%; height: 140px;
+      display: block;
+      border: 1px solid rgba(100, 160, 200, 0.35);
+      background: #061018;
+      image-rendering: pixelated;
+    }
+    #account-panel #account-ship-change-btn {
+      align-self: flex-start;
+    }
+    #account-panel .ac-confirm {
+      width: 100%; margin-top: 4px;
+      border-color: rgba(160, 220, 100, 0.55) !important;
+      background: rgba(40, 70, 35, 0.95) !important;
+      color: #e8ffd0 !important;
+      letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    #account-panel .ac-confirm:hover {
+      background: rgba(55, 95, 45, 0.98) !important;
     }
     #account-panel .ac-actions {
       display: flex; flex-wrap: wrap; gap: 8px;
@@ -355,6 +377,59 @@
       min-height: 16px; margin: 0 0 10px; font-size: 11px; color: #ff8aaa;
     }
     #account-panel .ac-msg.ok, #pin-modal .ac-msg.ok { color: #8dffb0; }
+    #ship-picker-panel {
+      display: none; position: fixed; inset: 0; z-index: 8;
+      align-items: center; justify-content: center;
+      background: rgba(4, 6, 12, 0.78);
+      pointer-events: auto;
+    }
+    #ship-picker-panel.open { display: flex; }
+    #ship-picker-panel .ship-picker-card {
+      width: min(720px, calc(100vw - 28px));
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      padding: 22px 22px 18px;
+      background: rgba(10, 14, 22, 0.97);
+      border: 1px solid rgba(100, 180, 220, 0.4);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      color: #c8e0f0;
+      font: 14px Consolas, "Courier New", monospace;
+    }
+    #ship-picker-panel .sp-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; margin-bottom: 14px;
+    }
+    #ship-picker-panel .sp-title {
+      font-size: 16px; letter-spacing: 0.12em; text-transform: uppercase;
+      color: #7ee8ff;
+    }
+    #ship-picker-panel .sp-head button {
+      border: 1px solid rgba(100, 180, 220, 0.4);
+      background: rgba(30, 50, 70, 0.9);
+      color: #d8f0ff; font: inherit; padding: 7px 14px; cursor: pointer;
+    }
+    #ship-picker-panel .sp-head button:hover { background: rgba(40, 70, 95, 0.95); }
+    #ship-picker-panel .ship-picker-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+      gap: 10px;
+    }
+    #ship-picker-panel .ship-pick {
+      appearance: none; border: 1px solid rgba(100, 160, 200, 0.35);
+      background: #061018; padding: 0; cursor: pointer;
+      width: 100%; aspect-ratio: 1; overflow: hidden;
+    }
+    #ship-picker-panel .ship-pick:hover {
+      border-color: rgba(126, 232, 255, 0.7);
+    }
+    #ship-picker-panel .ship-pick.active {
+      border-color: #8dffb0;
+      box-shadow: 0 0 0 1px rgba(141, 255, 176, 0.45);
+    }
+    #ship-picker-panel .ship-pick canvas {
+      width: 100%; height: 100%; display: block;
+      image-rendering: pixelated;
+    }
     #settings-panel .sp-check {
       display: flex; align-items: flex-start; gap: 10px;
       margin: 4px 0 14px; cursor: pointer; color: #c8e4f4; font-size: 13px;
@@ -369,14 +444,16 @@
     }
     #settings-panel .sp-card button,
     #account-panel .sp-card button,
-    #pin-modal .sp-card button {
+    #pin-modal .sp-card button,
+    #ship-picker-panel .sp-card button {
       border: 1px solid rgba(100, 180, 220, 0.4);
       background: rgba(30, 50, 70, 0.9);
       color: #d8f0ff; font: inherit; padding: 7px 14px; cursor: pointer;
     }
     #settings-panel .sp-card button:hover,
     #account-panel .sp-card button:hover,
-    #pin-modal .sp-card button:hover { background: rgba(40, 70, 95, 0.95); }
+    #pin-modal .sp-card button:hover,
+    #ship-picker-panel .sp-card button:hover { background: rgba(40, 70, 95, 0.95); }
     #account-panel .ac-primary, #pin-modal .ac-primary {
       border-color: rgba(160, 220, 100, 0.5);
       background: rgba(40, 70, 35, 0.95);
@@ -1884,26 +1961,6 @@
       <option value="2">1680 × 960</option>
       <option value="3">2520 × 1440</option>
     </select>
-    <label class="sp-check" for="settings-dyn-light">
-      <input type="checkbox" id="settings-dyn-light" checked />
-      <span>Dynamic grid lighting
-        <span class="sp-check-sub">Flashlight cone on the grid; asteroids cast shadows</span>
-      </span>
-    </label>
-    <label class="sp-label" for="settings-bake-quality">Grid warp quality</label>
-    <select id="settings-bake-quality">
-      <option value="5">5 — fastest</option>
-      <option value="6">6</option>
-      <option value="7">7</option>
-      <option value="8" selected>8 — default</option>
-      <option value="9">9</option>
-      <option value="10">10</option>
-      <option value="11">11</option>
-      <option value="12">12</option>
-      <option value="13">13</option>
-      <option value="14">14 — finest</option>
-    </select>
-    <p class="sp-hint">Higher = smoother grid distortion, more GPU/CPU. Changing rebuilds the warp mesh.</p>
   </div>
 </div>
 <div id="account-panel" aria-hidden="true">
@@ -1932,13 +1989,27 @@
         <input id="account-shoot-color" type="color" value="#59F2FF" />
         <span id="account-shoot-color-hex" class="ac-hex">#59F2FF</span>
       </div>
-      <button type="button" id="account-colors-btn">Save colors</button>
+    </div>
+    <div class="ac-ship">
+      <label class="sp-label">Ship</label>
+      <canvas id="account-ship-preview" width="160" height="120" aria-label="Ship preview"></canvas>
+      <button type="button" id="account-ship-change-btn">Change</button>
     </div>
     <div class="ac-msg" id="account-msg"></div>
     <div class="ac-actions">
       <button type="button" class="ac-primary" id="account-register-btn">Register</button>
       <button type="button" id="account-login-btn">Login</button>
     </div>
+    <button type="button" class="ac-confirm" id="account-confirm-btn">Confirm</button>
+  </div>
+</div>
+<div id="ship-picker-panel" aria-hidden="true">
+  <div class="sp-card ship-picker-card">
+    <div class="sp-head">
+      <div class="sp-title">Select Ship</div>
+      <button type="button" id="ship-picker-close-btn">Close</button>
+    </div>
+    <div class="ship-picker-grid" id="ship-picker-grid"></div>
   </div>
 </div>
 <div id="pin-modal" aria-hidden="true">
@@ -2068,7 +2139,7 @@
 <script src="lib/bassoonplayer.js"></script>
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
-<script src="sim/local-server.js?v=2"></script>
-<script src="game.js?v=693"></script>
+<script src="sim/local-server.js?v=3"></script>
+<script src="game.js?v=694"></script>
 </body>
 </html>

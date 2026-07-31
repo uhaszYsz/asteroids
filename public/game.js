@@ -1504,7 +1504,8 @@ function setMyColors(playerHex, shootHex) {
       player: myPlayerColorRgb.slice(),
       shoot: myShootColorRgb.slice(),
       playerHex: pc,
-      shootHex: sc
+      shootHex: sc,
+      shipId: selectedShipMeshId
     });
   }
   invalidateGridBake();
@@ -1517,14 +1518,16 @@ function applyPlayerColors(rows) {
     const id = row[0] | 0;
     const pc = normalizeColorHex(row[1]) || DEFAULT_PLAYER_COLOR_HEX;
     const sc = normalizeColorHex(row[2]) || DEFAULT_SHOOT_COLOR_HEX;
+    const sid = normalizeClientShipId(row[3]);
     const pr = hexToRgb01(pc) || COL.self.slice();
     const sr = hexToRgb01(sc) || COL.laser.slice();
-    playerColors.set(id, { player: pr, shoot: sr, playerHex: pc, shootHex: sc });
+    playerColors.set(id, { player: pr, shoot: sr, playerHex: pc, shootHex: sc, shipId: sid });
     if (id === myId) {
       myPlayerColorHex = pc;
       myShootColorHex = sc;
       myPlayerColorRgb = pr.slice();
       myShootColorRgb = sr.slice();
+      if (sid) setActiveShipMesh(sid);
       syncAccountColorInputs();
     }
   }
@@ -9723,7 +9726,7 @@ const ARROW_SHIP_DEF = {
 };
 const SHIP_MESHES = [scaleShipMeshDef(ARROW_SHIP_DEF)];
 
-let selectedShipMeshId = 'arrow';
+let selectedShipMeshId = 'tiny_1';
 try {
   const saved = localStorage.getItem(SHIP_MESH_LS_KEY);
   if (saved) selectedShipMeshId = saved;
@@ -10174,12 +10177,22 @@ function tinyShipFrameUV(spec, sheetW, sheetH, stateName, tSec) {
 
 try {
   if (selectedShipMeshId && !SHIP_OPTIONS.some((m) => m.id === selectedShipMeshId)) {
-    selectedShipMeshId = 'arrow';
+    selectedShipMeshId = 'tiny_1';
   }
 } catch (_) { /* ignore */ }
 
 function getShipOptionById(id) {
   return SHIP_OPTIONS.find((m) => m.id === id) || SHIP_OPTIONS[0];
+}
+function normalizeClientShipId(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (s && SHIP_OPTIONS.some((m) => m.id === s)) return s;
+  return 'tiny_1';
+}
+function shipIdForOwner(ownerId) {
+  if (ownerId === myId) return selectedShipMeshId;
+  const c = playerColors.get(ownerId);
+  return (c && c.shipId) || 'tiny_1';
 }
 function getActiveShipOption() {
   return getShipOptionById(selectedShipMeshId);
@@ -10198,6 +10211,11 @@ function setActiveShipMesh(id) {
   selectedShipMeshId = m.id;
   try { localStorage.setItem(SHIP_MESH_LS_KEY, m.id); } catch (_) { /* ignore */ }
   if (typeof syncShipMeshUi === 'function') syncShipMeshUi();
+  if (myId != null) {
+    const cur = playerColors.get(myId);
+    if (cur) cur.shipId = m.id;
+    else playerColors.set(myId, { shipId: m.id });
+  }
 }
 
 /** Default Arrow mesh — rockets / fallback still use this tetrahedron. */
@@ -10609,12 +10627,12 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
 }
 
 function drawShip3D(x, y, angle, av, color, id, dt, moving) {
-  const opt = getActiveShipOption();
+  const opt = getShipOptionById(shipIdForOwner(id));
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color);
     return;
   }
-  const mesh = getActiveShipMesh();
+  const mesh = getShipMeshById(shipIdForOwner(id));
   const bank = shipBankSmoothed(id, av, dt);
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank);
 
@@ -11886,8 +11904,8 @@ const pauseLeaveBtn = document.getElementById('pause-leave-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const settingsPanelEl = document.getElementById('settings-panel');
 const settingsResEl = document.getElementById('settings-resolution');
-const settingsDynLightEl = document.getElementById('settings-dyn-light');
-const settingsBakeQualityEl = document.getElementById('settings-bake-quality');
+const settingsDynLightEl = null;
+const settingsBakeQualityEl = null;
 const accountBtn = document.getElementById('account-btn');
 const leaderboardBtn = document.getElementById('leaderboard-btn');
 const leaderboardPanelEl = document.getElementById('leaderboard-panel');
@@ -11946,7 +11964,12 @@ const accountPlayerColorEl = document.getElementById('account-player-color');
 const accountShootColorEl = document.getElementById('account-shoot-color');
 const accountPlayerColorHexEl = document.getElementById('account-player-color-hex');
 const accountShootColorHexEl = document.getElementById('account-shoot-color-hex');
-const accountColorsBtn = document.getElementById('account-colors-btn');
+const accountConfirmBtn = document.getElementById('account-confirm-btn');
+const accountShipPreviewEl = document.getElementById('account-ship-preview');
+const accountShipChangeBtn = document.getElementById('account-ship-change-btn');
+const shipPickerPanelEl = document.getElementById('ship-picker-panel');
+const shipPickerGridEl = document.getElementById('ship-picker-grid');
+const shipPickerCloseBtn = document.getElementById('ship-picker-close-btn');
 const pinModalEl = document.getElementById('pin-modal');
 const pinModalTitleEl = document.getElementById('pin-modal-title');
 const pinModalHintEl = document.getElementById('pin-modal-hint');
@@ -11962,8 +11985,12 @@ let accountSession = {
   hasSnapshot: false,
   playerColor: DEFAULT_PLAYER_COLOR_HEX,
   shootColor: DEFAULT_SHOOT_COLOR_HEX,
+  shipId: 'tiny_1',
   friends: []
 };
+/** Draft ship while account panel is open (committed on Confirm). */
+let accountDraftShipId = 'tiny_1';
+const accountShipPickerSlots = [];
 let pinModalMode = 'register';
 let soloSnapshot = null;
 let selectedPlayMode = null;
@@ -12431,6 +12458,7 @@ function accountErrText(err) {
   switch (String(err || '')) {
     case 'name': return 'Invalid callsign.';
     case 'color': return 'Invalid color.';
+    case 'ship': return 'Invalid ship.';
     case 'taken': return 'That callsign is taken.';
     case 'pin': return 'PIN must be exactly 4 digits.';
     case 'mismatch': return 'PINs do not match.';
@@ -12516,11 +12544,17 @@ function applyAccountSession(msg) {
     hasSnapshot: !!(msg.hasSnapshot || soloSnapshot),
     playerColor: normalizeColorHex(msg.playerColor) || accountSession.playerColor || DEFAULT_PLAYER_COLOR_HEX,
     shootColor: normalizeColorHex(msg.shootColor) || accountSession.shootColor || DEFAULT_SHOOT_COLOR_HEX,
+    shipId: normalizeClientShipId(msg.shipId != null ? msg.shipId : accountSession.shipId),
     friends
   };
   lbFriendsSet = new Set(friends);
   setMyColors(accountSession.playerColor, accountSession.shootColor);
+  if (accountSession.shipId) {
+    setActiveShipMesh(accountSession.shipId);
+    accountDraftShipId = accountSession.shipId;
+  }
   syncAccountColorInputs();
+  redrawAccountShipPreview(true);
   if (accountNameEl && document.activeElement !== accountNameEl) {
     accountNameEl.value = accountSession.name || '';
   }
@@ -12728,14 +12762,19 @@ function openAccountPanel() {
   closePinModal();
   closeModePanel();
   closeLeaderboardPanel();
+  closeShipPickerPanel();
   setAccountMsg('');
   if (accountNameEl) accountNameEl.value = accountSession.name || '';
+  accountDraftShipId = normalizeClientShipId(accountSession.shipId || selectedShipMeshId);
+  syncAccountColorInputs();
   accountPanelEl.classList.add('open');
   accountPanelEl.setAttribute('aria-hidden', 'false');
+  redrawAccountShipPreview(true);
 }
 
 function closeAccountPanel() {
   if (!accountPanelEl) return;
+  closeShipPickerPanel();
   accountPanelEl.classList.remove('open');
   accountPanelEl.setAttribute('aria-hidden', 'true');
 }
@@ -12770,19 +12809,122 @@ function closePinModal() {
   pinModalEl.setAttribute('aria-hidden', 'true');
 }
 
+function accountNetSocket() {
+  if (remoteWs && remoteWs.readyState === 1) return remoteWs;
+  if (ws && !ws.__local && ws.readyState === 1) return ws;
+  return (ws && ws.readyState === 1) ? ws : null;
+}
+
 function sendAccountNameChange() {
-  if (!ws || ws.readyState !== 1) return;
+  const sock = accountNetSocket();
+  if (!sock) return;
   const name = accountNameEl ? String(accountNameEl.value || '').trim() : '';
   setAccountMsg('');
-  ws.send(JSON.stringify({ t: 'setName', name }));
+  sock.send(JSON.stringify({ t: 'setName', name }));
 }
 
 function sendAccountColors() {
-  if (!ws || ws.readyState !== 1) return;
+  const sock = accountNetSocket();
+  if (!sock) return;
   const playerColor = accountPlayerColorEl ? accountPlayerColorEl.value : myPlayerColorHex;
   const shootColor = accountShootColorEl ? accountShootColorEl.value : myShootColorHex;
+  const shipId = normalizeClientShipId(accountDraftShipId || selectedShipMeshId);
   setAccountMsg('');
-  ws.send(JSON.stringify({ t: 'setColors', playerColor, shootColor }));
+  setActiveShipMesh(shipId);
+  sock.send(JSON.stringify({ t: 'setColors', playerColor, shootColor, shipId }));
+}
+
+function redrawAccountShipPreview(force) {
+  if (!accountShipPreviewEl) return;
+  if (!force && !(accountPanelEl && accountPanelEl.classList.contains('open'))) return;
+  const ctx = accountShipPreviewEl.getContext('2d');
+  if (!ctx) return;
+  const w = accountShipPreviewEl.width | 0;
+  const h = accountShipPreviewEl.height | 0;
+  const opt = getShipOptionById(accountDraftShipId || selectedShipMeshId);
+  const t = performance.now() * 0.001;
+  drawShipMeshPreview(ctx, opt, w, h, t);
+  // Color outline frame so the preview reads like the in-game tinted ship.
+  const hex = normalizeColorHex(accountPlayerColorEl ? accountPlayerColorEl.value : myPlayerColorHex)
+    || DEFAULT_PLAYER_COLOR_HEX;
+  ctx.save();
+  ctx.strokeStyle = hex;
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(1, 1, w - 2, h - 2);
+  ctx.restore();
+}
+
+function openShipPickerPanel() {
+  if (!shipPickerPanelEl) return;
+  ensureShipPickerGrid();
+  syncShipPickerActive();
+  updateAccountShipPickerPreviews(true);
+  shipPickerPanelEl.classList.add('open');
+  shipPickerPanelEl.setAttribute('aria-hidden', 'false');
+}
+
+function closeShipPickerPanel() {
+  if (!shipPickerPanelEl) return;
+  shipPickerPanelEl.classList.remove('open');
+  shipPickerPanelEl.setAttribute('aria-hidden', 'true');
+}
+
+function ensureShipPickerGrid() {
+  if (!shipPickerGridEl || shipPickerGridEl.childElementCount) return;
+  accountShipPickerSlots.length = 0;
+  const tinies = SHIP_OPTIONS.filter((m) => m.source === 'tiny');
+  for (const m of tinies) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ship-pick';
+    btn.setAttribute('data-ship', m.id);
+    btn.setAttribute('aria-label', 'Ship');
+    const canvas = document.createElement('canvas');
+    canvas.width = 96;
+    canvas.height = 96;
+    btn.appendChild(canvas);
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      accountDraftShipId = m.id;
+      syncShipPickerActive();
+      redrawAccountShipPreview(true);
+      closeShipPickerPanel();
+    });
+    shipPickerGridEl.appendChild(btn);
+    accountShipPickerSlots.push({ mesh: m, canvas, ctx: canvas.getContext('2d') });
+  }
+}
+
+function syncShipPickerActive() {
+  if (!shipPickerGridEl) return;
+  const cur = accountDraftShipId || selectedShipMeshId;
+  shipPickerGridEl.querySelectorAll('button[data-ship]').forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-ship') === cur);
+  });
+}
+
+function updateAccountShipPickerPreviews(force) {
+  if (!accountShipPickerSlots.length) return;
+  if (!force && !(shipPickerPanelEl && shipPickerPanelEl.classList.contains('open'))) return;
+  const t = performance.now() * 0.001;
+  let pending = false;
+  for (let i = 0; i < accountShipPickerSlots.length; i++) {
+    const slot = accountShipPickerSlots[i];
+    if (!slot || !slot.ctx) continue;
+    if (slot.mesh && slot.mesh.sprite) {
+      const ent = spriteShipTexById.get(slot.mesh.sprite.id);
+      if (!ent || !ent.ready) {
+        pending = true;
+        loadSpriteShipTexture(slot.mesh.sprite);
+      }
+    }
+    drawShipMeshPreview(slot.ctx, slot.mesh, slot.canvas.width, slot.canvas.height, t);
+  }
+  if (pending) {
+    // Textures still loading — try again shortly.
+    setTimeout(() => updateAccountShipPickerPreviews(true), 120);
+  }
 }
 
 function submitPinModal() {
@@ -12835,16 +12977,34 @@ if (accountChangeBtn) {
     sendAccountNameChange();
   });
 }
-if (accountColorsBtn) {
-  accountColorsBtn.addEventListener('click', (e) => {
+if (accountConfirmBtn) {
+  accountConfirmBtn.addEventListener('click', (e) => {
     e.preventDefault();
     sendAccountColors();
+  });
+}
+if (accountShipChangeBtn) {
+  accountShipChangeBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    openShipPickerPanel();
+  });
+}
+if (shipPickerCloseBtn) {
+  shipPickerCloseBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    closeShipPickerPanel();
+  });
+}
+if (shipPickerPanelEl) {
+  shipPickerPanelEl.addEventListener('click', (e) => {
+    if (e.target === shipPickerPanelEl) closeShipPickerPanel();
   });
 }
 if (accountPlayerColorEl) {
   accountPlayerColorEl.addEventListener('input', () => {
     const hex = normalizeColorHex(accountPlayerColorEl.value) || DEFAULT_PLAYER_COLOR_HEX;
     if (accountPlayerColorHexEl) accountPlayerColorHexEl.textContent = hex;
+    redrawAccountShipPreview(true);
   });
 }
 if (accountShootColorEl) {
@@ -18118,8 +18278,10 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'setColors') {
       applyAccountSession(msg);
-      if (msg.ok) setAccountMsg('Colors saved.', true);
-      else setAccountMsg(msg.err === 'color' ? 'Invalid color.' : accountErrText(msg.err), false);
+      if (msg.ok) setAccountMsg('Saved.', true);
+      else setAccountMsg(msg.err === 'color' ? 'Invalid color.'
+        : msg.err === 'ship' ? 'Invalid ship.'
+        : accountErrText(msg.err), false);
       return;
     }
     if (msg.t === 'colors' && inGame) {
@@ -21349,6 +21511,12 @@ function frame(now) {
   fpsAccumMs -= LOCK_FRAME_MS;
 
   updateFpsHud(now);
+  if (accountPanelEl && accountPanelEl.classList.contains('open')) {
+    redrawAccountShipPreview(false);
+  }
+  if (shipPickerPanelEl && shipPickerPanelEl.classList.contains('open')) {
+    updateAccountShipPickerPreviews(false);
+  }
   if (inGame) {
     syncSimTicks();
     updateHud();

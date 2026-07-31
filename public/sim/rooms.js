@@ -1031,7 +1031,8 @@ function startMatch(members) {
     const id = nextPlayerId++;
     const p = spawnPlayer(id, ws.displayName, {
       playerColor: ws.playerColor,
-      shootColor: ws.shootColor
+      shootColor: ws.shootColor,
+      shipId: ws.shipId
     }, room);
     p.accountKey = ws.accountKey || null;
     room.players.set(id, p);
@@ -1080,7 +1081,8 @@ function startPractice(ws, queueKind, opts) {
   const id = nextPlayerId++;
   const p = spawnPlayer(id, ws.displayName, {
     playerColor: ws.playerColor,
-    shootColor: ws.shootColor
+    shootColor: ws.shootColor,
+    shipId: ws.shipId
   }, room);
   p.lives = SOLO_LIVES;
   p.hp = SOLO_MAX_HP;
@@ -1159,7 +1161,8 @@ function startCoop(members) {
     const id = nextPlayerId++;
     const p = spawnPlayer(id, ws.displayName, {
       playerColor: ws.playerColor,
-      shootColor: ws.shootColor
+      shootColor: ws.shootColor,
+      shipId: ws.shipId
     }, room);
     p.lives = SOLO_LIVES;
     p.hp = SOLO_MAX_HP;

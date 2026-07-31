@@ -16,6 +16,14 @@ const JSON_LEGACY = path.join(__dirname, 'accounts.json');
 
 const DEFAULT_PLAYER_COLOR = '#59D9FF';
 const DEFAULT_SHOOT_COLOR = '#59F2FF';
+const DEFAULT_SHIP_ID = 'tiny_1';
+
+/** Accept ship id like tiny_1 / arrow — alphanumeric + underscore, max 32. */
+function normalizeShipId(raw) {
+  const s = String(raw == null ? '' : raw).trim().slice(0, 32);
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(s)) return null;
+  return s;
+}
 
 /** @type {{ users: Record<string, object> }} */
 let data = { users: {} };
@@ -56,6 +64,7 @@ function migrateUser(u) {
   if (!Array.isArray(u.friends)) u.friends = [];
   u.playerColor = normalizeColor(u.playerColor) || DEFAULT_PLAYER_COLOR;
   u.shootColor = normalizeColor(u.shootColor) || DEFAULT_SHOOT_COLOR;
+  u.shipId = normalizeShipId(u.shipId) || DEFAULT_SHIP_ID;
   if (u.steamId != null) u.steamId = String(u.steamId);
   if (u.displayName != null) u.displayName = String(u.displayName);
   return u;
@@ -98,6 +107,7 @@ function rowToUser(row) {
     friends,
     playerColor: row.player_color,
     shootColor: row.shoot_color,
+    shipId: row.ship_id,
     createdAt: row.created_at || undefined,
     lastSteamLoginAt: row.last_steam_login_at || undefined
   });
@@ -117,6 +127,7 @@ function userToParams(username, u) {
     JSON.stringify(u.friends || []),
     u.playerColor || DEFAULT_PLAYER_COLOR,
     u.shootColor || DEFAULT_SHOOT_COLOR,
+    u.shipId || DEFAULT_SHIP_ID,
     u.createdAt || null,
     u.lastSteamLoginAt || null
   ];
@@ -126,8 +137,8 @@ const UPSERT_SQL = `
 INSERT INTO users (
   username, pin_hash, salt, steam_id, display_name,
   matches_won, best_waves, best_waves_duo, friends,
-  player_color, shoot_color, created_at, last_steam_login_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  player_color, shoot_color, ship_id, created_at, last_steam_login_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(username) DO UPDATE SET
   pin_hash = excluded.pin_hash,
   salt = excluded.salt,
@@ -139,6 +150,7 @@ ON CONFLICT(username) DO UPDATE SET
   friends = excluded.friends,
   player_color = excluded.player_color,
   shoot_color = excluded.shoot_color,
+  ship_id = excluded.ship_id,
   created_at = excluded.created_at,
   last_steam_login_at = excluded.last_steam_login_at
 `;
@@ -256,10 +268,15 @@ async function init() {
       friends TEXT NOT NULL DEFAULT '[]',
       player_color TEXT NOT NULL DEFAULT '#59D9FF',
       shoot_color TEXT NOT NULL DEFAULT '#59F2FF',
+      ship_id TEXT NOT NULL DEFAULT 'tiny_1',
       created_at INTEGER,
       last_steam_login_at INTEGER
     )
   `);
+
+  try {
+    await runAsync(`ALTER TABLE users ADD COLUMN ship_id TEXT NOT NULL DEFAULT 'tiny_1'`);
+  } catch (_) { /* column already exists */ }
 
   const countRows = await allAsync('SELECT COUNT(*) AS n FROM users');
   const n = (countRows[0] && countRows[0].n) | 0;
@@ -311,6 +328,7 @@ function upsertSteamUser(steamId, personaName) {
     friends: [],
     playerColor: DEFAULT_PLAYER_COLOR,
     shootColor: DEFAULT_SHOOT_COLOR,
+    shipId: DEFAULT_SHIP_ID,
     createdAt: Date.now(),
     lastSteamLoginAt: Date.now()
   };
@@ -340,6 +358,7 @@ function createUser(username, pin) {
     friends: [],
     playerColor: DEFAULT_PLAYER_COLOR,
     shootColor: DEFAULT_SHOOT_COLOR,
+    shipId: DEFAULT_SHIP_ID,
     createdAt: Date.now()
   };
   persistUser(username, data.users[username]);
@@ -404,7 +423,19 @@ function setColors(username, playerColor, shootColor) {
   u.playerColor = pc;
   u.shootColor = sc;
   persistUser(username, u);
-  return { ok: 1, playerColor: pc, shootColor: sc };
+  return { ok: 1, playerColor: pc, shootColor: sc, shipId: u.shipId || DEFAULT_SHIP_ID };
+}
+
+function setShip(username, shipId) {
+  ensureReady();
+  const u = data.users[username];
+  if (!u) return { ok: 0, err: 'missing' };
+  migrateUser(u);
+  const sid = normalizeShipId(shipId);
+  if (!sid) return { ok: 0, err: 'ship' };
+  u.shipId = sid;
+  persistUser(username, u);
+  return { ok: 1, shipId: sid };
 }
 
 function renameUser(oldName, newName) {
@@ -503,8 +534,10 @@ module.exports = {
   DB_PATH,
   normalizePin,
   normalizeColor,
+  normalizeShipId,
   DEFAULT_PLAYER_COLOR,
   DEFAULT_SHOOT_COLOR,
+  DEFAULT_SHIP_ID,
   getUser,
   createUser,
   verifyUser,
@@ -514,6 +547,7 @@ module.exports = {
   setBestWaves,
   setBestWavesDuo,
   setColors,
+  setShip,
   renameUser,
   listFriends,
   addFriend,
