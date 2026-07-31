@@ -5116,13 +5116,14 @@ const softOvalFS = `
   varying vec2 vUV;
   varying vec4 vCol;
   varying vec2 vWorld;
+  uniform float uInner;
 ` + SCENE_LIGHT_GLSL + `
   void main() {
     float d = length(vUV);
     if (d > 1.0) discard;
-    // Smooth alpha → transparent at the rim.
-    float edge = 1.0 - smoothstep(0.35, 1.0, d);
-    float a = vCol.a * edge * edge;
+    // Full alpha to uInner, then smooth fade to transparent at the rim.
+    float edge = 1.0 - smoothstep(uInner, 1.0, d);
+    float a = vCol.a * edge;
     gl_FragColor = applyNightLitPremul(vCol.rgb, a, vWorld);
   }
 `;
@@ -5134,6 +5135,7 @@ gl.attachShader(softOvalProg, shader(gl.VERTEX_SHADER, softOvalVS));
 gl.attachShader(softOvalProg, shader(gl.FRAGMENT_SHADER, softOvalFS));
 linkProgram(softOvalProg);
 const soURes = gl.getUniformLocation(softOvalProg, 'uRes');
+const soUInner = gl.getUniformLocation(softOvalProg, 'uInner');
 const soAPos = gl.getAttribLocation(softOvalProg, 'aPos');
 const soAUV = gl.getAttribLocation(softOvalProg, 'aUV');
 const soACol = gl.getAttribLocation(softOvalProg, 'aCol');
@@ -5146,9 +5148,10 @@ const softOvalMesh = new Float32Array(6 * 8); // 2 tris × stride 8
 
 /**
  * Oriented soft oval. halfW = cross-axis half-size, halfL = along-ang half-size.
+ * softInner: UV radius of solid alpha (default 0.35); fade from there to rim.
  * Does not pixel-snap (avoids tiny ovals collapsing to 2×2 squares).
  */
-function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive) {
+function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInner) {
   const hx = Math.max(0.5, halfW);
   const hy = Math.max(0.5, halfL);
   const c = Math.cos(ang || 0);
@@ -5157,6 +5160,7 @@ function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive) {
   const g = color ? color[1] : 1;
   const b = color ? color[2] : 1;
   const a = alpha == null ? 1 : alpha;
+  const inner = softInner == null ? 0.35 : Math.max(0, Math.min(0.98, softInner));
   // Local: X = cross (UV.x), Y = along (UV.y) — matches particle scaleY convention.
   const lx0 = -hx, ly0 = -hy;
   const lx1 = hx, ly1 = -hy;
@@ -5189,6 +5193,7 @@ function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive) {
   gl.vertexAttribPointer(soAUV, 2, gl.FLOAT, false, stride, 8);
   gl.vertexAttribPointer(soACol, 4, gl.FLOAT, false, stride, 16);
   gl.uniform2f(soURes, W, H);
+  gl.uniform1f(soUInner, inner);
   bindSceneLightUniforms(softOvalLightU);
   gl.enable(gl.BLEND);
   gl.blendFunc(additive ? gl.ONE : gl.SRC_ALPHA, additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
@@ -15304,9 +15309,10 @@ function drawEnemyCommonShot(x, y, ang, scale) {
   const red = COL.enemyBullet || [1.0, 0.18, 0.12];
   const glowR = ENEMY_SHOT_GLOW_BASE * s;
   const coreR = ENEMY_SHOT_CORE_BASE * s;
-  drawSoftOval(x, y, 0, glowR, glowR, red, 0.7, true);
-  drawSoftOval(x, y, 0, glowR, glowR, red, 0.7, true); // 2× additive glow strength
-  drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false);
+  // Solid red under the white core footprint; alpha fades only outside the core.
+  const glowInner = Math.min(0.95, coreR / Math.max(glowR, 1e-6));
+  drawSoftOval(x, y, 0, glowR, glowR, red, 0.85, false, glowInner);
+  drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false, 0.35);
 }
 
 function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, ownerId, sizeOpts) {
