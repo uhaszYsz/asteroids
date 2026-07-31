@@ -10915,7 +10915,7 @@ const WEAPON_MAX_LEVEL = 3;
 let selectedWeapon = 1; // 1 default … 8 asteroidgun
 /** Mirror of server WEAPONS — used only to gate local muzzle/fake shot FX. */
 const WEAPONS = {
-  default: { ammo: 3, cooldown: 2, reload: 32, speed: 8 * RES_SCALE * 1.15 },
+  default: { ammo: 3, cooldown: 2, reload: 32, speed: 8 * RES_SCALE * 1.15 * 0.85 },
   rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 8 * RES_SCALE * 0.85 },
   laser: { ammo: 30, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
   shotgun: {
@@ -10924,7 +10924,7 @@ const WEAPONS = {
     reload: 40,
     shotgun: 5,
     spread: 30,
-    shotgunSpeeds: [7.5 * RES_SCALE, 10.5 * RES_SCALE]
+    shotgunSpeeds: [7.5 * RES_SCALE * 0.85, 10.5 * RES_SCALE * 0.85]
   },
   railgun: { ammo: 1, cooldown: 45, reload: 1, charge: Math.round(0.5 * TPS) },
   plasma: { ammo: 50, cooldown: 2, reload: Math.round(2 * TPS), speed: 9 * RES_SCALE * 1.7 },
@@ -11690,7 +11690,7 @@ function currentWeaponBulletSpeed() {
   const n = currentWeaponName();
   const w = effectiveLocalWeapon(n);
   if (n === 'shotgun') {
-    const sp = w.shotgunSpeeds || [7.5 * RES_SCALE, 10.5 * RES_SCALE];
+    const sp = w.shotgunSpeeds || [7.5 * RES_SCALE * 0.85, 10.5 * RES_SCALE * 0.85];
     return (sp[0] + sp[1]) * 0.5;
   }
   if (w.speed != null && w.speed > 0) return w.speed;

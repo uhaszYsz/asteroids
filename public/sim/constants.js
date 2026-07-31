@@ -44,7 +44,7 @@ const MUZZLE = 10 * RES_SCALE;
 const WEAPON_SLOTS = ['default', 'rocket', 'laser', 'shotgun', 'railgun', 'plasma', 'voidcannon', 'asteroidgun'];
 const WEAPON_MAX_LEVEL = 3;
 const WEAPONS = {
-  default: { ammo: 3, cooldown: 2, reload: 32, speed: 8 * RES_SCALE * 1.15 },
+  default: { ammo: 3, cooldown: 2, reload: 32, speed: 8 * RES_SCALE * 1.15 * 0.85 },
   rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 8 * RES_SCALE * 0.85 },
   laser: { ammo: 30, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
   shotgun: {
@@ -53,7 +53,7 @@ const WEAPONS = {
     reload: 40,
     shotgun: 5,
     spread: 30,
-    shotgunSpeeds: [7.5 * RES_SCALE, 10.5 * RES_SCALE],
+    shotgunSpeeds: [7.5 * RES_SCALE * 0.85, 10.5 * RES_SCALE * 0.85],
     relative: false
   },
   /** Charge 0.5s then one raycast; 45-tick cooldown between shots; infinite reloads. */
