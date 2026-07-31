@@ -294,7 +294,7 @@ function startBcastFx(mode, color) {
   if (!bcastFx.raf) bcastFx.raf = requestAnimationFrame(tickBcastFx);
 }
 
-const gl = canvas.getContext('webgl', { antialias: false, alpha: false });
+const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: true });
 
 /** Internal framebuffer scale vs fixed world size (W×H). Physics unchanged. */
 const RENDER_SCALE_KEY = 'asteroids_render_scale';
@@ -10227,7 +10227,7 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
     [uv.u1, uv.v1],
     [uv.u0, uv.v1]
   ];
-  const { xy } = projectMesh3D(verts, x, y, angle, bank || 0, SPRITE_ROOF_LIFT);
+  const { xy, depth } = projectMesh3D(verts, x, y, angle, bank || 0, SPRITE_ROOF_LIFT);
   const col = tint || COL_WHITE;
   const windFwd = [0, 1, 2, 0, 2, 3];
   const windBack = [0, 2, 1, 0, 3, 2];
@@ -10240,14 +10240,18 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
       spriteShipMesh[o++] = xy[i * 2 + 1];
       spriteShipMesh[o++] = uvs[i][0];
       spriteShipMesh[o++] = uvs[i][1];
+      spriteShipMesh[o++] = spriteWorldZToClip(depth[i]);
     }
   }
   gl.useProgram(spriteShipProg);
   gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
   gl.enableVertexAttribArray(ssAPos);
   gl.enableVertexAttribArray(ssAUV);
-  gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, 16, 0);
-  gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, 16, 8);
+  gl.enableVertexAttribArray(ssADepth);
+  const flatStride = 5 * 4;
+  gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, flatStride, 0);
+  gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, flatStride, 8);
+  gl.vertexAttribPointer(ssADepth, 1, gl.FLOAT, false, flatStride, 16);
   gl.uniform2f(ssURes, W, H);
   bindSceneLightUniforms(spriteShipLightU);
   gl.uniform1f(ssUTintPow, 0);
@@ -10289,6 +10293,7 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   gl.drawArrays(gl.TRIANGLES, 0, 12);
   bindSpriteColorRemap(null, null, 0);
   gl.disableVertexAttribArray(ssAUV);
+  gl.disableVertexAttribArray(ssADepth);
 }
 
 function tinyShipCols(spec, sheetW) {
@@ -10556,9 +10561,16 @@ function drawShipOutlineEdges(xy, mesh, color, nose, tipHeat) {
 }
 
 /* ========== Tiny sprite ships on invisible banking 3D plane ========== */
+/** Map projectMesh3D world-Z → clip Z. Higher world Z = closer (smaller clip Z). */
+const SPRITE_SHIP_DEPTH_RANGE = 120;
+function spriteWorldZToClip(worldZ) {
+  const z = -worldZ / SPRITE_SHIP_DEPTH_RANGE;
+  return z > 0.99 ? 0.99 : (z < -0.99 ? -0.99 : z);
+}
 const spriteShipVS = `
   attribute vec2 aPos;
   attribute vec2 aUV;
+  attribute float aDepth;
   uniform vec2 uRes;
   uniform vec2 uOffset;
   varying vec2 vUV;
@@ -10566,7 +10578,7 @@ const spriteShipVS = `
   void main() {
     vec2 a = aPos + uOffset;
     vec2 p = floor(a + 0.5) / uRes * 2.0 - 1.0;
-    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);
+    gl_Position = vec4(p.x, -p.y, aDepth, 1.0);
     vUV = aUV;
     vWorld = a;
   }
@@ -10625,6 +10637,7 @@ const spriteShipFS = `
 const spriteShipProg = gl.createProgram();
 gl.bindAttribLocation(spriteShipProg, 0, 'aPos');
 gl.bindAttribLocation(spriteShipProg, 1, 'aUV');
+gl.bindAttribLocation(spriteShipProg, 2, 'aDepth');
 gl.attachShader(spriteShipProg, shader(gl.VERTEX_SHADER, spriteShipVS));
 gl.attachShader(spriteShipProg, shader(gl.FRAGMENT_SHADER, spriteShipFS));
 linkProgram(spriteShipProg);
@@ -10646,6 +10659,7 @@ const spriteShipLightU = {
 };
 const ssAPos = gl.getAttribLocation(spriteShipProg, 'aPos');
 const ssAUV = gl.getAttribLocation(spriteShipProg, 'aUV');
+const ssADepth = gl.getAttribLocation(spriteShipProg, 'aDepth');
 /** Hull red #A60000 — remap source for UFO turret art. */
 const SPRITE_REMAP_HULL_RED = [0xA6 / 255, 0, 0];
 /** Catch #DD3A3A / #550000 family without eating silver/grey. */
@@ -10662,7 +10676,7 @@ function bindSpriteColorRemap(src, dst, range) {
 }
 const spriteShipBuf = gl.createBuffer();
 /** One roof panel, both windings: 12 verts × (xy + uv). */
-const spriteShipMesh = new Float32Array(12 * 4);
+const spriteShipMesh = new Float32Array(12 * 5); // x,y,u,v,depth clip
 /** Pitch of the two sprite halves (house-roof fold along nose→tail). */
 const SPRITE_ROOF_PITCH = 0.58;
 /** Screen lift so the ridge reads above the wing tips even at bank=0. */
@@ -10844,9 +10858,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
       }
     ];
   } else if (tube) {
-    // Roof + mirrored under: outer long edges share y=±wingY, z=0 so they touch.
-    // Convex diamond only — do NOT add a 90° copy (those planes intersect and
-    // break painter's depth sort with alpha sprites).
+    // Roof + mirrored under (convex diamond), plus a 90° copy around length.
+    // Planes intersect — depth buffer + sprite discard sorts them (not painter's).
     panels = [
       {
         verts: [
@@ -10885,33 +10898,15 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         uvs: uvsR
       }
     ];
-    // Slice along length so long faces sort correctly when banked/spinning.
-    const SEGS = 4;
-    const sliced = [];
-    for (let p = 0; p < panels.length; p++) {
-      const src = panels[p];
-      // verts: 0 nose-ridge, 1 nose-tip, 2 tail-tip, 3 tail-ridge
-      for (let s = 0; s < SEGS; s++) {
-        const t0 = s / SEGS;
-        const t1 = (s + 1) / SEGS;
-        const lerp4 = (a, b, t) => [
-          a[0] + (b[0] - a[0]) * t,
-          a[1] + (b[1] - a[1]) * t,
-          a[2] + (b[2] - a[2]) * t
-        ];
-        const lerpUV = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-        const v0 = lerp4(src.verts[0], src.verts[3], t0);
-        const v1 = lerp4(src.verts[1], src.verts[2], t0);
-        const v2 = lerp4(src.verts[1], src.verts[2], t1);
-        const v3 = lerp4(src.verts[0], src.verts[3], t1);
-        const u0 = lerpUV(src.uvs[0], src.uvs[3], t0);
-        const u1 = lerpUV(src.uvs[1], src.uvs[2], t0);
-        const u2 = lerpUV(src.uvs[1], src.uvs[2], t1);
-        const u3 = lerpUV(src.uvs[0], src.uvs[3], t1);
-        sliced.push({ verts: [v0, v1, v2, v3], uvs: [u0, u1, u2, u3] });
-      }
+    // Same 4 faces spun 90° around length (+X): (x, y, z) → (x, -z, y).
+    const n0 = panels.length;
+    for (let i = 0; i < n0; i++) {
+      const src = panels[i];
+      panels.push({
+        verts: src.verts.map((v) => [v[0], -v[2], v[1]]),
+        uvs: src.uvs
+      });
     }
-    panels = sliced;
   } else {
     // Left / right halves share the ridge (y=0,z=0); tips fold down like a roof.
     panels = [
@@ -10936,8 +10931,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     ];
   }
 
-  // Painter's algorithm when spinning / multi-sided tube.
-  if (panels.length > 2 || (spinRate && spinRate !== 0) || (yawSpinDpt && yawSpinDpt !== 0) || leanY) {
+  // Painter's algorithm when spinning / multi-sided (skip tube — uses Z-buffer).
+  if (!tube && (panels.length > 2 || (spinRate && spinRate !== 0) || (yawSpinDpt && yawSpinDpt !== 0) || leanY)) {
     for (let p = 0; p < panels.length; p++) {
       panels[p]._i = p;
       const { depth } = projectPanel(panels[p].verts);
@@ -10945,7 +10940,6 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
       for (let i = 0; i < depth.length; i++) z += depth[i];
       panels[p]._z = z / Math.max(1, depth.length);
     }
-    // Far (low Z) → near (high Z). Stable tie-break keeps adjacent slices ordered.
     panels.sort((a, b) => (a._z - b._z) || (a._i - b._i));
   }
 
@@ -10983,8 +10977,11 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
   gl.enableVertexAttribArray(ssAPos);
   gl.enableVertexAttribArray(ssAUV);
-  gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, 16, 0);
-  gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, 16, 8);
+  gl.enableVertexAttribArray(ssADepth);
+  const ssStride = 5 * 4;
+  gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, ssStride, 0);
+  gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, ssStride, 8);
+  gl.vertexAttribPointer(ssADepth, 1, gl.FLOAT, false, ssStride, 16);
   gl.uniform2f(ssURes, W, H);
   bindSceneLightUniforms(spriteShipLightU);
   gl.uniform3f(ssUTint, tint[0], tint[1], tint[2]);
@@ -11006,7 +11003,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const windBackT = [0, 2, 1];
   /** @returns {number} GL triangle vertex count (double-sided unless oneSided). */
   function fillPanelMesh(panel, oneSided) {
-    const { xy } = projectPanel(panel.verts);
+    const { xy, depth } = projectPanel(panel.verts);
     const uvs = panel.uvs;
     const tri = panel.verts.length === 3;
     const fwd = tri ? windFwdT : windFwdQ;
@@ -11021,10 +11018,11 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         spriteShipMesh[o++] = xy[i * 2 + 1];
         spriteShipMesh[o++] = uvs[i][0];
         spriteShipMesh[o++] = uvs[i][1];
+        spriteShipMesh[o++] = spriteWorldZToClip(depth[i]);
       }
     }
     gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh.subarray(0, o), gl.DYNAMIC_DRAW);
-    return o / 4;
+    return o / 5;
   }
 
   // Player-color silhouette outline around sprite pixels (not roof plane edges).
@@ -11065,13 +11063,27 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.uniform1f(ssUOutline, 0);
   gl.uniform1f(ssUAlpha, 1);
   gl.uniform2f(ssUOffset, 0, 0);
+  if (tube) {
+    // Intersecting 90° tube planes: hardware Z + discard (painter's cannot order them).
+    gl.depthMask(true);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(1, 1);
+  }
   for (let p = 0; p < panels.length; p++) {
     const nVert = fillPanelMesh(panels[p], !!tube);
     gl.drawArrays(gl.TRIANGLES, 0, nVert);
   }
+  if (tube) {
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    gl.disable(gl.DEPTH_TEST);
+  }
 
   gl.disable(gl.BLEND);
   gl.disableVertexAttribArray(ssAUV);
+  gl.disableVertexAttribArray(ssADepth);
 }
 
 function drawShip3D(x, y, angle, av, color, id, dt, moving) {
