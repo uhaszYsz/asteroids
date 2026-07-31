@@ -1307,8 +1307,8 @@ function updateSpinnerWeapon(room, e) {
     return;
   }
   const base = Number.isFinite(e.spinAng) ? e.spinAng : 0;
-  const step = Math.PI / 2;
-  for (let i = 0; i < 4; i++) {
+  const step = Math.PI; // 2 streams, 180° apart
+  for (let i = 0; i < 2; i++) {
     fireEnemyLineBullet(
       room, e, base + i * step,
       ENEMY_SPINNER.speed, ENEMY_SPINNER.dmg, 'enemySpinner'
