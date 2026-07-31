@@ -10427,12 +10427,13 @@ function projectMesh3D(verts, cx, cy, yaw, bank, lift) {
 }
 
 /**
- * Spin around Z, then tip Z toward +X by leanY — irregular UFO wobble
- * (spin axis leaned instead of a fixed X roll).
+ * Tip Z by leanY toward +X, then precess around world Z.
+ * Origin (bottom of the axis) stays put; the tip of +Z sweeps a circle
+ * so the dome apex tracks that circulating direction.
  */
-function projectMesh3DLeanSpin(verts, cx, cy, spin, leanY, lift) {
-  const cs = Math.cos(spin);
-  const ss = Math.sin(spin);
+function projectMesh3DPrecess(verts, cx, cy, precess, leanY, lift) {
+  const cp = Math.cos(precess);
+  const sp = Math.sin(precess);
   const cl = Math.cos(leanY);
   const sl = Math.sin(leanY);
   const L = lift != null ? lift : SHIP3D_LIFT;
@@ -10443,12 +10444,14 @@ function projectMesh3DLeanSpin(verts, cx, cy, spin, leanY, lift) {
     const lx = verts[i][0];
     const ly = verts[i][1];
     const lz = verts[i][2];
-    const x1 = lx * cs - ly * ss;
-    const y1 = lx * ss + ly * cs;
-    const z1 = lz;
-    const x2 = x1 * cl + z1 * sl;
-    const y2 = y1;
-    const z2 = -x1 * sl + z1 * cl;
+    // Ry(lean): tip local +Z toward +X
+    const x1 = lx * cl + lz * sl;
+    const y1 = ly;
+    const z1 = -lx * sl + lz * cl;
+    // Rz(precess): sweep that tip around world Z
+    const x2 = x1 * cp - y1 * sp;
+    const y2 = x1 * sp + y1 * cp;
+    const z2 = z1;
     xy[i * 2] = cx + x2;
     xy[i * 2 + 1] = cy + y2 - z2 * L;
     depth[i] = z2;
@@ -10656,8 +10659,8 @@ const SPRITE_SHIP_PX_SCALE = 1;
  *  opts.flat: single z=0 quad (full sprite) — no roof fold.
  *  opts.hexDome: low-poly hex bulge — 6 tris, rim z=0, center z=domeZ (default 22).
  *  opts.tiltXDeg: fixed roll around +X (degrees).
- *  opts.spinLeanYDeg: tip Z toward +X (degrees), then spin — wobbly UFO axis.
- *  opts.yawSpinDegPerTick: continuous yaw around Z (degrees per sim tick).
+ *  opts.spinLeanYDeg: cone angle — tip of +Z circles at this lean from vertical.
+ *  opts.yawSpinDegPerTick: how fast that tip circles (precession around Z).
  *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor, opts) {
   const spec = opt && opt.sprite;
@@ -10674,7 +10677,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   let bank = flat ? 0 : ((bankOverride != null && Number.isFinite(bankOverride))
     ? bankOverride * 0.5
     : shipBankSmoothed(id, av, dt) * 0.5);
-  // Leaned spin replaces fixed X tilt on hex dome.
+  // Precessing cone replaces fixed X tilt on hex dome.
   if (hexDome) bank = leanY ? 0 : (tiltXDeg * Math.PI / 180);
   else if (tiltXDeg) bank += tiltXDeg * Math.PI / 180;
   const spinRate = opts && opts.spinRate;
@@ -10688,7 +10691,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     drawAng = angle + performance.now() * 0.001 * dps * Math.PI / 180 + (id | 0) * 0.73;
   }
   function projectPanel(verts) {
-    if (leanY) return projectMesh3DLeanSpin(verts, x, y, drawAng, leanY, SPRITE_ROOF_LIFT);
+    if (leanY) return projectMesh3DPrecess(verts, x, y, drawAng, leanY, SPRITE_ROOF_LIFT);
     return projectMesh3D(verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
   }
   const sc = SPRITE_SHIP_PX_SCALE * (sizeScale > 0 ? sizeScale : 1);
@@ -16683,7 +16686,7 @@ function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
   return bank;
 }
 
-/** Spinner: round sprite on hex dome; Z axis leaned 20° toward X, spins 4°/tick. */
+/** Spinner: round sprite on hex dome; +Z tip circles at 20° lean, 4°/tick. */
 function drawEnemySpinner(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_SPINNER_SPRITE_ID);
