@@ -5117,27 +5117,12 @@ const softOvalFS = `
   varying vec4 vCol;
   varying vec2 vWorld;
   uniform float uInner;
-  uniform float uPixSize;
-  uniform vec2 uCenter;
-  uniform float uRadius;
 ` + SCENE_LIGHT_GLSL + `
   void main() {
-    float d;
-    if (uPixSize > 0.001) {
-      // Axis-aligned world pixels — glow + core share the same grid.
-      vec2 local = vWorld - uCenter;
-      vec2 cell = floor(local / uPixSize) * uPixSize + uPixSize * 0.5;
-      d = length(cell) / max(uRadius, 0.001);
-    } else {
-      d = length(vUV);
-    }
+    float d = length(vUV);
     if (d > 1.0) discard;
     // Full alpha to uInner, then smooth fade to transparent at the rim.
     float edge = 1.0 - smoothstep(uInner, 1.0, d);
-    if (uPixSize > 0.001) {
-      float steps = max(2.0, uRadius / uPixSize);
-      edge = floor(edge * steps + 0.5) / steps;
-    }
     float a = vCol.a * edge;
     gl_FragColor = applyNightLitPremul(vCol.rgb, a, vWorld);
   }
@@ -5151,9 +5136,6 @@ gl.attachShader(softOvalProg, shader(gl.FRAGMENT_SHADER, softOvalFS));
 linkProgram(softOvalProg);
 const soURes = gl.getUniformLocation(softOvalProg, 'uRes');
 const soUInner = gl.getUniformLocation(softOvalProg, 'uInner');
-const soUPixSize = gl.getUniformLocation(softOvalProg, 'uPixSize');
-const soUCenter = gl.getUniformLocation(softOvalProg, 'uCenter');
-const soURadius = gl.getUniformLocation(softOvalProg, 'uRadius');
 const soAPos = gl.getAttribLocation(softOvalProg, 'aPos');
 const soAUV = gl.getAttribLocation(softOvalProg, 'aUV');
 const soACol = gl.getAttribLocation(softOvalProg, 'aCol');
@@ -5167,14 +5149,11 @@ const softOvalMesh = new Float32Array(6 * 8); // 2 tris × stride 8
 /**
  * Oriented soft oval. halfW = cross-axis half-size, halfL = along-ang half-size.
  * softInner: UV radius of solid alpha (default 0.35); fade from there to rim.
- * pixSize: world units per pixel block (0 = smooth). Circles share a world grid.
+ * Does not pixel-snap (avoids tiny ovals collapsing to 2×2 squares).
  */
-function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInner, pixSize) {
-  const pix = pixSize > 0 ? pixSize : 0;
-  const pad = pix > 0 ? pix : 0;
-  const hx = Math.max(0.5, halfW + pad);
-  const hy = Math.max(0.5, halfL + pad);
-  const rad = Math.max(halfW, halfL, 0.5);
+function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInner) {
+  const hx = Math.max(0.5, halfW);
+  const hy = Math.max(0.5, halfL);
   const c = Math.cos(ang || 0);
   const s = Math.sin(ang || 0);
   const r = color ? color[0] : 1;
@@ -5215,9 +5194,6 @@ function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInn
   gl.vertexAttribPointer(soACol, 4, gl.FLOAT, false, stride, 16);
   gl.uniform2f(soURes, W, H);
   gl.uniform1f(soUInner, inner);
-  gl.uniform1f(soUPixSize, pix);
-  gl.uniform2f(soUCenter, cx, cy);
-  gl.uniform1f(soURadius, rad);
   bindSceneLightUniforms(softOvalLightU);
   gl.enable(gl.BLEND);
   // Shader outputs premul (rgb*a, a). Additive: ONE/ONE. Alpha: ONE/ONE_MINUS_SRC_ALPHA.
@@ -5226,6 +5202,102 @@ function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInn
   gl.disable(gl.BLEND);
   gl.disableVertexAttribArray(soAUV);
   gl.disableVertexAttribArray(soACol);
+}
+
+/**
+ * Same idea as pro CONFIG.RENDERING.BULLET_INTERNAL_RESOLUTION:
+ * draw glow bullets into a lower-res buffer, then NEAREST-upscale (pixelation).
+ */
+const ENEMY_GLOW_BULLET_INTERNAL_RES = 0.75;
+let enemyGlowFbo = null;
+let enemyGlowTex = null;
+let enemyGlowFboW = 0;
+let enemyGlowFboH = 0;
+let enemyGlowLayerActive = false;
+
+const enemyGlowBlitVS = `
+  attribute vec2 aPos;
+  varying vec2 vUV;
+  void main() {
+    vUV = aPos * 0.5 + 0.5;
+    gl_Position = vec4(aPos, 0.0, 1.0);
+  }
+`;
+const enemyGlowBlitFS = `
+  precision mediump float;
+  uniform sampler2D uTex;
+  varying vec2 vUV;
+  void main() {
+    gl_FragColor = texture2D(uTex, vUV);
+  }
+`;
+const enemyGlowBlitProg = gl.createProgram();
+gl.bindAttribLocation(enemyGlowBlitProg, 0, 'aPos');
+gl.attachShader(enemyGlowBlitProg, shader(gl.VERTEX_SHADER, enemyGlowBlitVS));
+gl.attachShader(enemyGlowBlitProg, shader(gl.FRAGMENT_SHADER, enemyGlowBlitFS));
+linkProgram(enemyGlowBlitProg);
+const egbUTex = gl.getUniformLocation(enemyGlowBlitProg, 'uTex');
+const egbAPos = gl.getAttribLocation(enemyGlowBlitProg, 'aPos');
+const enemyGlowBlitBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, enemyGlowBlitBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  -1, -1, 1, -1, -1, 1, 1, 1
+]), gl.STATIC_DRAW);
+
+function ensureEnemyGlowBulletFbo() {
+  const tw = Math.max(1, Math.floor(canvas.width * ENEMY_GLOW_BULLET_INTERNAL_RES));
+  const th = Math.max(1, Math.floor(canvas.height * ENEMY_GLOW_BULLET_INTERNAL_RES));
+  if (enemyGlowFbo && enemyGlowTex && enemyGlowFboW === tw && enemyGlowFboH === th) return;
+  if (enemyGlowTex) gl.deleteTexture(enemyGlowTex);
+  if (enemyGlowFbo) gl.deleteFramebuffer(enemyGlowFbo);
+  enemyGlowTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, enemyGlowTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, tw, th, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  enemyGlowFbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, enemyGlowFbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, enemyGlowTex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  enemyGlowFboW = tw;
+  enemyGlowFboH = th;
+}
+
+function beginEnemyGlowBulletLayer() {
+  ensureEnemyGlowBulletFbo();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, enemyGlowFbo);
+  gl.viewport(0, 0, enemyGlowFboW, enemyGlowFboH);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  enemyGlowLayerActive = true;
+}
+
+function endEnemyGlowBulletLayer() {
+  if (!enemyGlowLayerActive) return;
+  enemyGlowLayerActive = false;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(enemyGlowBlitProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, enemyGlowBlitBuf);
+  gl.enableVertexAttribArray(egbAPos);
+  gl.vertexAttribPointer(egbAPos, 2, gl.FLOAT, false, 0, 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, enemyGlowTex);
+  gl.uniform1i(egbUTex, 0);
+  gl.enable(gl.BLEND);
+  // FBO contents are premul (softOval); NEAREST upscale = pixelation like pro bullet canvas.
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.disable(gl.BLEND);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  gl.disableVertexAttribArray(egbAPos);
+}
+
+function isEnemyGlowBulletType(type) {
+  return type === 'enemy' || type === 'enemySpinner' || type === 'enemyWorm';
 }
 
 /* ========== Pickup 3D boxes (22×22 strip9 + shiny metal shader) ========== */
@@ -15341,6 +15413,7 @@ function bulletAt(b) {
 /**
  * Common / spinner / worm shot: soft circle (glow + white core).
  * Collision radius = white core (ENEMY_SHOT_CORE_*). Glow is visual only.
+ * Pixelation comes from ENEMY_GLOW_BULLET_INTERNAL_RES FBO (pro-style), not shader.
  */
 const ENEMY_SHOT_VIS_SCALE = 2;
 const ENEMY_SHOT_CORE_BASE = 2.4 * RES_SCALE;
@@ -19054,7 +19127,32 @@ function renderBullets() {
   const turretPts = [];
   // Default trail runs every other frame so it stays lighter than rockets.
   const defaultTrail = ((performance.now() / 32) | 0) % 2 === 0;
+
+  // Pass 1: glowing enemy shots → low-res FBO (pro BULLET_INTERNAL_RESOLUTION style).
+  let anyGlow = false;
   for (const b of bullets.values()) {
+    if (isEnemyGlowBulletType(b.type)) { anyGlow = true; break; }
+  }
+  if (anyGlow) {
+    beginEnemyGlowBulletLayer();
+    for (const b of bullets.values()) {
+      if (!isEnemyGlowBulletType(b.type)) continue;
+      const p = bulletAt(b);
+      const vx = p.vx != null ? p.vx : b.vx;
+      const vy = p.vy != null ? p.vy : b.vy;
+      const ang = Math.atan2(vy, vx);
+      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+      drawBulletVisual(
+        b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner,
+        (b.length != null || b.width != null) ? { length: b.length, width: b.width } : null
+      );
+    }
+    endEnemyGlowBulletLayer();
+  }
+
+  // Pass 2: everything else on the main framebuffer.
+  for (const b of bullets.values()) {
+    if (isEnemyGlowBulletType(b.type)) continue;
     const p = bulletAt(b);
     const vx = p.vx != null ? p.vx : b.vx;
     const vy = p.vy != null ? p.vy : b.vy;
