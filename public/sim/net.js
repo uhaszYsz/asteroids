@@ -307,7 +307,16 @@ function roomBroadcastBinary(room, buf) {
 }
 
 function packBullet(b) {
-  return [b.id, b.spawnX, b.spawnY, b.vx, b.vy, b.owner, b.spawnSt, b.type || 'default'];
+  const row = [b.id, b.spawnX, b.spawnY, b.vx, b.vy, b.owner, b.spawnSt, b.type || 'default'];
+  if ((b.type || 'default') === 'rocket') {
+    row.push(
+      b.accel != null ? +b.accel : ROCKET_ACCEL_DEFAULT,
+      b.maxSpeed != null ? +b.maxSpeed : 0,
+      b.homing != null ? +b.homing : ROCKET_HOMING_DEFAULT,
+      b.hp != null ? (b.hp | 0) : ROCKET_HP_DEFAULT
+    );
+  }
+  return row;
 }
 
 function asteroidSizeCode(a) {

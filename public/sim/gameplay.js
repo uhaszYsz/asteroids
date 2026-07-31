@@ -475,7 +475,9 @@ function enemyMoveType(e) {
 }
 
 function wormIsHolding(e) {
-  return !!(e && e.kind === 'worm' && (e.wormPhase | 0) > 0);
+  // Laser aim/fire/reload holds still. Rocket barrage (4–5) keeps wandering.
+  const p = e && (e.wormPhase | 0);
+  return !!(e && e.kind === 'worm' && p >= 1 && p <= 3);
 }
 
 /**
@@ -659,9 +661,11 @@ function makeEnemy(kind, wave, weapon) {
     lastLaserAng: null,
     enteredPlay: false,
     speed: randomEnemyWanderSpeed(),
-    // Worm laser attack: 0 idle, 1 aim (3s), 2 firing, 3 reload.
+    // Worm laser attack: 0 idle, 1 aim, 2 fire, 3 reload;
+    // rocket barrage: 4 fire, 5 reload. wormAtk 0=laser next, 1=rockets next.
     wormPhase: 0,
-    wormAimLeft: 0
+    wormAimLeft: 0,
+    wormAtk: 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -825,7 +829,7 @@ function fireEnemyLaserBeam(room, e, ang) {
     });
     if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg);
     else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, 0);
-    else if (hit.kind === 'rocket') deflectRocketAwayFrom(room, hit.target, ox, oy);
+    else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
   }
   e.angle = ang;
   e.lastLaserAng = ang;
@@ -865,7 +869,7 @@ function fireWormLaserBeam(room, e) {
     if (hit) {
       if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg);
       else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, 0);
-      else if (hit.kind === 'rocket') deflectRocketAwayFrom(room, hit.target, o.x, o.y);
+      else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
     }
   }
   const x1 = midHit ? midHit.x : ox + dx * range;
@@ -894,9 +898,74 @@ function beginWormLaserAttack(room, e) {
   emitEnemyUpdate(room, e);
 }
 
+function beginWormRocketAttack(room, e) {
+  e.wormPhase = 4;
+  e.wormAimLeft = 0;
+  e.shootAmmo = ENEMY_WORM_ROCKET.ammo;
+  e.shootCd = 0;
+  e.reloadLeft = 0;
+}
+
+function finishWormAttack(room, e) {
+  e.wormPhase = 0;
+  e.wormAimLeft = 0;
+  e.shootAmmo = 0;
+  e.reloadLeft = 0;
+  e.wormAtk = (e.wormAtk | 0) ? 0 : 1;
+  e.fireCd = Math.round(
+    (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
+  );
+  pickEnemyWanderTarget(e);
+  emitEnemyUpdate(room, e);
+}
+
+/** One 360° volley of gun-rockets from the worm. */
+function fireWormRocketVolley(room, e) {
+  const count = Math.max(1, ENEMY_WORM_ROCKET.shotgun | 0);
+  const spd = ENEMY_WORM_ROCKET.speed;
+  const baseAng = (e.dir != null && Number.isFinite(e.dir)) ? e.dir
+    : (Number.isFinite(e.angle) ? e.angle : 0);
+  const x = e.x;
+  const y = e.y;
+  const now = Date.now();
+  const owner = enemyFxOwner(e);
+  const rnd = makeShotgunRng(x + e.id * 0.13, y + (e.shootAmmo | 0) * 0.37);
+  for (let i = 0; i < count; i++) {
+    const m = shotgunPelletMotion(baseAng, ENEMY_WORM_ROCKET.spread, spd, spd, rnd);
+    const lifeS = ENEMY_WORM_ROCKET.lifeMinS
+      + Math.random() * (ENEMY_WORM_ROCKET.lifeMaxS - ENEMY_WORM_ROCKET.lifeMinS);
+    const b = {
+      id: room.nextBulletId++,
+      owner,
+      enemyOwner: e.id | 0,
+      type: 'rocket',
+      dmg: 0,
+      x, y,
+      spawnX: x,
+      spawnY: y,
+      vx: Math.cos(m.ang) * m.spd,
+      vy: Math.sin(m.ang) * m.spd,
+      spawnSt: now,
+      accel: ENEMY_WORM_ROCKET.accel,
+      maxSpeed: ENEMY_WORM_ROCKET.maxSpeed,
+      homing: ENEMY_WORM_ROCKET.homing,
+      hp: ENEMY_WORM_ROCKET.hp,
+      lifeLeft: Math.max(1, Math.round(lifeS * TPS)),
+      netLeft: ROCKET_NET_INTERVAL
+    };
+    room.bullets.push(b);
+    roomBroadcast(room, { t: 'bf', b: packBullet(b) });
+  }
+}
+
+function beginWormAttack(room, e) {
+  if ((e.wormAtk | 0) === 1) beginWormRocketAttack(room, e);
+  else beginWormLaserAttack(room, e);
+}
+
 function updateWormAttack(room, e, target) {
   if (!target) {
-    if (wormIsHolding(e)) {
+    if ((e.wormPhase | 0) > 0) {
       e.wormPhase = 0;
       e.wormAimLeft = 0;
       e.shootAmmo = 0;
@@ -907,49 +976,67 @@ function updateWormAttack(room, e, target) {
     return;
   }
 
-  if (!wormIsHolding(e)) {
+  if ((e.wormPhase | 0) === 0) {
     if ((e.fireCd | 0) > 0) return;
-    beginWormLaserAttack(room, e);
+    beginWormAttack(room, e);
     return;
   }
 
-  const desired = Math.atan2(target.y - e.y, target.x - e.x);
-  e.angle = turnAngleToward(e.angle || 0, desired, ENEMY_WORM_AIM_TURN);
-  e.dir = e.angle;
+  // —— Laser (phases 1–3): stop, aim, beam ——
+  if ((e.wormPhase | 0) >= 1 && (e.wormPhase | 0) <= 3) {
+    const desired = Math.atan2(target.y - e.y, target.x - e.x);
+    e.angle = turnAngleToward(e.angle || 0, desired, ENEMY_WORM_AIM_TURN);
+    e.dir = e.angle;
 
-  if ((e.wormPhase | 0) === 1) {
-    e.wormAimLeft = (e.wormAimLeft | 0) - 1;
-    if ((e.wormAimLeft | 0) <= 0) {
-      e.wormPhase = 2;
-      e.shootAmmo = ENEMY_WORM_LASER.ammo;
-      e.shootCd = 0;
+    if ((e.wormPhase | 0) === 1) {
+      e.wormAimLeft = (e.wormAimLeft | 0) - 1;
+      if ((e.wormAimLeft | 0) <= 0) {
+        e.wormPhase = 2;
+        e.shootAmmo = ENEMY_WORM_LASER.ammo;
+        e.shootCd = 0;
+      }
+      return;
+    }
+
+    if ((e.wormPhase | 0) === 2) {
+      if ((e.shootCd | 0) > 0) e.shootCd--;
+      if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) return;
+      fireWormLaserBeam(room, e);
+      e.shootAmmo--;
+      e.shootCd = ENEMY_WORM_LASER.cooldown;
+      if ((e.shootAmmo | 0) <= 0) {
+        e.wormPhase = 3;
+        e.reloadLeft = ENEMY_WORM_LASER.reload;
+      }
+      return;
+    }
+
+    if ((e.wormPhase | 0) === 3) {
+      if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
+      if ((e.reloadLeft | 0) > 0) return;
+      finishWormAttack(room, e);
     }
     return;
   }
 
-  if ((e.wormPhase | 0) === 2) {
+  // —— Rockets (phases 4–5): two 360° volleys while moving ——
+  if ((e.wormPhase | 0) === 4) {
     if ((e.shootCd | 0) > 0) e.shootCd--;
     if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) return;
-    fireWormLaserBeam(room, e);
+    fireWormRocketVolley(room, e);
     e.shootAmmo--;
-    e.shootCd = ENEMY_WORM_LASER.cooldown;
+    e.shootCd = ENEMY_WORM_ROCKET.cooldown;
     if ((e.shootAmmo | 0) <= 0) {
-      e.wormPhase = 3;
-      e.reloadLeft = ENEMY_WORM_LASER.reload;
+      e.wormPhase = 5;
+      e.reloadLeft = ENEMY_WORM_ROCKET.reload;
     }
     return;
   }
 
-  if ((e.wormPhase | 0) === 3) {
+  if ((e.wormPhase | 0) === 5) {
     if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
     if ((e.reloadLeft | 0) > 0) return;
-    e.wormPhase = 0;
-    e.wormAimLeft = 0;
-    e.fireCd = Math.round(
-      (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
-    );
-    pickEnemyWanderTarget(e);
-    emitEnemyUpdate(room, e);
+    finishWormAttack(room, e);
   }
 }
 
@@ -975,7 +1062,7 @@ function fireEnemyRailBeam(room, e, target) {
   if (hit) {
     if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, ENEMY_RAIL_DMG);
     else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, ENEMY_RAIL_DMG, 0);
-    else if (hit.kind === 'rocket') deflectRocketAwayFrom(room, hit.target, ox, oy);
+    else if (hit.kind === 'rocket') damageRocket(room, hit.target, ENEMY_RAIL_DMG);
   }
   e.angle = ang;
 }
@@ -3979,12 +4066,13 @@ function rocketBlastDamageAt(dist, radius, maxDmg) {
  * Rocket explosion AoE. `preAids` = asteroid ids that existed before this frame's
  * direct hit / earlier blast kills — shards spawned mid-explosion are ignored.
  */
-function applyRocketBlast(room, ownerId, x, y, preAids) {
+function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
   if (!room) return;
   const R = ROCKET_BLAST_RADIUS;
   let maxDmg = ROCKET_BLAST_DMG;
   const owner = ownerId > 0 ? room.players.get(ownerId) : null;
   if (owner && playerHasPowerup(owner, 'damage')) maxDmg *= DAMAGE_POWERUP_MULT;
+  const skipEnemyId = opts && opts.skipEnemyId != null ? (opts.skipEnemyId | 0) : 0;
 
   for (const p of room.players.values()) {
     if ((p.id | 0) === (ownerId | 0) || p.hp <= 0 || p.godLeft > 0) continue;
@@ -4018,6 +4106,7 @@ function applyRocketBlast(room, ownerId, x, y, preAids) {
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (!enemyIsSpawned(e) || e.hp <= 0) continue;
+      if (skipEnemyId && (e.id | 0) === skipEnemyId) continue;
       const dist = distToEnemyHit(x, y, e);
       const dmg = rocketBlastDamageAt(dist, R, maxDmg);
       if (dmg > 0) damageEnemy(room, e, dmg);
@@ -4036,7 +4125,24 @@ function detonateRocket(room, b, hitKind, _applyDirectIgnored) {
   for (const a of room.asteroids) preAids.add(a.aid);
   roomBroadcast(room, { t: 'bd', id: b.id, hit: hitKind, x, y });
   if (room.roundResetting) return;
-  applyRocketBlast(room, b.owner | 0, x, y, preAids);
+  applyRocketBlast(room, b.owner | 0, x, y, preAids, {
+    skipEnemyId: b.enemyOwner | 0
+  });
+}
+
+/** Apply hull damage to a rocket; detonates and removes it when HP hits 0. */
+function damageRocket(room, rocket, dmg) {
+  if (!rocket || rocket.type !== 'rocket') return false;
+  if (!(dmg > 0)) return false;
+  if (rocket.hp == null) rocket.hp = ROCKET_HP_DEFAULT;
+  if ((rocket.hp | 0) <= 0) return true;
+  rocket.hp -= dmg;
+  if (rocket.hp > 0) return false;
+  rocket.hp = 0;
+  const idx = room.bullets.indexOf(rocket);
+  if (idx >= 0) room.bullets.splice(idx, 1);
+  detonateRocket(room, rocket, 1);
+  return true;
 }
 
 /**
@@ -4122,6 +4228,12 @@ function fireProjectile(room, p, typeName) {
     vy: vel.vy,
     spawnSt: Date.now()
   };
+  if (typeName === 'rocket') {
+    b.hp = ROCKET_HP_DEFAULT;
+    b.accel = ROCKET_ACCEL_DEFAULT;
+    b.maxSpeed = 0;
+    b.homing = ROCKET_HOMING_DEFAULT;
+  }
   room.bullets.push(b);
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
@@ -4197,7 +4309,7 @@ function fireLaser(room, p, weaponName) {
   } else if (hit.kind === 'enemy') {
     damageEnemy(room, hit.target, dmg);
   } else if (hit.kind === 'rocket') {
-    deflectRocketFromShooter(room, hit.target, p.id);
+    damageRocket(room, hit.target, dmg);
   }
 }
 
@@ -4239,7 +4351,7 @@ function fireThrustRay(room, p) {
   } else if (hit.kind === 'enemy') {
     damageEnemy(room, hit.target, dmg);
   } else if (hit.kind === 'rocket') {
-    deflectRocketFromShooter(room, hit.target, p.id);
+    damageRocket(room, hit.target, dmg);
   }
 }
 
@@ -4416,7 +4528,7 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
   }
 
   for (let i = 0; i < rocketHits.length; i++) {
-    deflectRocketFromShooter(room, rocketHits[i].target, p.id);
+    damageRocket(room, rocketHits[i].target, dmg);
   }
 }
 
@@ -5016,6 +5128,8 @@ function steerHomingBullet(room, b) {
   if (!b) return;
   if (!HOMING_BULLET_TYPES.has(b.type || 'default')) return;
   if (b.type === 'enemy' || b.type === 'enemyRocket') return;
+  // Per-rocket homing (degrees/tick) is handled in applyRocketFlight.
+  if ((+b.homing || 0) > 0) return;
   const owner = room.players.get(b.owner);
   if (!playerHasPowerup(owner, 'homing')) return;
   let best = null;
@@ -5046,6 +5160,59 @@ function steerHomingBullet(room, b) {
   b.vy = Math.sin(nang) * spd;
 }
 
+function rocketHomingTarget(room, b) {
+  if ((b.enemyOwner | 0) > 0) return soloHumanTarget(room);
+  let best = null;
+  let bestD2 = Infinity;
+  for (const p of room.players.values()) {
+    if ((p.id | 0) === (b.owner | 0) || p.hp <= 0 || p.godLeft > 0) continue;
+    if (blocksFriendlyFire(room, b.owner)) continue;
+    const dx = p.x - b.x;
+    const dy = p.y - b.y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/** Accel + per-rocket homing (degrees/tick). Mutates vx/vy. */
+function applyRocketFlight(room, b) {
+  if (!b || b.type !== 'rocket') return;
+  let spd = Math.hypot(b.vx, b.vy);
+  let ang = spd > 1e-6 ? Math.atan2(b.vy, b.vx) : 0;
+  const accel = +b.accel || 0;
+  const maxSpd = b.maxSpeed != null && +b.maxSpeed > 0 ? +b.maxSpeed : 0;
+  if (accel > 0) {
+    const next = spd + accel;
+    spd = maxSpd > 0 ? Math.min(maxSpd, next) : next;
+  }
+  const homeDeg = +b.homing || 0;
+  if (homeDeg > 0) {
+    const target = rocketHomingTarget(room, b);
+    if (target) {
+      const want = Math.atan2(target.y - b.y, target.x - b.x);
+      ang = turnAngleToward(ang, want, (homeDeg * Math.PI) / 180);
+    }
+  }
+  b.vx = Math.cos(ang) * spd;
+  b.vy = Math.sin(ang) * spd;
+}
+
+function maybeResyncRocketNet(room, b) {
+  if (!b || b.type !== 'rocket') return;
+  if (!(+b.accel > 0 || +b.homing > 0)) return;
+  b.netLeft = (b.netLeft | 0) - 1;
+  if ((b.netLeft | 0) > 0) return;
+  b.netLeft = ROCKET_NET_INTERVAL;
+  b.spawnX = b.x;
+  b.spawnY = b.y;
+  b.spawnSt = Date.now();
+  roomBroadcast(room, { t: 'bu', b: packBullet(b) });
+}
+
 function updateBullets(room) {
   const { bullets, players } = room;
   for (let i = bullets.length - 1; i >= 0; i--) {
@@ -5053,14 +5220,32 @@ function updateBullets(room) {
     if (!b) continue;
     // Death sequence clears the bullet list mid-pass — stop cleanly.
     if (room.roundResetting) return;
+    if (b.type === 'rocket') applyRocketFlight(room, b);
     steerHomingBullet(room, b);
     b.x += b.vx;
     b.y += b.vy;
+
+    if (b.type === 'rocket' && b.lifeLeft != null) {
+      b.lifeLeft = (b.lifeLeft | 0) - 1;
+      if ((b.lifeLeft | 0) <= 0) {
+        detonateRocket(room, b, 2);
+        bullets.splice(i, 1);
+        continue;
+      }
+    }
+
     if (b.x < 0 || b.x > W || b.y < 0 || b.y > H) {
-      roomBroadcast(room, { t: 'bd', id: b.id, hit: 0, x: b.x, y: b.y });
+      // Timed worm rockets explode at the edge; normal rockets just despawn.
+      if (b.type === 'rocket' && b.lifeLeft != null) {
+        detonateRocket(room, b, 2);
+      } else {
+        roomBroadcast(room, { t: 'bd', id: b.id, hit: 0, x: b.x, y: b.y });
+      }
       bullets.splice(i, 1);
       continue;
     }
+
+    if (b.type === 'rocket') maybeResyncRocketNet(room, b);
 
     if (b.type === 'voidcannon') {
       if (!b.voidTouch) b.voidTouch = new Map();
@@ -5120,7 +5305,7 @@ function updateBullets(room) {
         const key = 'r:' + r.id;
         active.add(key);
         applyVoidOverlapPulse(b, key, () => {
-          deflectRocketFromShooter(room, r, b.owner);
+          damageRocket(room, r, b.dmg || BULLET_TYPES.voidcannon.dmg);
         });
       }
       for (const key of [...b.voidTouch.keys()]) {
@@ -5196,7 +5381,7 @@ function updateBullets(room) {
       if (hitEnemy) continue;
     }
 
-    // Hitting another player's rocket deflects it 10° away (does not destroy).
+    // Hitting another player's rocket damages its hull (detonates at 0 HP).
     {
       let hitRocket = false;
       for (let j = bullets.length - 1; j >= 0; j--) {
@@ -5206,8 +5391,8 @@ function updateBullets(room) {
         if ((r.owner | 0) === (b.owner | 0)) continue;
         if (blocksFriendlyFire(room, b.owner)) continue;
         if (!hitBulletTarget(b, r.x, r.y, rocketHitR(r), false)) continue;
-        if ((b.owner | 0) > 0) deflectRocketFromShooter(room, r, b.owner);
-        else deflectRocketAwayFrom(room, r, b.x, b.y);
+        const rdmg = b.type === 'rocket' ? ROCKET_HP_DEFAULT : (b.dmg || 1);
+        damageRocket(room, r, rdmg);
         if (b.type === 'rocket') {
           detonateRocket(room, b, 1);
         } else {

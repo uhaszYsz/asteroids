@@ -1582,6 +1582,7 @@ function applyPlayerColors(rows) {
 }
 
 function ownerPlayerColor(ownerId) {
+  if ((ownerId | 0) <= 0) return COL.enemy || COL.rocket;
   if (ownerId === myId) return myPlayerColorRgb || COL.self;
   const c = playerColors.get(ownerId);
   return (c && c.player) || COL.remote;
@@ -14879,6 +14880,45 @@ function bulletAgeTicks(b) {
 /** Server spawn + NTP age. */
 function bulletTrueAt(b) {
   const age = bulletAgeTicks(b);
+  if (b && b.type === 'rocket' && ((+b.accel || 0) > 0 || (+b.homing || 0) > 0)) {
+    let x = b.spawnX;
+    let y = b.spawnY;
+    let vx = b.vx;
+    let vy = b.vy;
+    const accel = +b.accel || 0;
+    const maxSpd = b.maxSpeed != null && +b.maxSpeed > 0 ? +b.maxSpeed : 0;
+    const homeDeg = +b.homing || 0;
+    const homeRad = (homeDeg * Math.PI) / 180;
+    const steps = Math.min(600, Math.max(0, Math.floor(age)));
+    let tx = null;
+    let ty = null;
+    if (homeDeg > 0) {
+      try {
+        const me = localView();
+        tx = me.x;
+        ty = me.y;
+      } catch (err) {
+        tx = null;
+      }
+    }
+    for (let i = 0; i < steps; i++) {
+      let spd = Math.hypot(vx, vy);
+      let ang = spd > 1e-6 ? Math.atan2(vy, vx) : 0;
+      if (accel > 0) {
+        const next = spd + accel;
+        spd = maxSpd > 0 ? Math.min(maxSpd, next) : next;
+      }
+      if (homeDeg > 0 && tx != null) {
+        const want = Math.atan2(ty - y, tx - x);
+        ang = enemyTurnAngleToward(ang, want, homeRad);
+      }
+      vx = Math.cos(ang) * spd;
+      vy = Math.sin(ang) * spd;
+      x += vx;
+      y += vy;
+    }
+    return { x, y, vx, vy };
+  }
   return {
     x: b.spawnX + b.vx * age,
     y: b.spawnY + b.vy * age
@@ -15006,7 +15046,7 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
 }
 
 function unpackBullet(row) {
-  return {
+  const b = {
     id: row[0],
     spawnX: row[1],
     spawnY: row[2],
@@ -15016,6 +15056,13 @@ function unpackBullet(row) {
     spawnSt: row[6],
     type: row[7] || 'default'
   };
+  if (b.type === 'rocket') {
+    b.accel = row[8] != null ? +row[8] : 0;
+    b.maxSpeed = row[9] != null ? +row[9] : 0;
+    b.homing = row[10] != null ? +row[10] : 0;
+    b.hp = row[11] != null ? (row[11] | 0) : 190;
+  }
+  return b;
 }
 
 /**
@@ -18387,10 +18434,12 @@ function renderBullets() {
   // Default trail runs every other frame so it stays lighter than rockets.
   const defaultTrail = ((performance.now() / 32) | 0) % 2 === 0;
   for (const b of bullets.values()) {
-    const ang = Math.atan2(b.vy, b.vx);
     const p = bulletAt(b);
+    const vx = p.vx != null ? p.vx : b.vx;
+    const vy = p.vy != null ? p.vy : b.vy;
+    const ang = Math.atan2(vy, vx);
     if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
-    const pt = drawBulletVisual(b.type, p.x, p.y, ang, b.vx, b.vy, defaultTrail, b.id, b.owner);
+    const pt = drawBulletVisual(b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner);
     if (pt) {
       const rainbow = ownerHasDamagePowerup(b.owner) && DAMAGE_RAINBOW_TYPES.has(b.type || 'default');
       if (rainbow) rainbowPts.push(pt);
@@ -19362,6 +19411,12 @@ function handleWsMessage(e) {
         b.vy = row[4];
         b.spawnSt = row[6];
         if (row[7]) b.type = row[7];
+        if (b.type === 'rocket') {
+          if (row[8] != null) b.accel = +row[8];
+          if (row[9] != null) b.maxSpeed = +row[9];
+          if (row[10] != null) b.homing = +row[10];
+          if (row[11] != null) b.hp = row[11] | 0;
+        }
       } else {
         addBullet(unpackBullet(row), false, false);
       }

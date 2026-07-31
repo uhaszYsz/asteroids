@@ -414,6 +414,32 @@ const ENEMY_WORM_LASER = {
   dmg: 8,
   width: 12 * RES_SCALE
 };
+/**
+ * Worm rocket barrage — shotgun-style, full 360° per volley (ammo×shotgun = 6).
+ * Speed/accel/homing are literal px/tick (not RES_SCALE).
+ */
+const ENEMY_WORM_ROCKET = {
+  ammo: 2,
+  shotgun: 3,
+  spread: 360,
+  cooldown: Math.round(0.5 * TPS),
+  reload: Math.round(1 * TPS),
+  speed: 3,
+  maxSpeed: 7,
+  accel: 0.3,
+  homing: 5,
+  lifeMinS: 6,
+  lifeMaxS: 14,
+  hp: 20
+};
+/** Player (and default) rocket hull HP — depleted by hitscans / bullets before detonate. */
+const ROCKET_HP_DEFAULT = 190;
+/** Default rocket accel (px/tick). 0 = constant speed. */
+const ROCKET_ACCEL_DEFAULT = 0;
+/** Default rocket homing turn (degrees/tick). 0 = disabled. */
+const ROCKET_HOMING_DEFAULT = 0;
+/** How often accel/homing rockets resync pose to clients. */
+const ROCKET_NET_INTERVAL = 5;
 /** Level-1 laser / plasma stats mirrored for carriers. */
 const ENEMY_LASER = {
   ammo: WEAPONS.laser.ammo,
