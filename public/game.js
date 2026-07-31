@@ -14022,6 +14022,8 @@ let inputSeq = 0;
 let pendingInputs = [];
 let frameHistory = [];
 let lastAppliedSeq = 0;
+/** Offline: shoot-FX cursor (pose comes from snaps; must not reuse lastAppliedSeq). */
+let offlineShootSeq = 0;
 /** Highest seq we've put on the wire at least once (not an ack). */
 let lastSentSeq = 0;
 /** Highest seq the server has applied (from snaps). Resend anything above this. */
@@ -14456,28 +14458,19 @@ function hardSnapLocalPlayerFromRow(row) {
   softErr.x = 0;
   softErr.y = 0;
   softErr.angle = 0;
-  lastAppliedSeq = Math.max(lastAppliedSeq | 0, ack);
+  lastAppliedSeq = ack;
+  offlineShootSeq = Math.max(offlineShootSeq | 0, ack);
   pendingInputs = pendingInputs.filter(f => f.seq > ack);
 }
 
 /**
- * Offline solo: every host snap owns the ship. Copy pose, then replay only
- * unacked released inputs (0–1 ticks). No softErr — worm hitches can't drift you.
+ * Offline solo: every host snap owns the ship. No unacked replay — local predict
+ * is disabled offline so replaying here only reopened the dual-sim fight.
  */
 function syncOfflineLocalPlayerFromRow(row) {
   if (!row) return;
   const prevHp = player.hp | 0;
-  const ack = row[7] | 0;
   hardSnapLocalPlayerFromRow(row);
-  const releaseAt = releasedSeq();
-  let applied = ack;
-  for (const f of pendingInputs) {
-    if (f.seq > ack && f.seq <= releaseAt) {
-      applyInputTo(player, f);
-      applied = f.seq;
-    }
-  }
-  lastAppliedSeq = applied;
   softErr.x = 0;
   softErr.y = 0;
   softErr.angle = 0;
@@ -14865,6 +14858,7 @@ function resetMatchState() {
   lastAppliedSeq = 0;
   lastSentSeq = 0;
   ackedSeq = 0;
+  offlineShootSeq = 0;
   lastInputSendAt = 0;
   inputSeq = 0;
   resetTickClock();
@@ -18161,6 +18155,52 @@ function predictTick(forceShoot) {
     if (shootPulse) shootPulse = false;
     return;
   }
+
+  // PvP intro: do not locally predict movement (server is frozen until go).
+  if (!matchLive) {
+    const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sh: 0 };
+    pendingInputs.push(frame);
+    if (pendingInputs.length > 90) pendingInputs.shift();
+    rememberFrame(frame);
+    sendPendingInputs();
+    const applyUntil = releasedSeq();
+    while (lastAppliedSeq < applyUntil) {
+      const ready = frameBySeq(lastAppliedSeq + 1);
+      if (!ready) break;
+      lastAppliedSeq++;
+    }
+    if (shootPulse) shootPulse = false;
+    return;
+  }
+
+  // Offline local host: send inputs only — pose comes from every snap.
+  // Dual predict+snap was the shake/jump fight (esp. early thrust).
+  if (isOfflineLocalPlay()) {
+    if ((spaceLatch || enterLatch) && !localShoot.bursting && localShoot.reloadLeft === 0 &&
+        localShoot.shootAmmo > 0 && (localShoot.shootCd | 0) <= 0) {
+      shootPulse = true;
+    }
+    const inp = getInput();
+    if (forceShoot) inp.sp = 1;
+    const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh };
+    pendingInputs.push(frame);
+    if (pendingInputs.length > 90) pendingInputs.shift();
+    rememberFrame(frame);
+    sendPendingInputs();
+    // Local shoot FX only; do not advance lastAppliedSeq (snaps own that).
+    const applyUntil = releasedSeq();
+    while (offlineShootSeq < applyUntil) {
+      const ready = frameBySeq(offlineShootSeq + 1);
+      if (!ready) break;
+      offlineShootSeq++;
+      if (ready.sp) tryStartLocalBurst();
+      updateLocalShooting();
+    }
+    if (shootPulse) shootPulse = false;
+    if (demoRec) demoRecordAfterTick(frame);
+    return;
+  }
+
   // Held shoot: re-pulse when a new burst can start (railgun after cooldown, post-reload, etc.).
   if ((spaceLatch || enterLatch) && !localShoot.bursting && localShoot.reloadLeft === 0 &&
       localShoot.shootAmmo > 0 && (localShoot.shootCd | 0) <= 0) {
@@ -18692,6 +18732,7 @@ function enterGameFromWelcome(msg) {
   lastAppliedSeq = 0;
   lastSentSeq = 0;
   ackedSeq = 0;
+  offlineShootSeq = 0;
   lastInputSendAt = 0;
   pendingInputs = [];
   frameHistory = [];

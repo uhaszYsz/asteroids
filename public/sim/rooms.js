@@ -538,6 +538,22 @@ function stepRoom(room) {
       p.inp.sp = 0;
       continue;
     }
+    // PvP intro (waiting for ready): ack inputs but do not move — client used to
+    // predict thrust while we drifted, then snaps fought the ship.
+    if (!room.matchLive && !room.practice) {
+      p.vx = 0;
+      p.vy = 0;
+      p.av = 0;
+      p.inp.u = 0;
+      p.inp.l = 0;
+      p.inp.r = 0;
+      p.inp.sp = 0;
+      p.bursting = false;
+      p.railChargeLeft = 0;
+      p.prevX = p.x;
+      p.prevY = p.y;
+      continue;
+    }
     applyInput(p);
     if (room.matchLive && (!p.bot || room.perfTest) && p.hp > 0 && p.inp.u) {
       fireThrustRay(room, p);
