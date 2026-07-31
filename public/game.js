@@ -14911,7 +14911,7 @@ function applyWorldSyncMsg(msg) {
   }
   if (msg.enemies) {
     enemies.clear();
-    enemyCharges.clear();
+    clearAllEnemyCharges();
     for (const row of msg.enemies) addEnemy(unpackEnemy(row));
   }
   predReady = true;
@@ -15207,7 +15207,7 @@ function applyResumedMsg(msg) {
   }
   if (msg.enemies) {
     enemies.clear();
-    enemyCharges.clear();
+    clearAllEnemyCharges();
     for (const row of msg.enemies) addEnemy(unpackEnemy(row));
   }
   clearMatchPause();
@@ -15281,7 +15281,7 @@ function resetMatchState() {
   stopBcastFx();
   asteroids.clear();
   enemies.clear();
-  enemyCharges.clear();
+  clearAllEnemyCharges();
   clearCoins();
   localCoins = 0;
   localScore = 0;
@@ -17077,6 +17077,8 @@ const COL_CHARGE_RED = [1.0, 0.12, 0.1];
 const enemyCharges = new Map(); // id -> { start, until, ms, side, kind }
 /** Last bank used while drawing commons / UFOs — charge orbs match hull roll. */
 const enemyDrawBank = new Map();
+/** Worm tip suck-in particles (local 3D offsets from charge sphere center). */
+const wormChargeSuck = new Map(); // id -> { parts, last }
 
 /** Live craft-367 nose half-length (same formula as drawSpriteShipPlane). */
 function wormSpriteHalfLength() {
@@ -17092,6 +17094,78 @@ function wormSpriteVisualBank(id, baseBank) {
     + hitVibrationRoll('e', id)
     + performance.now() * 0.001 * ENEMY_WORM_SPIN_RATE
     + (id | 0) * 0.73;
+}
+
+function clearWormChargeSuck(id) {
+  wormChargeSuck.delete(id | 0);
+}
+
+function spawnWormChargeSuckPart(sphereR) {
+  // Random direction on a shell outside/around the sphere.
+  const u = Math.random() * Math.PI * 2;
+  const v = Math.acos(2 * Math.random() - 1);
+  const rad = sphereR * (0.9 + Math.random() * 1.2);
+  const sn = Math.sin(v);
+  return {
+    x: Math.cos(u) * sn * rad,
+    y: Math.sin(u) * sn * rad,
+    z: Math.cos(v) * rad,
+    life: 0.22 + Math.random() * 0.38,
+    age: 0,
+    size: (0.55 + Math.random() * 0.85) * RES_SCALE
+  };
+}
+
+/** Keep ~10 local-3D particles sucking into the worm charge tip. */
+function updateAndDrawWormChargeSuck(id, sx, sy, angle, bank, halfL, tipLy, tipLz, sphereR, now, alpha) {
+  let state = wormChargeSuck.get(id | 0);
+  if (!state) {
+    state = { parts: [], last: now };
+    wormChargeSuck.set(id | 0, state);
+  }
+  const dt = Math.min(0.05, Math.max(0.001, (now - state.last) * 0.001));
+  state.last = now;
+  const parts = state.parts;
+  while (parts.length < 10) parts.push(spawnWormChargeSuckPart(sphereR));
+
+  const suck = 5.2;
+  const inner = Math.max(0.35 * RES_SCALE, sphereR * 0.07);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const pt = parts[i];
+    pt.age += dt;
+    // Exponential pull toward sphere center (local 0).
+    const k = Math.exp(-suck * dt);
+    pt.x *= k;
+    pt.y *= k;
+    pt.z *= k;
+    const dist = Math.hypot(pt.x, pt.y, pt.z);
+    if (pt.age >= pt.life || dist < inner) {
+      parts[i] = spawnWormChargeSuckPart(sphereR);
+    }
+  }
+
+  // Draw back-to-front by projected depth.
+  const drawn = [];
+  for (let i = 0; i < parts.length; i++) {
+    const pt = parts[i];
+    const proj = projectMesh3D(
+      [[halfL + pt.x, tipLy + pt.y, tipLz + pt.z]],
+      sx, sy, angle, bank, SPRITE_ROOF_LIFT
+    );
+    drawn.push({
+      x: proj.xy[0],
+      y: proj.xy[1],
+      z: proj.depth[0],
+      size: pt.size,
+      lifeT: 1 - Math.min(1, pt.age / Math.max(1e-4, pt.life))
+    });
+  }
+  drawn.sort((a, b) => a.z - b.z);
+  for (const d of drawn) {
+    const a = Math.min(1, (alpha == null ? 0.7 : alpha) * (0.35 + 0.65 * d.lifeT));
+    const s = d.size * (0.55 + 0.45 * d.lifeT);
+    drawFilledPoly(circleVerts(d.x, d.y, s, 8), COL_CHARGE_RED, a, false);
+  }
 }
 
 function beginEnemyCharge(id, ms, side, kind) {
@@ -17111,6 +17185,12 @@ function beginEnemyCharge(id, ms, side, kind) {
 
 function clearEnemyCharge(id) {
   enemyCharges.delete(id | 0);
+  clearWormChargeSuck(id);
+}
+
+function clearAllEnemyCharges() {
+  enemyCharges.clear();
+  wormChargeSuck.clear();
 }
 
 function shipLocalToWorldLift(lx, ly, lz, cx, cy, yaw, bank, lift) {
@@ -17210,7 +17290,7 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const zSpan = Math.max(1e-4, zMax - zMin);
   const base = color || COL_CHARGE_RED;
   const fillA = alpha == null ? 0.35 : alpha;
-  // Additive emission fill (SRC_ALPHA, ONE).
+  // Solid (non-additive) shaded fill.
   for (const o of order) {
     const f = faces[o.i];
     const ax = xy[f[1] * 2] - xy[f[0] * 2];
@@ -17218,34 +17298,26 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
     const bx = xy[f[2] * 2] - xy[f[0] * 2];
     const by = xy[f[2] * 2 + 1] - xy[f[0] * 2 + 1];
     if (ax * by - ay * bx >= 0) continue;
-    const shade = 0.45 + 0.7 * ((o.z - zMin) / zSpan);
-    // Godot-style solid emission: albedo + tint×energy.
-    const emit = 0.85;
+    const shade = 0.4 + 0.6 * ((o.z - zMin) / zSpan);
     const col = [
-      Math.min(1, base[0] * shade + base[0] * emit),
-      Math.min(1, base[1] * shade + base[1] * emit * 0.55),
-      Math.min(1, base[2] * shade + base[2] * emit * 0.45)
+      Math.min(1, base[0] * shade + 0.12),
+      Math.min(1, base[1] * shade),
+      Math.min(1, base[2] * shade)
     ];
     drawFilledPoly([
       xy[f[0] * 2], xy[f[0] * 2 + 1],
       xy[f[1] * 2], xy[f[1] * 2 + 1],
       xy[f[2] * 2], xy[f[2] * 2 + 1]
-    ], col, fillA, true);
+    ], col, fillA, false);
   }
-  // Additive wireframe + soft outer glow.
+  // Solid wireframe — 3 px.
   const edgeW = 3;
-  const edgeCol = [1, 0.22, 0.16];
-  const edgeA = Math.min(1, fillA + 0.45);
+  const edgeCol = [1, 0.2, 0.15];
   for (const e of mesh.edges) {
     drawThickSegment(
       xy[e[0] * 2], xy[e[0] * 2 + 1],
       xy[e[1] * 2], xy[e[1] * 2 + 1],
-      edgeW, edgeCol, edgeA, true
-    );
-    drawThickSegment(
-      xy[e[0] * 2], xy[e[0] * 2 + 1],
-      xy[e[1] * 2], xy[e[1] * 2 + 1],
-      edgeW + 2, edgeCol, edgeA * 0.4, true
+      edgeW, edgeCol, Math.min(1, fillA + 0.45), false
     );
   }
 }
@@ -17255,34 +17327,34 @@ function drawEnemyCommonCharges() {
   const now = performance.now();
   for (const [id, ch] of enemyCharges) {
     if (!ch || now >= ch.until) {
-      enemyCharges.delete(id);
+      clearEnemyCharge(id);
       continue;
     }
     const e = enemies.get(id);
     if (!e || (e.hp | 0) <= 0) {
-      enemyCharges.delete(id);
+      clearEnemyCharge(id);
       continue;
     }
     const kind = ch.kind || e.kind;
     if (kind !== 'common' && kind !== 'ufo' && kind !== 'worm') {
-      enemyCharges.delete(id);
+      clearEnemyCharge(id);
       continue;
     }
     if (kind === 'ufo' && e.kind !== 'ufo') {
-      enemyCharges.delete(id);
+      clearEnemyCharge(id);
       continue;
     }
     if (kind === 'common' && e.kind !== 'common') {
-      enemyCharges.delete(id);
+      clearEnemyCharge(id);
       continue;
     }
     if (kind === 'worm' && e.kind !== 'worm') {
-      enemyCharges.delete(id);
+      clearEnemyCharge(id);
       continue;
     }
     // Worm laser aim charge: timed to ENEMY_WORM_AIM_TICKS (clear early once beam starts).
     if (kind === 'worm' && (e.wormPhase | 0) >= 2) {
-      enemyCharges.delete(id);
+      clearEnemyCharge(id);
       continue;
     }
     const p = enemyAt(e);
@@ -17341,6 +17413,10 @@ function drawEnemyCommonCharges() {
       const vs = voidShakeOffset('e', id);
       let sx = p.x + vs.x;
       let sy = p.y + vs.y;
+      // Continuous ±1px shake along worm width (local Y).
+      const tipLy = Math.sin(now * 0.045 + id * 1.9) * RES_SCALE;
+      const tipLz = 0;
+      // Late charge: keep the stronger world-space shake.
       if (shake > 0) {
         const ph = now * 0.055 + id * 2.1;
         sx += Math.cos(ph) * shake;
@@ -17350,19 +17426,22 @@ function drawEnemyCommonCharges() {
       drawEnemyChargeSphere(sx, sy, wr, p.angle, visBank, COL_CHARGE_RED, alpha, {
         lift: SPRITE_ROOF_LIFT,
         localX: halfL,
-        localY: 0,
-        localZ: 0
+        localY: tipLy,
+        localZ: tipLz
       });
+      updateAndDrawWormChargeSuck(
+        id, sx, sy, p.angle, visBank, halfL, tipLy, tipLz, wr, now, alpha
+      );
       if (t > 0.75) {
         const flash = (t - 0.75) / 0.25;
         const tip = projectMesh3D(
-          [[halfL, 0, 0]], sx, sy, p.angle, visBank, SPRITE_ROOF_LIFT
+          [[halfL, tipLy, tipLz]], sx, sy, p.angle, visBank, SPRITE_ROOF_LIFT
         );
         drawFilledPoly(
           circleVerts(tip.xy[0], tip.xy[1], (1.2 + flash * 2.2) * RES_SCALE * 2, 16),
           COL_CHARGE_RED,
           0.2 + flash * 0.55,
-          true
+          false
         );
       }
       continue;
@@ -19421,7 +19500,7 @@ function enterGameFromWelcome(msg) {
   scores.clear();
   asteroids.clear();
   enemies.clear();
-  enemyCharges.clear();
+  clearAllEnemyCharges();
   clearCoins();
   localCoins = 0;
   localScore = 0;
@@ -19523,7 +19602,7 @@ function enterGameFromWelcome(msg) {
   }
   if (msg.enemies) {
     enemies.clear();
-    enemyCharges.clear();
+    clearAllEnemyCharges();
     for (const row of msg.enemies) addEnemy(unpackEnemy(row));
   }
   if (msg.pickups) {
@@ -22300,7 +22379,7 @@ function demoApplySnap(ev) {
     }
   }
   enemies.clear();
-  enemyCharges.clear();
+  clearAllEnemyCharges();
   if (ev.enemies) {
     for (const row of ev.enemies) addEnemy(unpackEnemy(row));
   }
