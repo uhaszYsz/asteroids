@@ -7013,6 +7013,7 @@ function enemyMaxHp(kind) {
   if (kind === 'ufo') return 300;
   if (kind === 'carrier') return 90;
   if (kind === 'worm') return 1000;
+  if (kind === 'spinner') return 320;
   return 95;
 }
 
@@ -7149,6 +7150,7 @@ function enemyThrustColor(kind) {
   if (kind === 'ufo') return COL.enemyUfo;
   if (kind === 'carrier') return COL.enemyCarrier;
   if (kind === 'worm') return COL.enemy;
+  if (kind === 'spinner') return COL.enemy;
   return COL.enemy;
 }
 
@@ -15838,7 +15840,8 @@ const ENEMY_R = {
   common: 6 * RES_SCALE,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
-  worm: 10 * RES_SCALE
+  worm: 10 * RES_SCALE,
+  spinner: 8 * RES_SCALE
 };
 /**
  * UFO (Heavy 370) after 270° CW: fw=52, fh=84.
@@ -15944,6 +15947,7 @@ function parseEnemyKind(raw) {
   if (raw === 'ufo') return 'ufo';
   if (raw === 'carrier') return 'carrier';
   if (raw === 'worm') return 'worm';
+  if (raw === 'spinner') return 'spinner';
   return 'common';
 }
 
@@ -16214,6 +16218,10 @@ const ENEMY_WORM_SPRITE_ID = 'enemy_184';
 const ENEMY_WORM_SPRITE_SCALE = 1;
 /** Continuous roll around nose / length axis (rad/s). Doubled while laser-attack holding. */
 const ENEMY_WORM_SPIN_RATE = 3.2;
+const ENEMY_SPINNER_SPRITE_ID = 'enemy_136';
+const ENEMY_SPINNER_SPRITE_SCALE = 1;
+/** Visual yaw spin rate while alive (rad/s) — shoot spin is server-side. */
+const ENEMY_SPINNER_VIS_SPIN = 2.4;
 const ENEMY_COMMON_MESH = (() => {
   return cloneShipMeshScaled(SHIP_MESHES[0], ENEMY_COMMON_SCALE);
 })();
@@ -16400,6 +16408,23 @@ function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
+  }
+  return bank;
+}
+
+/** Spinner: compact craft with continuous yaw spin for the radial-burst look. */
+function drawEnemySpinner(x, y, angle, color, id, dt) {
+  const bank = enemyBankSmoothed(id, angle, dt);
+  const opt = getShipOptionById(ENEMY_SPINNER_SPRITE_ID);
+  const yaw = angle + performance.now() * 0.001 * ENEMY_SPINNER_VIS_SPIN + (id | 0) * 0.41;
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(
+      x, y, yaw, 0, id, dt, opt, true, color,
+      bank, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
+      null
+    );
+  } else {
+    drawEnemyCommon(x, y, yaw, color, id, dt);
   }
   return bank;
 }
@@ -16818,6 +16843,9 @@ function drawEnemies(dt) {
     else if (p.kind === 'carrier') drawEnemyCarrier(x, y, p.angle, e.weapon);
     else if (p.kind === 'worm') {
       const bank = drawEnemyWorm(x, y, p.angle, COL.enemy, id, dt, !!e.wormAtk);
+      enemyDrawBank.set(id, bank);
+    } else if (p.kind === 'spinner') {
+      const bank = drawEnemySpinner(x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
     } else {
       const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt);
@@ -22233,7 +22261,7 @@ function runConsole(line) {
   if (cmdName === 'spawn') {
     if (!conRequireAdmin()) return;
     if (!args.length) {
-      conPrint('usage: spawn big|medium|small|huge|meteor|common|ufo|worm', 'err');
+      conPrint('usage: spawn big|medium|small|huge|meteor|common|ufo|worm|spinner', 'err');
       return;
     }
     if (!ws || ws.readyState !== 1) {
@@ -22253,7 +22281,7 @@ function runConsole(line) {
     conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
     conPrint('give <weapon|powerup|admingun>  — grant loadout (admin, in-game)', 'info');
-    conPrint('spawn big|medium|small|huge|meteor|common|ufo|worm  — off-screen spawn (admin, in-game)', 'info');
+    conPrint('spawn big|medium|small|huge|meteor|common|ufo|worm|spinner  — off-screen spawn (admin, in-game)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');
     conPrint('cl_allToDefault 1  — reset all cl_ cvars to defaults', 'info');

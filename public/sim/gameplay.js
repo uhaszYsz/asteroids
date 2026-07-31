@@ -629,6 +629,7 @@ function makeEnemy(kind, wave, weapon) {
   if (kind === 'ufo') k = 'ufo';
   else if (kind === 'carrier') k = 'carrier';
   else if (kind === 'worm') k = 'worm';
+  else if (kind === 'spinner') k = 'spinner';
   // Random 4–6s before first shot (reuse fireCd / shootCd — no extra timer).
   const firstShotCd = Math.round(
     (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
@@ -653,8 +654,8 @@ function makeEnemy(kind, wave, weapon) {
     ty: 0,
     fireCd: firstShotCd,
     shootAmmo: 0,
-    // Carriers gate on shootCd; commons/UFOs use fireCd.
-    shootCd: k === 'carrier' ? firstShotCd : 0,
+    // Carriers / spinners gate on shootCd; commons/UFOs use fireCd.
+    shootCd: (k === 'carrier' || k === 'spinner') ? firstShotCd : 0,
     reloadLeft: 0,
     bursting: false,
     railChargeLeft: 0,
@@ -665,13 +666,18 @@ function makeEnemy(kind, wave, weapon) {
     // rocket barrage: 4 fire, 5 reload. wormAtk 0=laser next, 1=rockets next.
     wormPhase: 0,
     wormAimLeft: 0,
-    wormAtk: 0
+    wormAtk: 0,
+    spinAng: 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
     if (e.weapon === 'laser') e.shootAmmo = ENEMY_LASER.ammo;
     else if (e.weapon === 'plasma') e.shootAmmo = ENEMY_PLASMA.ammo;
     else if (e.weapon === 'rail') e.shootAmmo = 1;
+  }
+  if (k === 'spinner') {
+    e.shootAmmo = ENEMY_SPINNER.ammo;
+    e.spinAng = Math.random() * Math.PI * 2;
   }
   return e;
 }
@@ -737,10 +743,11 @@ function spawnSoloWaveEnemies(room, wave) {
 
   if (commonN <= 0) return;
 
-  // 25% UFO wave: add one UFO and keep half the commons (random).
-  const spawnUfo = Math.random() < UFO_WAVE_CHANCE;
-  if (spawnUfo) {
-    const e = makeEnemy('ufo', wave);
+  // 25% special wave: one UFO or spinner (50/50), half the commons.
+  const spawnSpecial = Math.random() < UFO_WAVE_CHANCE;
+  if (spawnSpecial) {
+    const specialKind = Math.random() < 0.5 ? 'spinner' : 'ufo';
+    const e = makeEnemy(specialKind, wave);
     e.id = room.nextEnemyId++;
     e.appearLeft = 0;
     e.queued = false;
@@ -1231,6 +1238,31 @@ function fireEnemyRocket(room, e, ang, spd, dmg) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
+function updateSpinnerWeapon(room, e) {
+  if ((e.shootCd | 0) > 0) e.shootCd--;
+  if ((e.reloadLeft | 0) > 0) {
+    e.reloadLeft--;
+    if (e.reloadLeft === 0) e.shootAmmo = ENEMY_SPINNER.ammo;
+    return;
+  }
+  if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) {
+    if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_SPINNER.reload;
+    return;
+  }
+  const base = Number.isFinite(e.spinAng) ? e.spinAng : 0;
+  const step = Math.PI / 2;
+  for (let i = 0; i < 4; i++) {
+    fireEnemyLineBullet(
+      room, e, base + i * step,
+      ENEMY_SPINNER.speed, ENEMY_SPINNER.dmg
+    );
+  }
+  e.spinAng = base + (ENEMY_SPINNER.spin * Math.PI) / 180;
+  e.shootAmmo--;
+  e.shootCd = ENEMY_SPINNER.cooldown;
+  if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_SPINNER.reload;
+}
+
 function enemyTryFire(room, e) {
   const target = soloHumanTarget(room);
   if (!target) return;
@@ -1242,6 +1274,11 @@ function enemyTryFire(room, e) {
 
   if (e.kind === 'worm') {
     updateWormAttack(room, e, target);
+    return;
+  }
+
+  if (e.kind === 'spinner') {
+    updateSpinnerWeapon(room, e);
     return;
   }
 
@@ -2532,7 +2569,7 @@ function resolveAdminGiveItem(raw) {
 
 /**
  * Admin console `spawn <kind>` — off-screen asteroid / enemy with normal entry path.
- * kinds: big medium small huge meteor common ufo worm
+ * kinds: big medium small huge meteor common ufo worm spinner
  */
 function handleAdminSpawn(ws, kindRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -2558,7 +2595,7 @@ function handleAdminSpawn(ws, kindRaw) {
     emitAsteroidFire(room, a);
     return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
   }
-  if (kind === 'common' || kind === 'ufo' || kind === 'worm') {
+  if (kind === 'common' || kind === 'ufo' || kind === 'worm' || kind === 'spinner') {
     if (!room.practice) return { ok: 0, err: 'enemies only in solo/coop wave rooms' };
     if (!room.enemies) room.enemies = [];
     if (!room.nextEnemyId) room.nextEnemyId = 1;
@@ -2572,7 +2609,7 @@ function handleAdminSpawn(ws, kindRaw) {
   }
   return {
     ok: 0,
-    err: 'usage: spawn big|medium|small|huge|meteor|common|ufo|worm'
+    err: 'usage: spawn big|medium|small|huge|meteor|common|ufo|worm|spinner'
   };
 }
 

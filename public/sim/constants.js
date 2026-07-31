@@ -377,7 +377,8 @@ const ENEMY_R = {
   common: 6 * RES_SCALE,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
-  worm: 10 * RES_SCALE
+  worm: 10 * RES_SCALE,
+  spinner: 8 * RES_SCALE
 };
 /**
  * UFO (Heavy 370) after 270° CW load: fw=52, fh=84.
@@ -391,7 +392,17 @@ const ENEMY_HP = {
   common: 95,
   ufo: 300,
   carrier: 90,
-  worm: 1000
+  worm: 1000,
+  spinner: 320
+};
+/** Spinner: 4-way radial burst; shoot angle advances `spin` degrees after each volley. */
+const ENEMY_SPINNER = {
+  ammo: 50,
+  cooldown: 5,
+  reload: Math.round(5 * TPS),
+  spin: 8,
+  speed: ENEMY_COMMON_BULLET_SPEED,
+  dmg: ENEMY_COMMON_BULLET_DMG
 };
 const ENEMY_CARRIER_WEAPONS = ['laser', 'plasma', 'rail'];
 const ENEMY_LASER_AIM_DELAY = 12; // frames
