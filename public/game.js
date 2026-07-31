@@ -7263,14 +7263,9 @@ function enemyThrustColor(kind) {
   return COL.enemy;
 }
 
-/** Always-on idle-style thruster trail for every living enemy. */
+/** Enemy engine trails — disabled (read as damage debris on full-HP bosses). */
 function emitEnemyThrustFx() {
-  if (deathSpectating || matchPaused || soloShopOpen) return;
-  for (const e of enemies.values()) {
-    if ((e.hp | 0) <= 0) continue;
-    const p = enemyAt(e);
-    emitThrustIdleFx(p.x, p.y, p.angle, p.vx, p.vy, 0, enemyThrustColor(p.kind));
-  }
+  // no-op
 }
 
 /** Resolve ship/enemy px/tick velocity for muzzle particle inherit. */
@@ -17687,7 +17682,7 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   faceItems.sort((a, b) => a.z - b.z);
 
   const base = color || COL_CHARGE_HOT;
-  const fillA = 0.92;
+  const fillA = 0.6;
   // Charge pulse: 5 Hz → 30 Hz as charge fills.
   const pulseHz = 5 + 25 * Math.min(1, Math.max(0, chargeT));
   const pulse01 = 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * pulseHz * Math.PI * 2);
@@ -17787,10 +17782,10 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   if (hwDepth) {
     const co = packChargeTexFaces(chargeTexMesh, faceItems, coreS);
     gl.depthMask(true);
-    drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_HOT, 0.95, emitPow * 1.2, pulse01, false);
+    drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_HOT, 0.6, emitPow * 1.2, pulse01, false);
     gl.depthMask(false);
     gl.depthFunc(gl.LEQUAL);
-    drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_CORE, 0.3 + 0.3 * chargeT * pulse01, emitPow * 1.6, pulse01, true);
+    drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_CORE, 0.25 + 0.2 * chargeT * pulse01, emitPow * 1.6, pulse01, true);
     gl.depthMask(true);
     gl.depthFunc(gl.LESS);
   } else {
