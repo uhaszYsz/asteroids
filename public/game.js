@@ -17499,7 +17499,7 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   }
   const zSpan = Math.max(1e-4, zMax - zMin);
   const base = color || COL_CHARGE_RED;
-  const fillA = 1;
+  const fillA = 0.9;
   const emitPow = 0.5;
 
   if (hwDepth) {
