@@ -17073,10 +17073,12 @@ const ENEMY_COMMON_GUNS = [
   [7 * RES_SCALE, 2.4 * RES_SCALE, 0],
   [7 * RES_SCALE, -2.4 * RES_SCALE, 0]
 ];
-/** Worm laser charge orbs — dual commons-style spheres at the nose. */
-const ENEMY_WORM_GUNS = [
-  [ENEMY_WORM_HIT_LEN * 0.42, 3.2 * RES_SCALE, 0],
-  [ENEMY_WORM_HIT_LEN * 0.42, -3.2 * RES_SCALE, 0]
+/** Worm laser charge — one commons-style sphere at sprite tip (local y=0, z=0). */
+const ENEMY_WORM_CHARGE_TIP = [
+  // Nose–tail half-length of craft 367 (fh) × worm sprite scale.
+  49 * 0.5 * ENEMY_WORM_SPRITE_SCALE,
+  0,
+  0
 ];
 const COL_CHARGE_RED = [1.0, 0.12, 0.1];
 const enemyCharges = new Map(); // id -> { start, until, ms, side, kind }
@@ -17311,9 +17313,33 @@ function drawEnemyCommonCharges() {
       continue;
     }
 
-    const guns = kind === 'worm' ? ENEMY_WORM_GUNS : ENEMY_COMMON_GUNS;
-    for (let g = 0; g < guns.length; g++) {
-      const gun = guns[g];
+    if (kind === 'worm') {
+      // Single tip sphere, 2× commons size — local [halfL, 0, 0].
+      const tip = ENEMY_WORM_CHARGE_TIP;
+      let w = localToWorldBanked(tip[0], tip[1], tip[2], p.x, p.y, p.angle, bank);
+      if (shake > 0) {
+        const ph = now * 0.055 + id * 2.1;
+        w = {
+          x: w.x + Math.cos(ph) * shake,
+          y: w.y + Math.sin(ph * 1.37) * shake
+        };
+      }
+      const wr = r * 2;
+      drawEnemyChargeSphere(w.x, w.y, wr, p.angle, spin, COL_CHARGE_RED, alpha);
+      if (t > 0.75) {
+        const flash = (t - 0.75) / 0.25;
+        drawFilledPoly(
+          circleVerts(w.x, w.y, (1.2 + flash * 2.2) * RES_SCALE * 2, 16),
+          COL_CHARGE_RED,
+          0.2 + flash * 0.55,
+          true
+        );
+      }
+      continue;
+    }
+
+    for (let g = 0; g < ENEMY_COMMON_GUNS.length; g++) {
+      const gun = ENEMY_COMMON_GUNS[g];
       let w = localToWorldBanked(gun[0], gun[1], gun[2], p.x, p.y, p.angle, bank);
       if (shake > 0) {
         const ph = now * 0.055 + id * 2.1 + g * 1.3;
@@ -17327,8 +17353,8 @@ function drawEnemyCommonCharges() {
     // Late-phase core flash between the guns.
     if (t > 0.75) {
       const flash = (t - 0.75) / 0.25;
-      const g0 = guns[0];
-      const g1 = guns[1];
+      const g0 = ENEMY_COMMON_GUNS[0];
+      const g1 = ENEMY_COMMON_GUNS[1];
       const mid = localToWorldBanked(
         (g0[0] + g1[0]) * 0.5,
         (g0[1] + g1[1]) * 0.5,
