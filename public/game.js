@@ -15275,20 +15275,17 @@ function bulletAt(b) {
 }
 
 /**
- * Common shot: 2D twin ovals sized like the UFO rocket mesh (ENEMY_ROCKET3D ≈ ship×0.7/3).
- * Soft falloff shrinks the bright core, so half-sizes are padded to match that footprint.
+ * Common / spinner / worm shot: soft circle (glow + white core).
  * scale: 1 = common (L15). Spinner = 20/15. Worm pellets pass their own scale.
  */
 function drawEnemyCommonShot(x, y, ang, scale) {
   const s = scale > 0 ? scale : 1;
   const red = COL.enemyBullet || [1.0, 0.18, 0.12];
-  // UFO rocket spans ~5×8 px at RES_SCALE=2 — glow a bit larger, white core ≈ body.
-  const glowW = 4.2 * RES_SCALE * s;
-  const glowL = 6.0 * RES_SCALE * s;
-  const coreW = 2.4 * RES_SCALE * s;
-  const coreL = 4.8 * RES_SCALE * s;
-  drawSoftOval(x, y, ang, glowW, glowL, red, 0.7, true);
-  drawSoftOval(x, y, ang, coreW, coreL, COL_WHITE, 1, false);
+  const glowR = 4.2 * RES_SCALE * s;
+  const coreR = 2.4 * RES_SCALE * s;
+  // Equal axes → true circle (not flight-aligned oval).
+  drawSoftOval(x, y, 0, glowR, glowR, red, 0.7, true);
+  drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false);
 }
 
 function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, ownerId, sizeOpts) {
