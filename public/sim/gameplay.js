@@ -679,6 +679,7 @@ function makeEnemy(kind, wave, weapon) {
   if (k === 'spinner') {
     e.shootAmmo = ENEMY_SPINNER.ammo;
     e.spinAng = Math.random() * Math.PI * 2;
+    e.spinStepDeg = ENEMY_SPINNER.spinStart;
   }
   return e;
 }
@@ -1295,7 +1296,10 @@ function updateSpinnerWeapon(room, e) {
   if ((e.shootCd | 0) > 0) e.shootCd--;
   if ((e.reloadLeft | 0) > 0) {
     e.reloadLeft--;
-    if (e.reloadLeft === 0) e.shootAmmo = ENEMY_SPINNER.ammo;
+    if (e.reloadLeft === 0) {
+      e.shootAmmo = ENEMY_SPINNER.ammo;
+      e.spinStepDeg = ENEMY_SPINNER.spinStart;
+    }
     return;
   }
   if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) {
@@ -1310,7 +1314,9 @@ function updateSpinnerWeapon(room, e) {
       ENEMY_SPINNER.speed, ENEMY_SPINNER.dmg, 'enemySpinner'
     );
   }
-  e.spinAng = base + (ENEMY_SPINNER.spin * Math.PI) / 180;
+  let spinDeg = Number.isFinite(e.spinStepDeg) ? e.spinStepDeg : ENEMY_SPINNER.spinStart;
+  e.spinAng = base + (spinDeg * Math.PI) / 180;
+  e.spinStepDeg = spinDeg + ENEMY_SPINNER.spinGrow;
   e.shootAmmo--;
   e.shootCd = ENEMY_SPINNER.cooldown;
   if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_SPINNER.reload;
