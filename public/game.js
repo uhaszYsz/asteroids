@@ -5117,12 +5117,27 @@ const softOvalFS = `
   varying vec4 vCol;
   varying vec2 vWorld;
   uniform float uInner;
+  uniform float uPixSize;
+  uniform vec2 uCenter;
+  uniform float uRadius;
 ` + SCENE_LIGHT_GLSL + `
   void main() {
-    float d = length(vUV);
+    float d;
+    if (uPixSize > 0.001) {
+      // Axis-aligned world pixels — glow + core share the same grid.
+      vec2 local = vWorld - uCenter;
+      vec2 cell = floor(local / uPixSize) * uPixSize + uPixSize * 0.5;
+      d = length(cell) / max(uRadius, 0.001);
+    } else {
+      d = length(vUV);
+    }
     if (d > 1.0) discard;
     // Full alpha to uInner, then smooth fade to transparent at the rim.
     float edge = 1.0 - smoothstep(uInner, 1.0, d);
+    if (uPixSize > 0.001) {
+      float steps = max(2.0, uRadius / uPixSize);
+      edge = floor(edge * steps + 0.5) / steps;
+    }
     float a = vCol.a * edge;
     gl_FragColor = applyNightLitPremul(vCol.rgb, a, vWorld);
   }
@@ -5136,6 +5151,9 @@ gl.attachShader(softOvalProg, shader(gl.FRAGMENT_SHADER, softOvalFS));
 linkProgram(softOvalProg);
 const soURes = gl.getUniformLocation(softOvalProg, 'uRes');
 const soUInner = gl.getUniformLocation(softOvalProg, 'uInner');
+const soUPixSize = gl.getUniformLocation(softOvalProg, 'uPixSize');
+const soUCenter = gl.getUniformLocation(softOvalProg, 'uCenter');
+const soURadius = gl.getUniformLocation(softOvalProg, 'uRadius');
 const soAPos = gl.getAttribLocation(softOvalProg, 'aPos');
 const soAUV = gl.getAttribLocation(softOvalProg, 'aUV');
 const soACol = gl.getAttribLocation(softOvalProg, 'aCol');
@@ -5149,11 +5167,14 @@ const softOvalMesh = new Float32Array(6 * 8); // 2 tris × stride 8
 /**
  * Oriented soft oval. halfW = cross-axis half-size, halfL = along-ang half-size.
  * softInner: UV radius of solid alpha (default 0.35); fade from there to rim.
- * Does not pixel-snap (avoids tiny ovals collapsing to 2×2 squares).
+ * pixSize: world units per pixel block (0 = smooth). Circles share a world grid.
  */
-function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInner) {
-  const hx = Math.max(0.5, halfW);
-  const hy = Math.max(0.5, halfL);
+function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInner, pixSize) {
+  const pix = pixSize > 0 ? pixSize : 0;
+  const pad = pix > 0 ? pix : 0;
+  const hx = Math.max(0.5, halfW + pad);
+  const hy = Math.max(0.5, halfL + pad);
+  const rad = Math.max(halfW, halfL, 0.5);
   const c = Math.cos(ang || 0);
   const s = Math.sin(ang || 0);
   const r = color ? color[0] : 1;
@@ -5194,6 +5215,9 @@ function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInn
   gl.vertexAttribPointer(soACol, 4, gl.FLOAT, false, stride, 16);
   gl.uniform2f(soURes, W, H);
   gl.uniform1f(soUInner, inner);
+  gl.uniform1f(soUPixSize, pix);
+  gl.uniform2f(soUCenter, cx, cy);
+  gl.uniform1f(soURadius, rad);
   bindSceneLightUniforms(softOvalLightU);
   gl.enable(gl.BLEND);
   // Shader outputs premul (rgb*a, a). Additive: ONE/ONE. Alpha: ONE/ONE_MINUS_SRC_ALPHA.
