@@ -398,7 +398,7 @@ ENEMY_R.ufo = ENEMY_UFO_HIT_R;
  * (sprite 184 fw×scale, tube pitch = half SPRITE_ROOF_PITCH).
  */
 const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
-const ENEMY_WORM_HIT_LEN = 4 * ENEMY_WORM_HIT_R;
+const ENEMY_WORM_HIT_LEN = 8 * ENEMY_WORM_HIT_R;
 const ENEMY_WORM_SPRITE_FW = 81;
 const ENEMY_WORM_SPRITE_SCALE = 1.6;
 const ENEMY_WORM_TUBE_PITCH = 0.58 * 0.5;

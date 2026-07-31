@@ -16221,7 +16221,7 @@ const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 /** Worm: oriented hit box — length 4× circle-R; width 70% of both tube planes. */
 const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
-const ENEMY_WORM_HIT_LEN = 4 * ENEMY_WORM_HIT_R;
+const ENEMY_WORM_HIT_LEN = 8 * ENEMY_WORM_HIT_R;
 const ENEMY_WORM_HIT_FW = 81;
 const ENEMY_WORM_HIT_SCALE = 1.6;
 const ENEMY_WORM_HIT_TUBE_PITCH = 0.58 * 0.5;
