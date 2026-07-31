@@ -1338,6 +1338,7 @@ function syncDynamicPredictionCvar() {
 
 /** Client-side mirror of server fire lead (for aim cone / debug). */
 function shootPredictLeadTicks() {
+  if (isOfflineLocalPlay()) return 0;
   const scale = Number(cv('sv_dynamic_prediction'));
   if (scale > 0) {
     const oneWayTicks = (pingMs * 0.5) / TICK_MS;
@@ -1347,6 +1348,7 @@ function shootPredictLeadTicks() {
 }
 
 function shootPredictAngleLeadTicks() {
+  if (isOfflineLocalPlay()) return 0;
   if (Number(cv('sv_dynamic_prediction')) > 0) {
     return shootPredictLeadTicks();
   }
@@ -18142,7 +18144,9 @@ function reconcileFromServer(row) {
   const srvGod = row[10] != null ? (row[10] | 0) : (player.godLeft || 0);
   const prevHp = player.hp | 0;
   const blending = performance.now() < resumeBlendUntil;
-  const spike = !blending && performance.now() < rttSpikeUntil;
+  const offline = isOfflineLocalPlay();
+  // Offline has no real RTT — never hold pose on a stale spike flag.
+  const spike = !offline && !blending && performance.now() < rttSpikeUntil;
 
   // Ping spike: keep local predicted pose (no softErr yank). Still take HP / stun / god.
   if (spike) {
@@ -18152,24 +18156,6 @@ function reconcileFromServer(row) {
     if (prevHp > 0 && (player.hp | 0) < prevHp && (player.hp | 0) > 0 && !deathSpectating) {
       emitDamageTakenFx(player.x, player.y);
     }
-    predReady = true;
-    if (clientTickCursor == null) clientTickCursor = Math.floor(estimatedServerTick());
-    return;
-  }
-
-  // Offline local host: same-process sim — pose snaps fight client predict and feel like lag.
-  // Trust prediction; only pull HP / stun / god (and input ack above).
-  if (isOfflineLocalPlay()) {
-    player.hp = row[6];
-    player.stunned = srvStunned;
-    player.godLeft = srvGod;
-    softErr.x = 0;
-    softErr.y = 0;
-    softErr.angle = 0;
-    if (prevHp > 0 && (player.hp | 0) < prevHp && (player.hp | 0) > 0 && !deathSpectating) {
-      emitDamageTakenFx(player.x, player.y);
-    }
-    lastAppliedSeq = Math.max(lastAppliedSeq | 0, ack);
     predReady = true;
     if (clientTickCursor == null) clientTickCursor = Math.floor(estimatedServerTick());
     return;
@@ -18206,7 +18192,9 @@ function reconcileFromServer(row) {
   // Soft visual correction: keep old on-screen pose, bleed error out over time.
   // Use toroidal deltas so edge-wraps don't create a full-map rubber-band.
   // Large drift → hard teleport, unless tab-resume blend window is active.
-  if (cv('cl_recon') <= 0) {
+  // Offline local host: hard-match the in-process sim every snap (no softErr).
+  // Trusting prediction here drifted the ship hundreds of px from where bullets spawn.
+  if (offline || cv('cl_recon') <= 0) {
     softErr.x = 0;
     softErr.y = 0;
     softErr.angle = 0;

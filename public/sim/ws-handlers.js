@@ -4,7 +4,8 @@ wss.on('connection', (ws) => {
   ws.room = null;
   ws.playerId = null;
   ws.rttMs = 0;
-  ws.cmdDelayTicks = 1;
+  // In-browser local host has no network delay — default 1 fought fire lead / input release.
+  ws.cmdDelayTicks = ws.__local ? 0 : 1;
   ws.getAsteroidsEvery = 0;
   ws.isAdmin = false;
   initClientLimits(ws);

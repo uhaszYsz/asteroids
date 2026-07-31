@@ -4062,12 +4062,15 @@ function playerCmdDelayTicks(room, playerId) {
 }
 
 function playerPredictShootSteps(room, p) {
+  // Practice / offline solo: zero latency — never lead fire away from the ship.
+  if (room && room.practice) return 0;
   if (svDynamicPrediction) return pingBasedPredictLeadTicks(room, p);
   let n = p && p.predictShootStep != null ? (p.predictShootStep | 0) : 1;
   return clampPredictLeadTicks(n);
 }
 
 function playerPredictShootAngleSteps(room, p) {
+  if (room && room.practice) return 0;
   if (svDynamicPrediction) return pingBasedPredictLeadTicks(room, p);
   let n = p && p.predictShootAngle != null ? (p.predictShootAngle | 0) : 1;
   return clampPredictLeadTicks(n);
