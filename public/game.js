@@ -15579,8 +15579,15 @@ function enemyTurnAngleToward(from, to, maxTurn) {
   return from + d;
 }
 
+function parseEnemyKind(raw) {
+  if (raw === 'ufo') return 'ufo';
+  if (raw === 'carrier') return 'carrier';
+  if (raw === 'worm') return 'worm';
+  return 'common';
+}
+
 function unpackEnemy(row) {
-  const kind = row[1] === 'ufo' ? 'ufo' : row[1] === 'carrier' ? 'carrier' : 'common';
+  const kind = parseEnemyKind(row[1]);
   const spawnX = row[2];
   const spawnY = row[3];
   const tx = row[4];
@@ -15645,7 +15652,7 @@ function applyEnemySnapList(list, st) {
     const row = list[i];
     const id = row[0] | 0;
     seen.add(id);
-    const kind = row[1] === 'ufo' ? 'ufo' : row[1] === 'carrier' ? 'carrier' : 'common';
+    const kind = parseEnemyKind(row[1]);
     const move = row[11] === ENEMY_MOVE_DESTINATION ? ENEMY_MOVE_DESTINATION : ENEMY_MOVE_DESTINATION_SMOOTH;
     const weapon = row[10] === 'laser' || row[10] === 'plasma' || row[10] === 'rail' ? row[10] : '';
     const angle = +row[6];
@@ -18404,6 +18411,8 @@ async function connect() {
   sock.onopen = () => {
     if (usingLocalSolo) {
       remoteWs = sock;
+      // Keep dedicated-server admin ready for lobby / real matches.
+      tryAutoAdminLogin(sock);
       return;
     }
     remoteWs = sock;
@@ -18413,7 +18422,7 @@ async function connect() {
     if (playBtn) playBtn.disabled = false;
     sendPing();
     trySteamAuthLogin();
-    tryAutoAdminLogin();
+    tryAutoAdminLogin(sock);
   };
   sock.onclose = () => {
     if (remoteWs === sock) remoteWs = null;
@@ -18463,8 +18472,10 @@ function handleWsMessage(e) {
       if (msg.t !== 'admin' && msg.t !== 'adminPw' && msg.t !== 'session' && msg.t !== 'presence') return;
     }
     if (msg.t === 'admin') {
+      const fromLocal = !!(e && e.target && e.target.__local);
       if (msg.loggedOut) {
-        consoleAdmin = false;
+        // Local logout shouldn't strip remote admin memory while dual-connected.
+        if (!fromLocal || !usingLocalSolo) consoleAdmin = false;
         conPrint('admin logged out', 'info');
         return;
       }
@@ -18474,18 +18485,24 @@ function handleWsMessage(e) {
           saveAdminPasswordLocal(pendingAdminLoginPw);
           pendingAdminLoginPw = '';
         }
-        if (msg.auto) conPrint('admin auto-login ok', 'info');
-        else conPrint('admin login ok', 'info');
+        if (msg.auto) {
+          if (!fromLocal) conPrint('admin auto-login ok', 'info');
+        } else conPrint('admin login ok', 'info');
         syncPortalCvar();
         syncDemoCvar();
       } else {
-        consoleAdmin = false;
-        pendingAdminLoginPw = '';
-        if (msg.auto) {
-          // Saved password no longer valid — drop it quietly.
-          saveAdminPasswordLocal('');
-        } else {
+        // Local host uses admin1 — ignore its fail so dual-login with the
+        // dedicated-server password does not wipe localStorage.
+        if (fromLocal) return;
+        if (!msg.auto) {
+          consoleAdmin = false;
+          pendingAdminLoginPw = '';
           conPrint(msg.err || 'admin login failed', 'err');
+        } else {
+          // Auto-fail on dedicated server: drop stale saved password.
+          pendingAdminLoginPw = '';
+          saveAdminPasswordLocal('');
+          if (!usingLocalSolo) consoleAdmin = false;
         }
       }
       return;
@@ -19413,6 +19430,22 @@ function handleRemoteBackgroundMsg(bg) {
     applyTeamState(bg);
     return;
   }
+  // Keep dedicated-server admin password in sync while playing on local host.
+  if (bg.t === 'admin') {
+    if (bg.ok) {
+      if (pendingAdminLoginPw) {
+        saveAdminPasswordLocal(pendingAdminLoginPw);
+        pendingAdminLoginPw = '';
+      }
+    } else if (bg.auto) {
+      pendingAdminLoginPw = '';
+      saveAdminPasswordLocal('');
+    } else if (!bg.loggedOut) {
+      pendingAdminLoginPw = '';
+      conPrint(bg.err || 'admin login failed', 'err');
+    }
+    return;
+  }
   if (!waitingOnlineQueue) return;
   if (bg.t === 'queued') {
     onlineQueueWaiting = bg.waiting | 0;
@@ -19504,6 +19537,10 @@ async function ensureLocalSoloSocket() {
   connected = true;
   resetClockSync();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
+  // Local host is always admin (server + console); also auth with admin1.
+  consoleAdmin = true;
+  tryAutoAdminLogin(sock);
+  if (remoteWs && remoteWs.readyState === 1) tryAutoAdminLogin(remoteWs);
   return sock;
 }
 
@@ -21364,12 +21401,32 @@ function saveAdminPasswordLocal(pw) {
 }
 
 /** Re-auth after refresh / reconnect using locally saved password. */
-function tryAutoAdminLogin() {
-  if (!ws || ws.readyState !== 1) return;
+function tryAutoAdminLogin(sock) {
+  const target = sock || ws;
+  if (!target || target.readyState !== 1) return;
+  // In-browser local host always uses admin1 — do not overwrite saved remote password.
+  if (target.__local) {
+    try { target.send(JSON.stringify({ t: 'adminLogin', pw: 'admin1', auto: 1 })); } catch (_) {}
+    return;
+  }
   const pw = loadSavedAdminPassword();
   if (!pw) return;
   pendingAdminLoginPw = pw;
-  ws.send(JSON.stringify({ t: 'adminLogin', pw, auto: 1 }));
+  target.send(JSON.stringify({ t: 'adminLogin', pw, auto: 1 }));
+}
+
+/** Login on the active game socket and the dedicated server (if different). */
+function sendAdminLogin(pw, auto) {
+  const clean = String(pw == null ? '' : pw);
+  if (!clean) return;
+  pendingAdminLoginPw = clean;
+  const msg = JSON.stringify({ t: 'adminLogin', pw: clean, auto: auto ? 1 : 0 });
+  const seen = new Set();
+  for (const sock of [ws, remoteWs]) {
+    if (!sock || sock.readyState !== 1 || seen.has(sock)) continue;
+    seen.add(sock);
+    try { sock.send(msg); } catch (_) {}
+  }
 }
 
 function conRequireAdmin() {
@@ -21687,15 +21744,21 @@ function runConsole(line) {
       return;
     }
     pendingAdminLoginPw = args.join(' ');
-    ws.send(JSON.stringify({ t: 'adminLogin', pw: pendingAdminLoginPw }));
+    sendAdminLogin(pendingAdminLoginPw, false);
     return;
   }
   if (cmdName === 'logout') {
     consoleAdmin = false;
     pendingAdminLoginPw = '';
     saveAdminPasswordLocal('');
-    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'adminLogout' }));
-    else conPrint('admin logged out', 'info');
+    const msg = JSON.stringify({ t: 'adminLogout' });
+    const seen = new Set();
+    for (const sock of [ws, remoteWs]) {
+      if (!sock || sock.readyState !== 1 || seen.has(sock)) continue;
+      seen.add(sock);
+      try { sock.send(msg); } catch (_) {}
+    }
+    conPrint('admin logged out', 'info');
     return;
   }
   if (cmdName === 'password') {

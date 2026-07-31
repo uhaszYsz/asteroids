@@ -314,6 +314,9 @@
       client.readyState = 1;
       try {
         runtime.wss._accept(serverWs);
+        // Local solo/wait host is always admin so spawn/give work without the
+        // dedicated-server password (which still auto-logs in on remoteWs).
+        serverWs.isAdmin = true;
       } catch (err) {
         console.error('local solo accept failed:', err);
         client.readyState = 3;
@@ -336,7 +339,7 @@
 
       const texts = [];
       for (let i = 0; i < SIM_PARTS.length; i++) {
-        const url = simBase + SIM_PARTS[i] + '?v=8';
+        const url = simBase + SIM_PARTS[i] + '?v=9';
         const res = await fetch(url, { cache: 'no-cache' });
         if (!res.ok) throw new Error('Failed to load ' + SIM_PARTS[i] + ' (' + res.status + ')');
         texts.push(await res.text());
