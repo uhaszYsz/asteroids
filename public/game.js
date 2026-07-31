@@ -12641,6 +12641,7 @@ function openModePanel() {
   closePinModal();
   closeLeaderboardPanel();
   syncModeContinueUi();
+  syncModeOnlineButtons();
   requestPresence();
   modePanelEl.classList.add('open');
   modePanelEl.setAttribute('aria-hidden', 'false');
@@ -12653,18 +12654,38 @@ function closeModePanel() {
 }
 
 function startPlayMode(mode) {
-  if (!connected || !ws || ws.readyState !== 1) return;
+  const onlineOk = !!(ws && !ws.__local && ws.readyState === 1);
+  const wantSolo = mode === 'solo' || mode === 'continue';
+  if (!wantSolo && !onlineOk) return;
   closeModePanel();
   selectedPlayMode = mode;
   const name = accountSession.name || '';
-  if (mode === 'continue') {
-    const snap = soloSnapshot || loadSoloSnapshot();
-    if (!snap) return;
-    ws.send(JSON.stringify({ t: 'queue', mode: 'continue', name, snap }));
-  } else {
-    ws.send(JSON.stringify({ t: 'queue', mode, name }));
+
+  const sendQueue = () => {
+    if (!ws || ws.readyState !== 1) return;
+    if (mode === 'continue') {
+      const snap = soloSnapshot || loadSoloSnapshot();
+      if (!snap) return;
+      ws.send(JSON.stringify({ t: 'queue', mode: 'continue', name, snap }));
+    } else {
+      ws.send(JSON.stringify({ t: 'queue', mode, name }));
+    }
+    showQueue();
+  };
+
+  if (wantSolo) {
+    ensureLocalSoloSocket().then(sendQueue).catch((err) => {
+      console.error(err);
+      alert('Could not start offline solo.');
+      showMenu();
+    });
+    return;
   }
-  showQueue();
+
+  // Online modes always use the dedicated server socket.
+  if (usingLocalSolo) restoreRemoteSocketAfterSolo();
+  if (!ws || ws.__local || ws.readyState !== 1) return;
+  sendQueue();
 }
 
 function openAccountPanel() {
@@ -13734,7 +13755,7 @@ function setPracticeWaiting(on) {
 
 function showMenu() {
   if (menuEl) menuEl.classList.remove('hidden');
-  if (playBtn) playBtn.disabled = !connected;
+  if (playBtn) playBtn.disabled = !canOpenPlayMenu();
   if (cancelBtn) cancelBtn.classList.remove('visible');
   syncRejoinButton();
   playMenuMusic();
@@ -17800,13 +17821,15 @@ function returnToLobby() {
   hideSoloOverScreen();
   hideSoloShop();
   resetMatchState();
+  if (usingLocalSolo) restoreRemoteSocketAfterSolo();
   showMenu();
   updateHud();
 }
 
 async function connect() {
   showMenu();
-  if (playBtn) playBtn.disabled = true;
+  // Solo works offline via AsteroidsLocal; keep Play enabled while we hunt for a host.
+  if (playBtn) playBtn.disabled = !canOpenPlayMenu();
   const base = await findHost();
   if (!base) {
     showMenu();
@@ -17817,9 +17840,15 @@ async function connect() {
   showMenu();
   // Trailing slash required under nginx (/asteroids exact path 301s; WS cannot follow redirects).
   const wsUrl = base.replace(/^http/, 'ws').replace(/\/?$/, '/');
-  ws = new WebSocket(wsUrl);
-  ws.binaryType = 'arraybuffer';
-  ws.onopen = () => {
+  const sock = new WebSocket(wsUrl);
+  sock.binaryType = 'arraybuffer';
+  sock.onopen = () => {
+    if (usingLocalSolo) {
+      remoteWs = sock;
+      return;
+    }
+    remoteWs = sock;
+    ws = sock;
     connected = true;
     showMenu();
     if (playBtn) playBtn.disabled = false;
@@ -17827,18 +17856,27 @@ async function connect() {
     trySteamAuthLogin();
     tryAutoAdminLogin();
   };
-  ws.onclose = () => {
-    connected = false;
-    consoleAdmin = false;
-    resetClockSync();
-    resetMatchState();
-    showMenu();
-    if (playBtn) playBtn.disabled = true;
-    if (cancelBtn) cancelBtn.classList.remove('visible');
+  sock.onclose = () => {
+    if (remoteWs === sock) remoteWs = null;
+    if (ws === sock) {
+      connected = false;
+      consoleAdmin = false;
+      resetClockSync();
+      if (!usingLocalSolo) {
+        resetMatchState();
+        showMenu();
+        if (playBtn) playBtn.disabled = !canOpenPlayMenu();
+        if (cancelBtn) cancelBtn.classList.remove('visible');
+      }
+    }
     setTimeout(connect, 1000);
   };
-  ws.onerror = () => ws.close();
-  ws.onmessage = (e) => {
+  sock.onerror = () => sock.close();
+  sock.onmessage = handleWsMessage;
+  if (!usingLocalSolo) ws = sock;
+}
+
+function handleWsMessage(e) {
     if (e.data instanceof ArrayBuffer) {
       if (inGame && !(demoPlay && demoPlay.active)) applyBinarySnap(e.data);
       return;
@@ -18727,12 +18765,101 @@ async function connect() {
       return;
     }
     if (msg.t === 'snap' && inGame) applySnapshot(msg);
+}
+
+/** Remote dedicated-server socket (lobby / PvP / coop). */
+let remoteWs = null;
+/** True while playing on the in-browser local host (offline solo). */
+let usingLocalSolo = false;
+
+function localSoloAvailable() {
+  return !!(typeof AsteroidsLocal !== 'undefined' && AsteroidsLocal);
+}
+
+function canOpenPlayMenu() {
+  return localSoloAvailable() || (connected && ws && ws.readyState === 1);
+}
+
+function syncModeOnlineButtons() {
+  const onlineSock = (remoteWs && remoteWs.readyState === 1)
+    ? remoteWs
+    : (ws && !ws.__local && ws.readyState === 1 ? ws : null);
+  const online = !!onlineSock;
+  if (modePvpBtn) {
+    modePvpBtn.disabled = !online;
+    modePvpBtn.title = online ? '' : 'Requires online server';
+  }
+  if (modeCoopBtn) {
+    modeCoopBtn.disabled = !online;
+    modeCoopBtn.title = online ? '' : 'Requires online server';
+  }
+  if (modeSoloBtn) modeSoloBtn.disabled = false;
+  if (modeContinueBtn) {
+    const snap = soloSnapshot || loadSoloSnapshot();
+    modeContinueBtn.disabled = !snap;
+  }
+}
+
+async function ensureLocalSoloSocket() {
+  if (!localSoloAvailable()) throw new Error('Local solo host missing');
+  await AsteroidsLocal.ensure();
+  if (ws && !ws.__local && ws.readyState === 1) remoteWs = ws;
+  if (ws && ws.__local) {
+    try {
+      ws.onclose = null;
+      ws.close();
+    } catch (_) {}
+  }
+  const sock = AsteroidsLocal.connect();
+  sock.binaryType = 'arraybuffer';
+  sock.onmessage = handleWsMessage;
+  sock.onerror = () => { try { sock.close(); } catch (_) {} };
+  sock.onclose = () => {
+    if (!usingLocalSolo) return;
+    usingLocalSolo = false;
+    if (remoteWs && remoteWs.readyState === 1) {
+      ws = remoteWs;
+      connected = true;
+    } else {
+      ws = null;
+      connected = false;
+    }
+    if (!inGame) showMenu();
   };
+  await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('local solo open timeout')), 5000);
+    sock.onopen = () => {
+      clearTimeout(t);
+      resolve();
+    };
+  });
+  ws = sock;
+  usingLocalSolo = true;
+  connected = true;
+  return sock;
+}
+
+function restoreRemoteSocketAfterSolo() {
+  if (!usingLocalSolo && !(ws && ws.__local)) return;
+  usingLocalSolo = false;
+  const local = ws && ws.__local ? ws : null;
+  if (local) {
+    try { local.onclose = null; } catch (_) {}
+    try { local.close(); } catch (_) {}
+  }
+  if (remoteWs && remoteWs.readyState === 1) {
+    ws = remoteWs;
+    connected = true;
+  } else {
+    ws = null;
+    connected = false;
+  }
 }
 
 if (playBtn) {
   playBtn.addEventListener('click', () => {
-    if (!connected || !ws || ws.readyState !== 1) return;
+    if (!canOpenPlayMenu()) return;
+    syncModeOnlineButtons();
     openModePanel();
   });
 }

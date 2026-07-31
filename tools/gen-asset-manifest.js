@@ -18,7 +18,8 @@ const INCLUDE_DIRS = [
   'textures',
   'sounds',
   'music',
-  'lib'
+  'lib',
+  'sim'
 ];
 const INCLUDE_ROOT_FILES = [
   'game.js',

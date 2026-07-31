@@ -1,18 +1,32 @@
 const fs = require('fs');
 const path = require('path');
 
-const PARTS = [
+const SIM_DIR = path.join(__dirname, 'public', 'sim');
+const NODE_DIR = path.join(__dirname, 'server');
+
+/** Shared with the browser local solo host (public/sim). */
+const SIM_PARTS = [
   'constants.js',
   'utils.js',
   'net.js',
   'gameplay.js',
   'session.js',
-  'rooms.js',
+  'rooms.js'
+];
+
+/** Node-only (HTTP, real WebSocket, admin console, listen). */
+const NODE_PARTS = [
   'http.js',
   'ws.js',
   'admin.js',
   'boot.js'
 ];
+
+function readPart(dir, name) {
+  let code = fs.readFileSync(path.join(dir, name), 'utf8');
+  code = code.replace(/^\/\*\* @file[\s\S]*?\*\/\r?\n/, '');
+  return '// ##### ' + name + ' #####\n' + code;
+}
 
 function loadServerParts() {
   const prelude = [
@@ -27,12 +41,10 @@ function loadServerParts() {
     ''
   ].join('\n');
 
-  const chunks = PARTS.map((name) => {
-    const fp = path.join(__dirname, 'server', name);
-    let code = fs.readFileSync(fp, 'utf8');
-    code = code.replace(/^\/\*\* @file[\s\S]*?\*\/\r?\n/, '');
-    return '// ##### ' + name + ' #####\n' + code;
-  });
+  const chunks = [
+    ...SIM_PARTS.map((n) => readPart(SIM_DIR, n)),
+    ...NODE_PARTS.map((n) => readPart(NODE_DIR, n))
+  ];
 
   const bundled = prelude + chunks.join('\n');
   const runner = new Function(
