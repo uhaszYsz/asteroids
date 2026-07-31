@@ -993,7 +993,8 @@ function fireWormRocketVolley(room, e) {
       owner,
       enemyOwner: e.id | 0,
       type: 'rocket',
-      dmg: 0,
+      dmg: ENEMY_WORM_ROCKET.dmg,
+      noBlast: 1,
       x, y,
       spawnX: x,
       spawnY: y,
@@ -4245,14 +4246,16 @@ function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
 /**
  * Remove rocket on impact: broadcast, then circle blast only (no separate direct hit dmg).
  * `preAids` = asteroid ids before this frame so split shards are not damaged this blast.
+ * Worm rockets set `noBlast` — expire / miss with no AoE.
  */
 function detonateRocket(room, b, hitKind, _applyDirectIgnored) {
   const x = b.x;
   const y = b.y;
-  const preAids = new Set();
-  for (const a of room.asteroids) preAids.add(a.aid);
   roomBroadcast(room, { t: 'bd', id: b.id, hit: hitKind, x, y });
   if (room.roundResetting) return;
+  if (b.noBlast) return;
+  const preAids = new Set();
+  for (const a of room.asteroids) preAids.add(a.aid);
   applyRocketBlast(room, b.owner | 0, x, y, preAids, {
     skipEnemyId: b.enemyOwner | 0
   });
@@ -5461,6 +5464,7 @@ function updateBullets(room) {
     if (hit) {
       const p = hitPlayer;
       if (b.type === 'rocket') {
+        if (b.noBlast) dealDamageToPlayer(room, p, b.dmg || 30, b.owner | 0);
         detonateRocket(room, b, 1);
         const owner = players.get(b.owner);
         if (owner) tryEmpStun(room, owner, p, 'rocket', b);
@@ -5497,6 +5501,7 @@ function updateBullets(room) {
         if (!enemyIsSpawned(e)) continue;
         if (!hitBulletEnemy(b, e)) continue;
         if (b.type === 'rocket') {
+          if (b.noBlast) damageEnemy(room, e, b.dmg || 30);
           detonateRocket(room, b, 3);
         } else {
           damageEnemy(room, e, b.dmg);

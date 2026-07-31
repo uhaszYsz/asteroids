@@ -412,7 +412,7 @@ const ENEMY_PLASMA_RANGE = 240 * RES_SCALE;
 /** Worm laser aim telegraph before the beam opens. */
 const ENEMY_WORM_AIM_TICKS = Math.round(3 * TPS);
 /** Max turn toward player while worm is stopped for its laser attack. */
-const ENEMY_WORM_AIM_TURN = (0.9 * Math.PI) / 180;
+const ENEMY_WORM_AIM_TURN = (1.1 * Math.PI) / 180;
 /** Worm vs asteroid crush check interval. */
 const ENEMY_WORM_AST_CHECK = Math.round(0.2 * TPS);
 /**
@@ -424,12 +424,13 @@ const ENEMY_WORM_LASER = {
   cooldown: 1,
   reload: Math.round(1 * TPS),
   range: Math.hypot(W, H),
-  dmg: 8,
+  dmg: 3,
   width: 12 * RES_SCALE
 };
 /**
  * Worm rocket barrage — shotgun-style, full 360° per volley (ammo×shotgun = 6).
  * Speed/accel/homing are literal px/tick (not RES_SCALE).
+ * Direct-hit only (no blast radius).
  */
 const ENEMY_WORM_ROCKET = {
   ammo: 2,
@@ -443,7 +444,8 @@ const ENEMY_WORM_ROCKET = {
   homing: 4,
   lifeMinS: 6,
   lifeMaxS: 14,
-  hp: 20
+  hp: 20,
+  dmg: 30
 };
 /** Player (and default) rocket hull HP — depleted by hitscans / bullets before detonate. */
 const ROCKET_HP_DEFAULT = 190;
