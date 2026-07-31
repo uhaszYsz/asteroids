@@ -5595,6 +5595,11 @@ function syncSoloWaitBanner() {
     waitBannerEl.textContent = 'Coop waves · Wave ' + w + ' · Lives ' + soloLives;
   } else if (soloOnlyMode) {
     waitBannerEl.textContent = 'Singleplayer · Wave ' + w + ' · Lives ' + soloLives;
+  } else if (waitingOnlineQueue) {
+    const n = onlineQueueWaiting | 0;
+    const need = Math.max(1, onlineQueueNeed | 0);
+    waitBannerEl.textContent = 'Solo waves · Wave ' + w + ' · Lives ' + soloLives
+      + ' · matchmaking ' + n + '/' + need;
   } else {
     waitBannerEl.textContent = 'Solo waves · Wave ' + w + ' · Lives ' + soloLives + ' · matchmaking…';
   }
@@ -12654,14 +12659,19 @@ function closeModePanel() {
 }
 
 function startPlayMode(mode) {
-  const onlineOk = !!(ws && !ws.__local && ws.readyState === 1);
+  const onlineSock = (remoteWs && remoteWs.readyState === 1)
+    ? remoteWs
+    : (ws && !ws.__local && ws.readyState === 1 ? ws : null);
+  const onlineOk = !!(onlineSock && onlineSock.readyState === 1);
   const wantSolo = mode === 'solo' || mode === 'continue';
-  if (!wantSolo && !onlineOk) return;
+  const wantOnline = mode === 'pvp' || mode === 'coop';
+  if (wantOnline && !onlineOk) return;
+  if (wantSolo && !localSoloAvailable() && !onlineOk) return;
   closeModePanel();
   selectedPlayMode = mode;
   const name = accountSession.name || '';
 
-  const sendQueue = () => {
+  const sendLocalQueue = () => {
     if (!ws || ws.readyState !== 1) return;
     if (mode === 'continue') {
       const snap = soloSnapshot || loadSoloSnapshot();
@@ -12674,7 +12684,8 @@ function startPlayMode(mode) {
   };
 
   if (wantSolo) {
-    ensureLocalSoloSocket().then(sendQueue).catch((err) => {
+    waitingOnlineQueue = null;
+    ensureLocalSoloSocket().then(sendLocalQueue).catch((err) => {
       console.error(err);
       alert('Could not start offline solo.');
       showMenu();
@@ -12682,10 +12693,36 @@ function startPlayMode(mode) {
     return;
   }
 
-  // Online modes always use the dedicated server socket.
+  // PvP / coop: queue on dedicated server, play wait-waves on local host.
   if (usingLocalSolo) restoreRemoteSocketAfterSolo();
-  if (!ws || ws.__local || ws.readyState !== 1) return;
-  sendQueue();
+  if (!onlineSock || onlineSock.readyState !== 1) return;
+  remoteWs = onlineSock;
+  ws = onlineSock;
+  connected = true;
+  waitingOnlineQueue = mode;
+  onlineQueueWaiting = 0;
+  onlineQueueNeed = 2;
+  onlineSock.send(JSON.stringify({ t: 'queue', mode, name }));
+
+  if (!localSoloAvailable()) {
+    showQueue();
+    return;
+  }
+
+  ensureLocalSoloSocket().then(() => {
+    if (!waitingOnlineQueue) {
+      // Match already started while local host booted.
+      restoreRemoteSocketAfterSolo();
+      return;
+    }
+    if (!ws || !ws.__local || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ t: 'queue', mode: 'wait', waitFor: mode, name }));
+    showQueue();
+  }).catch((err) => {
+    console.error(err);
+    // Still queued online — just no local wait-waves.
+    showQueue();
+  });
 }
 
 function openAccountPanel() {
@@ -17835,6 +17872,8 @@ function returnToLobby() {
   if (demoPlay && demoPlay.active) demoStopPlay(true);
   hideSoloOverScreen();
   hideSoloShop();
+  waitingOnlineQueue = null;
+  onlineQueueWaiting = 0;
   resetMatchState();
   if (usingLocalSolo) restoreRemoteSocketAfterSolo();
   showMenu();
@@ -17892,16 +17931,13 @@ async function connect() {
 }
 
 function handleWsMessage(e) {
-    // Background dedicated-server socket while offline solo is active: keep session/presence
-    // warm, but never let lobby/snaps yank the player back to the menu or corrupt prediction.
+    // Background dedicated-server socket while offline solo / wait-waves are active.
     if (usingLocalSolo && remoteWs && e && e.target === remoteWs) {
       if (e.data instanceof ArrayBuffer) return;
       if (typeof Blob !== 'undefined' && e.data instanceof Blob) return;
       let bg;
       try { bg = JSON.parse(e.data); } catch { return; }
-      if (bg.t === 'session') applyAccountSession(bg);
-      else if (bg.t === 'presence') applyPresence(bg);
-      else if (bg.t === 'team') applyTeamState(bg);
+      handleRemoteBackgroundMsg(bg);
       return;
     }
     if (e.data instanceof ArrayBuffer) {
@@ -18166,10 +18202,14 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'queued') {
       // Game-over while matchmaking: stay on soloOver (don't open main menu).
+      if (msg.waiting != null) onlineQueueWaiting = msg.waiting | 0;
+      if (msg.need != null) onlineQueueNeed = msg.need | 0;
       if (soloOverOpen) {
         if (waitBannerEl) {
           waitBannerEl.classList.remove('hidden');
-          waitBannerEl.textContent = 'Still matchmaking…';
+          waitBannerEl.textContent = waitingOnlineQueue
+            ? ('Still matchmaking… (' + onlineQueueWaiting + '/' + onlineQueueNeed + ')')
+            : 'Still matchmaking…';
         }
         if (cancelBtn) cancelBtn.classList.add('visible');
         return;
@@ -18182,6 +18222,11 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'welcome') {
+      // Real PvP (waitingReady) / coop (coop:1). Local wait-waves also send welcome.
+      if (waitingOnlineQueue && (msg.waitingReady || msg.coop)) {
+        promoteOnlineMatchFromWait(msg);
+        return;
+      }
       enterGameFromWelcome(msg);
       return;
     }
@@ -18798,9 +18843,65 @@ function handleWsMessage(e) {
 let remoteWs = null;
 /** True while playing on the in-browser local host (offline solo). */
 let usingLocalSolo = false;
+/** 'pvp' | 'coop' while queued online and playing local wait-waves. */
+let waitingOnlineQueue = null;
+let onlineQueueWaiting = 0;
+let onlineQueueNeed = 2;
 
 function localSoloAvailable() {
   return !!(typeof AsteroidsLocal !== 'undefined' && AsteroidsLocal);
+}
+
+function promoteOnlineMatchFromWait(msg) {
+  waitingOnlineQueue = null;
+  onlineQueueWaiting = 0;
+  hideSoloOverScreen();
+  hideSoloShop();
+  if (usingLocalSolo) restoreRemoteSocketAfterSolo();
+  enterGameFromWelcome(msg);
+}
+
+function handleRemoteBackgroundMsg(bg) {
+  if (!bg || !bg.t) return;
+  if (bg.t === 'session') {
+    applyAccountSession(bg);
+    return;
+  }
+  if (bg.t === 'presence') {
+    applyPresence(bg);
+    return;
+  }
+  if (bg.t === 'team') {
+    applyTeamState(bg);
+    return;
+  }
+  if (!waitingOnlineQueue) return;
+  if (bg.t === 'queued') {
+    onlineQueueWaiting = bg.waiting | 0;
+    onlineQueueNeed = bg.need != null ? (bg.need | 0) : 2;
+    if (soloOverOpen && waitBannerEl) {
+      waitBannerEl.classList.remove('hidden');
+      waitBannerEl.textContent = 'Still matchmaking… (' + onlineQueueWaiting + '/' + onlineQueueNeed + ')';
+      if (cancelBtn) cancelBtn.classList.add('visible');
+    } else {
+      syncSoloWaitBanner();
+    }
+    return;
+  }
+  if (bg.t === 'welcome') {
+    // Only real matches — not anything else on the remote socket.
+    if (bg.waitingReady || bg.coop) promoteOnlineMatchFromWait(bg);
+    return;
+  }
+  if (bg.t === 'queueErr') {
+    waitingOnlineQueue = null;
+    if (usingLocalSolo) {
+      try { if (ws && ws.__local) ws.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+      restoreRemoteSocketAfterSolo();
+    }
+    alert(bg.err === 'nosnap' ? 'No save to continue.' : 'Could not queue.');
+    showMenu();
+  }
 }
 
 function canOpenPlayMenu() {
@@ -18913,17 +19014,29 @@ if (pausePanelEl) {
 }
 if (cancelBtn) {
   cancelBtn.addEventListener('click', () => {
-    if (!connected || !ws || ws.readyState !== 1) return;
     if (soloShopOpen) return;
+    if (!connected && !(remoteWs && remoteWs.readyState === 1)) return;
     if (soloOverOpen || (inGame && practiceMode)) {
       if (!confirm(soloOverOpen
         ? 'Quit matchmaking and return to the main menu?'
         : 'Quit solo run and return to the main menu?')) return;
     }
-    ws.send(JSON.stringify({ t: 'cancel' }));
+    const local = ws && ws.__local ? ws : null;
+    const remote = remoteWs && remoteWs.readyState === 1 ? remoteWs
+      : (ws && !ws.__local && ws.readyState === 1 ? ws : null);
+    if (waitingOnlineQueue && remote) {
+      try { remote.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+    }
+    if (local && local.readyState === 1) {
+      try { local.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+    } else if (ws && ws.readyState === 1) {
+      try { ws.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+    }
+    waitingOnlineQueue = null;
     hideSoloOverScreen();
     hideSoloShop();
     setPracticeWaiting(false);
+    if (usingLocalSolo) restoreRemoteSocketAfterSolo();
     showMenu();
   });
 }
@@ -18933,15 +19046,26 @@ if (soloRestartBtn) {
     if (!connected || !ws || ws.readyState !== 1) return;
     if (!soloOverOpen) return;
     hideSoloOverScreen();
+    // Wait-waves restart on local host; online queue stays on remote.
     ws.send(JSON.stringify({ t: 'soloRestart' }));
   });
 }
 
 if (soloMenuBtn) {
   soloMenuBtn.addEventListener('click', () => {
-    if (!connected || !ws || ws.readyState !== 1) return;
     if (!confirm('Quit matchmaking and return to the main menu?')) return;
-    ws.send(JSON.stringify({ t: 'cancel' }));
+    const local = ws && ws.__local ? ws : null;
+    const remote = remoteWs && remoteWs.readyState === 1 ? remoteWs
+      : (ws && !ws.__local && ws.readyState === 1 ? ws : null);
+    if (waitingOnlineQueue && remote) {
+      try { remote.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+    }
+    if (local && local.readyState === 1) {
+      try { local.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+    } else if (ws && ws.readyState === 1) {
+      try { ws.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+    }
+    waitingOnlineQueue = null;
     returnToLobby();
   });
 }

@@ -184,6 +184,16 @@ wss.on('connection', (ws) => {
         startSoloMode(ws, snap);
         return;
       }
+      // Offline wait-waves while the dedicated server matchmakes PvP/coop.
+      if (mode === 'wait') {
+        const kind = String(msg.waitFor || 'pvp').toLowerCase() === 'coop' ? 'coop' : 'pvp';
+        removeFromQueue(ws);
+        if (ws.room) leaveRoom(ws);
+        ws.queueMode = 'wait';
+        ws.waitKind = kind;
+        startPractice(ws, kind);
+        return;
+      }
       if (mode === 'coop') {
         enqueue(ws, 'coop');
         return;
@@ -347,6 +357,8 @@ wss.on('connection', (ws) => {
     if (msg.t === 'cancel') {
       removeFromQueue(ws);
       leaveRoom(ws);
+      ws.waitKind = null;
+      ws.queueMode = null;
       send(ws, { t: 'lobby', st: Date.now() });
       send(ws, packPresence());
       return;
@@ -355,24 +367,30 @@ wss.on('connection', (ws) => {
     if (msg.t === 'soloRestart') {
       if (ws.state === 'playing') return;
       const mode = ws.queueMode || 'pvp';
-      if (mode === 'coop') {
+      // Local wait-waves keep waitKind even after soloOver rewrites queueMode to pvp/coop.
+      if (mode === 'wait' || ws.waitKind) {
+        const kind = ws.waitKind === 'coop' || mode === 'coop' ? 'coop' : 'pvp';
+        ws.queueMode = 'wait';
+        ws.waitKind = kind;
+        startPractice(ws, kind);
+      } else if (mode === 'coop') {
+        // Stay on dedicated-server matchmaking queue; wait-waves are local.
         if (!coopQueue.includes(ws)) coopQueue.push(ws);
         ws.state = 'queued';
         ws.queueMode = 'coop';
         notifyQueueKind('coop');
         tryMatchmakeCoop();
-        if (coopQueue.includes(ws) && (!ws.room || !ws.room.practice)) startPractice(ws, 'coop');
+        send(ws, queueStatusFor('coop'));
       } else if (ws.soloSnapshot && msg.continue) {
         startSoloMode(ws, ws.soloSnapshot);
       } else if (mode === 'pvp') {
-        // Game-over while matchmaking leaves the client queued without a room —
-        // Restart must start a fresh wait-practice, not dedicated solo.
+        // Stay queued for matchmaking; client restarts wait-waves locally.
         if (!matchQueue.includes(ws)) matchQueue.push(ws);
         ws.state = 'queued';
         ws.queueMode = 'pvp';
         notifyQueueKind('pvp');
         tryMatchmake();
-        if (matchQueue.includes(ws) && (!ws.room || !ws.room.practice)) startPractice(ws, 'pvp');
+        send(ws, queueStatusFor('pvp'));
       } else {
         startSoloMode(ws, null);
       }

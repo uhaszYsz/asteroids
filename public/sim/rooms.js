@@ -1237,13 +1237,13 @@ function enqueue(ws, mode) {
     send(ws, queueStatusFor('coop'));
     notifyQueueKind('coop');
     tryMatchmakeCoop();
-    if (coopQueue.includes(ws) && (!ws.room || !ws.room.practice)) startPractice(ws, 'coop');
+    // Wait-waves run on the client's local host; server only matchmakes.
   } else {
     matchQueue.push(ws);
     send(ws, queueStatusFor('pvp'));
     notifyQueueKind('pvp');
     tryMatchmake();
-    if (matchQueue.includes(ws) && (!ws.room || !ws.room.practice)) startPractice(ws, 'pvp');
+    // Wait-waves run on the client's local host; server only matchmakes.
   }
 }
 
@@ -1267,6 +1267,7 @@ function startSoloMode(ws, snap) {
   removeFromQueue(ws);
   if (ws.room) leaveRoom(ws);
   ws.queueMode = null;
+  ws.waitKind = null;
   startPractice(ws, null, { soloOnly: true, snap: snap || null });
 }
 

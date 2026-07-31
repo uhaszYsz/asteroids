@@ -188,6 +188,8 @@ wss.on('connection', (ws) => {
         enqueue(ws, 'coop');
         return;
       }
+      // Client-only wait-waves mode — dedicated server ignores it.
+      if (mode === 'wait') return;
       enqueue(ws, 'pvp');
       return;
     }
@@ -347,6 +349,8 @@ wss.on('connection', (ws) => {
     if (msg.t === 'cancel') {
       removeFromQueue(ws);
       leaveRoom(ws);
+      ws.waitKind = null;
+      ws.queueMode = null;
       send(ws, { t: 'lobby', st: Date.now() });
       send(ws, packPresence());
       return;
@@ -356,23 +360,22 @@ wss.on('connection', (ws) => {
       if (ws.state === 'playing') return;
       const mode = ws.queueMode || 'pvp';
       if (mode === 'coop') {
+        // Wait-waves run on the client local host; server only keeps the queue seat.
         if (!coopQueue.includes(ws)) coopQueue.push(ws);
         ws.state = 'queued';
         ws.queueMode = 'coop';
         notifyQueueKind('coop');
         tryMatchmakeCoop();
-        if (coopQueue.includes(ws) && (!ws.room || !ws.room.practice)) startPractice(ws, 'coop');
+        send(ws, queueStatusFor('coop'));
       } else if (ws.soloSnapshot && msg.continue) {
         startSoloMode(ws, ws.soloSnapshot);
       } else if (mode === 'pvp') {
-        // Game-over while matchmaking leaves the client queued without a room —
-        // Restart must start a fresh wait-practice, not dedicated solo.
         if (!matchQueue.includes(ws)) matchQueue.push(ws);
         ws.state = 'queued';
         ws.queueMode = 'pvp';
         notifyQueueKind('pvp');
         tryMatchmake();
-        if (matchQueue.includes(ws) && (!ws.room || !ws.room.practice)) startPractice(ws, 'pvp');
+        send(ws, queueStatusFor('pvp'));
       } else {
         startSoloMode(ws, null);
       }
