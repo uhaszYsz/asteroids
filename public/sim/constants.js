@@ -504,8 +504,8 @@ const ENEMY_WORM_SHOTGUN = {
   spread: 360,
   cooldown: 40,
   reload: Math.round(1 * TPS),
-  spdMin: 2,
-  spdMax: 8,
+  spdMin: 3.5,
+  spdMax: 6.5,
   sizeMin: 7,
   sizeMax: 30,
   dmg: 18
