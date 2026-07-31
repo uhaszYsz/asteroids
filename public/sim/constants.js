@@ -468,11 +468,11 @@ const ENEMY_WORM_SHOTGUN = {
   dmg: 18
 };
 /** Player rocket: launch reverse along aim, then accel up to WEAPONS.rocket.speed. */
-const ROCKET_LAUNCH_SPEED = 1;
+const ROCKET_LAUNCH_SPEED = 0;
 /** Player (and default) rocket hull HP — depleted by hitscans / bullets before detonate. */
 const ROCKET_HP_DEFAULT = 190;
 /** Player rocket accel (px/tick along flight axis). */
-const ROCKET_ACCEL_DEFAULT = 0.5;
+const ROCKET_ACCEL_DEFAULT = 1.2;
 /** Default rocket homing turn (degrees/tick). 0 = disabled. */
 const ROCKET_HOMING_DEFAULT = 0;
 /** How often accel/homing rockets resync pose to clients. */
