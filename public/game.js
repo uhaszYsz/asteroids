@@ -16319,13 +16319,13 @@ function laserPulseColor(base) {
   ];
 }
 
-/** Cyan laser segment with 10 Hz brightness / glow pulse. */
+/** Cyan laser segment with 10 Hz light pulse (brightness only, fixed width). */
 function drawLaserBeamSeg(x0, y0, x1, y1, width, color) {
   const p = laserPulse01();
   const col = laserPulseColor(color || COL.laser);
-  const w = Math.max(1, width * (0.82 + 0.35 * p));
-  drawThickSegment(x0, y0, x1, y1, w, col, 0.55 + 0.45 * p, false);
-  drawThickSegment(x0, y0, x1, y1, w * (1.35 + 0.75 * p), col, 0.18 + 0.38 * p, true);
+  const w = Math.max(1, width);
+  drawThickSegment(x0, y0, x1, y1, w, col, 0.5 + 0.5 * p, false);
+  drawThickSegment(x0, y0, x1, y1, w * 1.55, col, 0.12 + 0.4 * p, true);
 }
 
 function drawLaserBeams() {
