@@ -10622,6 +10622,8 @@ const SPRITE_SHIP_PX_SCALE = 1;
  *  opts.tube: also draw two mirrored under-planes (4 faces) for a full tube/worm.
  *  opts.flat: single z=0 quad (full sprite) — no roof fold.
  *  opts.hexDome: low-poly hex bulge — 6 tris, rim z=0, center z=domeZ (default 14).
+ *  opts.tiltXDeg: fixed roll around +X (degrees).
+ *  opts.yawSpinDegPerTick: continuous yaw around Z (degrees per sim tick).
  *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor, opts) {
   const spec = opt && opt.sprite;
@@ -10631,12 +10633,21 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
 
   const flat = !!(opts && opts.flat);
   const hexDome = !!(opts && opts.hexDome);
-  let bank = (flat || hexDome) ? 0 : ((bankOverride != null && Number.isFinite(bankOverride))
+  const tiltXDeg = opts && opts.tiltXDeg != null && Number.isFinite(+opts.tiltXDeg) ? +opts.tiltXDeg : 0;
+  let bank = flat ? 0 : ((bankOverride != null && Number.isFinite(bankOverride))
     ? bankOverride * 0.5
     : shipBankSmoothed(id, av, dt) * 0.5);
+  if (hexDome) bank = tiltXDeg * Math.PI / 180;
+  else if (tiltXDeg) bank += tiltXDeg * Math.PI / 180;
   const spinRate = opts && opts.spinRate;
   if (!flat && !hexDome && spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
     bank += performance.now() * 0.001 * spinRate + (id | 0) * 0.73;
+  }
+  let drawAng = angle;
+  const yawSpinDpt = opts && opts.yawSpinDegPerTick;
+  if (yawSpinDpt && Number.isFinite(+yawSpinDpt) && +yawSpinDpt !== 0) {
+    const dps = (+yawSpinDpt) * TPS;
+    drawAng = angle + performance.now() * 0.001 * dps * Math.PI / 180 + (id | 0) * 0.73;
   }
   const sc = SPRITE_SHIP_PX_SCALE * (sizeScale > 0 ? sizeScale : 1);
   // Nose–tail from frame height; wing span from frame width — true pixel proportions.
@@ -10786,9 +10797,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   }
 
   // Painter's algorithm when spinning / multi-sided tube.
-  if (panels.length > 2 || (spinRate && spinRate !== 0)) {
+  if (panels.length > 2 || (spinRate && spinRate !== 0) || (yawSpinDpt && yawSpinDpt !== 0)) {
     for (let p = 0; p < panels.length; p++) {
-      const { depth } = projectMesh3D(panels[p].verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
+      const { depth } = projectMesh3D(panels[p].verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
       let z = 0;
       for (let i = 0; i < depth.length; i++) z += depth[i];
       panels[p]._z = z / Math.max(1, depth.length);
@@ -10807,7 +10818,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   if (showPlanes) {
     for (let p = 0; p < panels.length; p++) {
       const verts = panels[p].verts;
-      const { xy } = projectMesh3D(verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
+      const { xy } = projectMesh3D(verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
       const n = verts.length;
       const poly = [];
       for (let i = 0; i < n; i++) {
@@ -10853,7 +10864,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const windBackT = [0, 2, 1];
   /** @returns {number} GL triangle vertex count (double-sided). */
   function fillPanelMesh(panel) {
-    const { xy } = projectMesh3D(panel.verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
+    const { xy } = projectMesh3D(panel.verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
     const uvs = panel.uvs;
     const tri = panel.verts.length === 3;
     const fwd = tri ? windFwdT : windFwdQ;
@@ -10878,8 +10889,25 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     gl.uniform3f(ssUTint, outlineTint[0], outlineTint[1], outlineTint[2]);
     gl.uniform1f(ssUOutline, 1);
     gl.uniform1f(ssUAlpha, outlineA);
-    for (let p = 0; p < panels.length; p++) {
-      const nVert = fillPanelMesh(panels[p]);
+    // Hex dome: one flat full-frame silhouette — per-tri outlines look like wireframe seams.
+    const outlinePanels = hexDome
+      ? [{
+          verts: [
+            [halfL, -halfW, 0],
+            [halfL, halfW, 0],
+            [-halfL, halfW, 0],
+            [-halfL, -halfW, 0]
+          ],
+          uvs: [
+            [uv.u0, uv.v0],
+            [uv.u1, uv.v0],
+            [uv.u1, uv.v1],
+            [uv.u0, uv.v1]
+          ]
+        }]
+      : panels;
+    for (let p = 0; p < outlinePanels.length; p++) {
+      const nVert = fillPanelMesh(outlinePanels[p]);
       for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
         const dir = SPRITE_SHIP_OUTLINE_DIRS[d];
         gl.uniform2f(ssUOffset, dir[0] * outlineW, dir[1] * outlineW);
@@ -16605,7 +16633,7 @@ function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
   return bank;
 }
 
-/** Spinner: compact craft on a 6-tri hex dome (rim z=0, center z=14); hull angle from server. */
+/** Spinner: hex dome sprite; 7° X tilt; spins 4°/tick around Z. */
 function drawEnemySpinner(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_SPINNER_SPRITE_ID);
@@ -16613,7 +16641,7 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
-      { hexDome: true, domeZ: 14 }
+      { hexDome: true, domeZ: 14, tiltXDeg: 7, yawSpinDegPerTick: 4 }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
