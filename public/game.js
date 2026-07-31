@@ -9233,8 +9233,8 @@ function uploadAsteroidPanelTex(tex, canvas, repeat) {
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   const wrap = repeat ? gl.REPEAT : gl.CLAMP_TO_EDGE;
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap);
@@ -9966,22 +9966,22 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
   if (outlineA > 0.001) {
     const nEq = mesh.n | 0;
     const outlineW = 2;
-    wire[0] = Math.min(1, lineCol[0] * blinkColorMul);
-    wire[1] = Math.min(1, lineCol[1] * blinkColorMul);
-    wire[2] = Math.min(1, lineCol[2] * blinkColorMul);
+    wire[0] = Math.min(1, lineCol[0]);
+    wire[1] = Math.min(1, lineCol[1]);
+    wire[2] = Math.min(1, lineCol[2]);
     // Untextured solid lines: Godot emission = albedo + tint×energy.
     const emitSolid = !outlineTexOn && outlineEmitPow > 0.001;
     if (emitSolid) {
       const e = outlineEmitPow;
-      wire[0] = Math.min(1, wire[0] + lineCol[0] * e * blinkMul);
-      wire[1] = Math.min(1, wire[1] + lineCol[1] * e * blinkMul);
-      wire[2] = Math.min(1, wire[2] + lineCol[2] * e * blinkMul);
+      wire[0] = Math.min(1, lineCol[0] + lineCol[0] * e);
+      wire[1] = Math.min(1, lineCol[1] + lineCol[1] * e);
+      wire[2] = Math.min(1, lineCol[2] + lineCol[2] * e);
     }
     const emitGlow = _astEmitColScratch;
     if (emitSolid) {
-      emitGlow[0] = lineCol[0] * blinkColorMul;
-      emitGlow[1] = lineCol[1] * blinkColorMul;
-      emitGlow[2] = lineCol[2] * blinkColorMul;
+      emitGlow[0] = lineCol[0];
+      emitGlow[1] = lineCol[1];
+      emitGlow[2] = lineCol[2];
     }
     const glowA = emitSolid ? Math.min(1, outlineA * outlineEmitPow * 0.55) : 0;
     const glowW = outlineW + 2;
@@ -9989,7 +9989,7 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
     for (let i = 0; i < nEq; i++) {
       const j = (i + 1) % nEq;
       if (outlineTexOn) {
-        drawAsteroidEdgeTex(xy, mv, i, j, radius, id, wire, outlineA, outlineW, 1, outlineEmitPow * blinkMul);
+        drawAsteroidEdgeTex(xy, mv, i, j, radius, id, wire, outlineA, outlineW, 1, outlineEmitPow);
       } else {
         drawThickSegment(
           xy[i * 2], xy[i * 2 + 1],
