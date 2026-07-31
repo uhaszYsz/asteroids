@@ -7968,7 +7968,8 @@ function emitDamageTakenFx(x, y) {
   });
   softErr.x += (Math.random() - 0.5) * 6 * RES_SCALE;
   softErr.y += (Math.random() - 0.5) * 6 * RES_SCALE;
-  clampSoftErr();
+  if (!isOfflineLocalPlay()) clampSoftErr();
+  else { softErr.x = 0; softErr.y = 0; softErr.angle = 0; }
   triggerScreenShake(240, 6 * RES_SCALE);
 }
 
@@ -14215,6 +14216,12 @@ function clampSoftErr() {
 }
 
 function decaySoftErr(dt) {
+  if (isOfflineLocalPlay()) {
+    softErr.x = 0;
+    softErr.y = 0;
+    softErr.angle = 0;
+    return;
+  }
   if (dt <= 0) return;
   const rate = cv('cl_recon');
   if (rate <= 0) {
@@ -14235,6 +14242,17 @@ function decaySoftErr(dt) {
 
 /** Visual pose for local ship (sim + soft error). */
 function localView() {
+  if (isOfflineLocalPlay()) {
+    return {
+      x: player.x,
+      y: player.y,
+      angle: player.angle,
+      vx: player.vx,
+      vy: player.vy,
+      av: player.av || 0,
+      hp: player.hp
+    };
+  }
   return {
     x: wrapCoord(player.x + softErr.x, W),
     y: wrapCoord(player.y + softErr.y, H),
@@ -14316,8 +14334,29 @@ function resetTickClock() {
 /**
  * After a long rAF pause: snap sim to last known server pose but keep the
  * on-screen ship continuous via softErr so it blends instead of teleports.
+ * Offline solo: never soft-blend — that fights host mirrors and causes shake.
  */
 function adoptServerGhostVisual() {
+  if (isOfflineLocalPlay()) {
+    if (serverGhost.valid) {
+      player.x = serverGhost.x;
+      player.y = serverGhost.y;
+      player.vx = serverGhost.vx;
+      player.vy = serverGhost.vy;
+      player.angle = serverGhost.angle;
+      player.av = serverGhost.av || 0;
+      player.hp = serverGhost.hp;
+      player.turnDecelStep = 0;
+      player.turnDecelLeft = 0;
+      player.turnDecelRev = 0;
+      lastAppliedSeq = ackedSeq;
+    }
+    softErr.x = 0;
+    softErr.y = 0;
+    softErr.angle = 0;
+    resumeBlendUntil = 0;
+    return;
+  }
   const prevX = player.x + softErr.x;
   const prevY = player.y + softErr.y;
   const prevA = player.angle + softErr.angle;
@@ -14345,6 +14384,52 @@ function adoptServerGhostVisual() {
   if (softErr.angle > SOFT_ERR_MAX_ANG * 2) softErr.angle = SOFT_ERR_MAX_ANG * 2;
   if (softErr.angle < -SOFT_ERR_MAX_ANG * 2) softErr.angle = -SOFT_ERR_MAX_ANG * 2;
   resumeBlendUntil = performance.now() + RESUME_BLEND_MS;
+}
+
+/**
+ * Solo local host: copy the live sim ship every frame (same JS process).
+ * Snaps alone leave 1-frame vel/pose fights after hitches; this is the source of truth.
+ */
+function mirrorOfflineHostShip() {
+  if (!isOfflineLocalPlay() || !inGame || myId == null) return false;
+  const sw = ws && ws.__local ? ws._server : null;
+  if (!sw || !sw.room) return false;
+  const p = sw.room.players.get(myId);
+  if (!p) return false;
+  const ack = p.lastSeq | 0;
+  player.x = p.x;
+  player.y = p.y;
+  player.vx = p.vx;
+  player.vy = p.vy;
+  player.angle = p.angle;
+  player.av = p.av || 0;
+  player.hp = p.hp;
+  player.stunned = !!p.stunned;
+  player.godLeft = p.godLeft | 0;
+  player.collideCd = p.collideCd || 0;
+  player.turnDecelStep = p.turnDecelStep || 0;
+  player.turnDecelLeft = p.turnDecelLeft || 0;
+  player.turnDecelRev = p.turnDecelRev || 0;
+  softErr.x = 0;
+  softErr.y = 0;
+  softErr.angle = 0;
+  resumeBlendUntil = 0;
+  serverGhost.x = p.x;
+  serverGhost.y = p.y;
+  serverGhost.vx = p.vx;
+  serverGhost.vy = p.vy;
+  serverGhost.angle = p.angle;
+  serverGhost.hp = p.hp;
+  serverGhost.av = p.av || 0;
+  serverGhost.valid = true;
+  if (ack > (ackedSeq | 0)) {
+    ackedSeq = ack;
+    pendingInputs = pendingInputs.filter(f => f.seq > ack);
+  }
+  lastAppliedSeq = ack;
+  offlineShootSeq = Math.max(offlineShootSeq | 0, ack);
+  predReady = true;
+  return true;
 }
 
 /**
@@ -22578,6 +22663,8 @@ function frame(now) {
   }
   if (inGame) {
     syncSimTicks();
+    // Solo: draw the live host ship (same process) — kills snap/softErr shake after hitches.
+    mirrorOfflineHostShip();
     updateHud();
     render();
   } else {
