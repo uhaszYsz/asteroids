@@ -1370,6 +1370,7 @@ function fireEnemyRocket(room, e, ang, spd, dmg) {
     enemyOwner: e.id,
     type: 'enemyRocket',
     dmg: damage,
+    hp: ENEMY_ROCKET_HP,
     x, y,
     spawnX: x,
     spawnY: y,
@@ -4265,9 +4266,9 @@ function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist) {
       best = { t: hit.t, x: hit.x, y: hit.y, kind: 'enemy', target: e };
     }
   }
-  // Player rockets — hits deflect heading (do not destroy).
+  // Hittable rockets (player hull / NPC enemy rockets).
   for (const b of room.bullets || []) {
-    if (!b || b.type !== 'rocket') continue;
+    if (!isHittableRocket(b)) continue;
     if ((b.owner | 0) === (ownerId | 0)) continue;
     if (blocksFriendlyFire(room, ownerId)) continue;
     const rr = rocketHitR(b);
@@ -4281,8 +4282,26 @@ function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist) {
 }
 
 function rocketHitR(b) {
+  if (b && b.type === 'enemyRocket') {
+    const cfg = BULLET_TYPES.enemyRocket || BULLET_TYPES.default;
+    return Math.max(2, cfg.size || 1);
+  }
   const cfg = BULLET_TYPES.rocket || BULLET_TYPES.default;
   return Math.max(2, cfg.size || 7 * RES_SCALE);
+}
+
+/** Player-owned rockets (PvP hull) or NPC rockets (UFO / worm). Other bullets have no hull. */
+function isHittableRocket(b) {
+  if (!b) return false;
+  if (b.type === 'enemyRocket') return true;
+  if (b.type === 'rocket') return true;
+  return false;
+}
+
+function rocketDefaultHp(b) {
+  if (!b) return ROCKET_HP_DEFAULT;
+  if (b.type === 'enemyRocket' || (b.owner | 0) <= 0) return ENEMY_ROCKET_HP;
+  return ROCKET_HP_DEFAULT;
 }
 
 /** Linear falloff: maxDmg at center, 0 at radius. */
@@ -4361,18 +4380,22 @@ function detonateRocket(room, b, hitKind, _applyDirectIgnored) {
   });
 }
 
-/** Apply hull damage to a rocket; detonates and removes it when HP hits 0. */
+/** Apply hull damage to a rocket; removes it when HP hits 0 (blast only for player rockets). */
 function damageRocket(room, rocket, dmg) {
-  if (!rocket || rocket.type !== 'rocket') return false;
+  if (!isHittableRocket(rocket)) return false;
   if (!(dmg > 0)) return false;
-  if (rocket.hp == null) rocket.hp = ROCKET_HP_DEFAULT;
+  if (rocket.hp == null) rocket.hp = rocketDefaultHp(rocket);
   if ((rocket.hp | 0) <= 0) return true;
   rocket.hp -= dmg;
   if (rocket.hp > 0) return false;
   rocket.hp = 0;
   const idx = room.bullets.indexOf(rocket);
   if (idx >= 0) room.bullets.splice(idx, 1);
-  detonateRocket(room, rocket, 1);
+  if (rocket.type === 'enemyRocket' || rocket.noBlast) {
+    roomBroadcast(room, { t: 'bd', id: rocket.id, hit: 1, x: rocket.x, y: rocket.y });
+  } else {
+    detonateRocket(room, rocket, 1);
+  }
   return true;
 }
 
@@ -4697,7 +4720,7 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
   }
   const rocketHits = [];
   for (const b of room.bullets || []) {
-    if (!b || b.type !== 'rocket') continue;
+    if (!isHittableRocket(b)) continue;
     if ((b.owner | 0) === (p.id | 0)) continue;
     if (blocksFriendlyFire(room, p.id)) continue;
     const rr = rocketHitR(b);
@@ -5546,7 +5569,7 @@ function updateBullets(room) {
       }
       for (let j = bullets.length - 1; j >= 0; j--) {
         const r = bullets[j];
-        if (!r || r.type !== 'rocket') continue;
+        if (!isHittableRocket(r)) continue;
         if ((r.owner | 0) === (b.owner | 0)) continue;
         if (blocksFriendlyFire(room, b.owner)) continue;
         if (!hitBulletTarget(b, r.x, r.y, rocketHitR(r), false)) continue;
@@ -5631,17 +5654,26 @@ function updateBullets(room) {
       if (hitEnemy) continue;
     }
 
-    // Hitting another player's rocket damages its hull (detonates at 0 HP).
+    // Only rockets have hull HP. Player shots hit NPC + other players' rockets.
+    // NPC shots can hit player rockets. Normal bullets never collide with each other.
     {
       let hitRocket = false;
       for (let j = bullets.length - 1; j >= 0; j--) {
         if (j === i) continue;
         const r = bullets[j];
-        if (!r || r.type !== 'rocket') continue;
+        if (!isHittableRocket(r)) continue;
         if ((r.owner | 0) === (b.owner | 0)) continue;
         if (blocksFriendlyFire(room, b.owner)) continue;
+        const shooterIsPlayer = (b.owner | 0) > 0;
+        const targetIsNpc = r.type === 'enemyRocket' || (r.owner | 0) <= 0;
+        const targetIsPlayerRocket = r.type === 'rocket' && (r.owner | 0) > 0;
+        if (shooterIsPlayer) {
+          if (!targetIsNpc && !targetIsPlayerRocket) continue;
+        } else if (!targetIsPlayerRocket) {
+          continue;
+        }
         if (!hitBulletTarget(b, r.x, r.y, rocketHitR(r), false)) continue;
-        const rdmg = b.type === 'rocket' ? ROCKET_HP_DEFAULT : (b.dmg || 1);
+        const rdmg = b.type === 'rocket' ? rocketDefaultHp(r) : (b.dmg || 1);
         damageRocket(room, r, rdmg);
         if (b.type === 'rocket') {
           detonateRocket(room, b, 1);

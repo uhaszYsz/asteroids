@@ -15345,7 +15345,7 @@ function unpackBullet(row) {
     b.accel = row[8] != null ? +row[8] : 0;
     b.maxSpeed = row[9] != null ? +row[9] : 0;
     b.homing = row[10] != null ? +row[10] : 0;
-    b.hp = row[11] != null ? (row[11] | 0) : 190;
+    b.hp = row[11] != null ? (row[11] | 0) : 180;
     if (row[12] != null && Number.isFinite(+row[12])) b.flightAng = +row[12];
   } else if (b.type === 'enemyWorm') {
     b.length = row[8] != null ? +row[8] : 15;

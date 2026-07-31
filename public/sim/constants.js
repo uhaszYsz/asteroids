@@ -436,6 +436,7 @@ const ENEMY_WORM_LASER = {
  * Speed/accel/homing are literal px/tick (not RES_SCALE).
  * Direct-hit only (no blast radius).
  */
+const ENEMY_ROCKET_HP = 20;
 const ENEMY_WORM_ROCKET = {
   ammo: 2,
   shotgun: 3,
@@ -448,7 +449,7 @@ const ENEMY_WORM_ROCKET = {
   homing: 2,
   lifeMinS: 6,
   lifeMaxS: 14,
-  hp: 20,
+  hp: ENEMY_ROCKET_HP,
   dmg: 30
 };
 /**
@@ -469,8 +470,8 @@ const ENEMY_WORM_SHOTGUN = {
 };
 /** Player rocket: launch at 0, then accel up to WEAPONS.rocket.speed. */
 const ROCKET_LAUNCH_SPEED = 0;
-/** Player (and default) rocket hull HP — depleted by hitscans / bullets before detonate. */
-const ROCKET_HP_DEFAULT = 190;
+/** Player rocket hull HP — depleted by hitscans / bullets before detonate. */
+const ROCKET_HP_DEFAULT = 180;
 /** Player rocket base accel (px/tick along flight axis) while |speed| < boost threshold. */
 const ROCKET_ACCEL_DEFAULT = 0.5;
 /** Above this signed speed, player rocket accel is multiplied. */
