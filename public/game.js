@@ -433,11 +433,8 @@ const SFX = {
     'sounds/ambientExplosion1.wav',
     'sounds/ambientExplosion2.wav'
   ],
-  collide: [
-    'sounds/impact.wav',
-    'sounds/impact1.wav',
-    'sounds/impact2.wav'
-  ],
+  collide: 'sounds/impact1.wav',
+  /** Asteroid↔asteroid (incl. asteroid-gun rocks); not ship hits. */
   asteroidCollide: 'sounds/explosion1.wav',
   shieldOff: 'sounds/shield.wav',
   /** Meteor-gun rock vs world asteroid — only asteroid↔asteroid collision sting. */
@@ -8000,7 +7997,7 @@ function emitAsteroidBurst(x, y, r, size, opts) {
 }
 
 function emitPlayerAsteroidHit(x, y) {
-  playSfx(SFX.asteroidCollide, { vol: 0.9, pool: 4 });
+  playSfx(SFX.collide, { vol: 0.9, pool: 4 });
   triggerScreenShake(400, 11 * RES_SCALE);
   emitParticles({
     x, y,
