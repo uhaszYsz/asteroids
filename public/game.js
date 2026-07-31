@@ -422,6 +422,8 @@ const SFX = {
     'sounds/shootEnergy.wav',
     'sounds/shootEnergy1.wav'
   ],
+  /** Common / spinner enemy line shots. */
+  shootEnemy: 'sounds/shootEnemy.wav',
   rocketFire: 'sounds/rocket_fire.wav',
   rocketTravel: 'sounds/rocket_travel.wav',
   scored: 'sounds/scored.ogg',
@@ -537,6 +539,7 @@ function unlockSfx() {
         };
         warm(SFX.money, 8);
         warm(SFX.shoot, 8);
+        warm(SFX.shootEnemy, 8);
         warm(SFX.collide, 6);
         warm(SFX.hitAsteroidBullet, 8);
         warm(SFX.hitPlayerBullet, 8);
@@ -15435,9 +15438,12 @@ function addBullet(b, withMuzzle, liveFire) {
     } else if (b.type === 'turret') {
       emitMuzzleFx(origin.x, origin.y, ang, COL.powerTurret, 7, sv.vx, sv.vy);
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.35, pool: 8 });
-    } else if (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyWorm') {
-      const mz = b.type === 'enemySpinner' ? 12 : (b.type === 'enemyWorm' ? 9 : 7);
+    } else if (b.type === 'enemy' || b.type === 'enemySpinner') {
+      const mz = b.type === 'enemySpinner' ? 12 : 7;
       emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, mz, sv.vx, sv.vy);
+      playSfx(SFX.shootEnemy, { vol: 0.55, pool: 8 });
+    } else if (b.type === 'enemyWorm') {
+      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, 9, sv.vx, sv.vy);
     }
   }
 }
