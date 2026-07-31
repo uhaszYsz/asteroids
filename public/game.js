@@ -16218,7 +16218,7 @@ const ENEMY_WORM_SPRITE_ID = 'enemy_184';
 const ENEMY_WORM_SPRITE_SCALE = 1;
 /** Continuous roll around nose / length axis (rad/s). Doubled while laser-attack holding. */
 const ENEMY_WORM_SPIN_RATE = 3.2;
-const ENEMY_SPINNER_SPRITE_ID = 'enemy_136';
+const ENEMY_SPINNER_SPRITE_ID = 'enemy_27';
 const ENEMY_SPINNER_SPRITE_SCALE = 1;
 /** Visual yaw spin rate while alive (rad/s) — shoot spin is server-side. */
 const ENEMY_SPINNER_VIS_SPIN = 2.4;
