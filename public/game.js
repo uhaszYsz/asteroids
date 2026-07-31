@@ -1,19 +1,4 @@
 const RES_SCALE = 2;
-// #region agent log
-function __agentLog(payload) {
-  try {
-    const b = JSON.stringify(Object.assign({ sessionId: 'f03469', timestamp: Date.now() }, payload));
-    let dbgUrl = '/__agent_debug';
-    try { dbgUrl = new URL('__agent_debug', location.href).href; } catch (_) {}
-    fetch(dbgUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: b }).catch(function () {});
-    fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f03469' },
-      body: b
-    }).catch(function () {});
-  } catch (_) {}
-}
-// #endregion
 const W = 420 * RES_SCALE, H = 240 * RES_SCALE;
 const canvas = document.getElementById('c');
 const statusEl = document.getElementById('status');
@@ -11020,20 +11005,10 @@ function tryStartLocalBurst() {
   // Space while invuln: drop godmode and fire (matches server).
   if ((player.godLeft | 0) > 0) player.godLeft = 0;
   if (localShoot.bursting || localShoot.reloadLeft > 0 || localShoot.shootAmmo <= 0 || (localShoot.shootCd | 0) > 0) {
-    // #region agent log
-    if (isOfflineLocalPlay() && currentWeaponName() === 'laser') {
-      __agentLog({sessionId:'f03469',hypothesisId:'E',location:'game.js:tryStartLocalBurst',message:'client burst rejected',data:{bursting:!!localShoot.bursting,reload:localShoot.reloadLeft|0,ammo:localShoot.shootAmmo|0,cd:localShoot.shootCd|0,god:player.godLeft|0},timestamp:Date.now()});
-    }
-    // #endregion
     return false;
   }
   if (currentWeaponName() === 'railgun' && (localShoot.railChargeLeft | 0) > 0) return false;
   localShoot.bursting = true;
-  // #region agent log
-  if (isOfflineLocalPlay()) {
-    __agentLog({sessionId:'f03469',hypothesisId:'D',location:'game.js:tryStartLocalBurst',message:'client burst started',data:{wpn:currentWeaponName(),ammo:localShoot.shootAmmo|0,seq:inputSeq|0,acked:ackedSeq|0,unacked:unackedInputCount(),local:1},timestamp:Date.now()});
-  }
-  // #endregion
   if (selectedWeapon === 3) {
     const w = effectiveLocalWeapon(currentWeaponName());
     const tickMs = 1000 / TPS;
@@ -14409,9 +14384,6 @@ function requestWorldSync() {
   const now = performance.now();
   if (now - lastWorldSyncAt < 250) return;
   lastWorldSyncAt = now;
-  // #region agent log
-  __agentLog({hypothesisId:'G',location:'game.js:requestWorldSync',message:'request worldSync',data:{offline:isOfflineLocalPlay()?1:0,cursor:clientTickCursor|0,syncTick:syncTick|0},timestamp:Date.now(),runId:'tab-resync'});
-  // #endregion
   try { ws.send(JSON.stringify({ t: 'worldSync' })); } catch (_) {}
 }
 
@@ -14474,9 +14446,6 @@ function applyWorldSyncMsg(msg) {
     enemyCharges.clear();
     for (const row of msg.enemies) addEnemy(unpackEnemy(row));
   }
-  // #region agent log
-  __agentLog({hypothesisId:'G',location:'game.js:applyWorldSyncMsg',message:'applied worldSync',data:{tick:syncTick|0,asts:(msg.asteroids&&msg.asteroids.length)|0,enys:(msg.enemies&&msg.enemies.length)|0,offline:isOfflineLocalPlay()?1:0,livePack:1,v:730},timestamp:Date.now(),runId:'tab-resync'});
-  // #endregion
   predReady = true;
   updateHud();
 }
@@ -17954,12 +17923,6 @@ function sendPendingInputs() {
   const frames = unacked.length > INPUT_SEND_MAX_FRAMES
     ? unacked.slice(0, INPUT_SEND_MAX_FRAMES)
     : unacked;
-  // #region agent log
-  if (isOfflineLocalPlay() && frames.some(f => f.sp)) {
-    const spFrames = frames.filter(f => f.sp).map(f => f.seq);
-    __agentLog({sessionId:'f03469',hypothesisId:'D',location:'game.js:sendPendingInputs',message:'sending sp frames',data:{spFrames,n:frames.length,unacked:unacked.length,acked:ackedSeq|0,inputSeq:inputSeq|0,lastSent:lastSentSeq|0},timestamp:Date.now()});
-  }
-  // #endregion
   ws.send(JSON.stringify({
     t: 'in',
     frames: frames.map(f => ({
@@ -19899,9 +19862,6 @@ async function ensureLocalSoloSocket() {
   ws = sock;
   usingLocalSolo = true;
   connected = true;
-  // #region agent log
-  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:728,local:1,maxUnack:2,ntpOff:1},runId:'post-fix'});
-  // #endregion
   resetClockSync();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
   // Local host is always admin (server + console); also auth with admin1.
