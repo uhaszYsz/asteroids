@@ -984,6 +984,11 @@ const CVARS = {
     def: 2,
     help: 'Server demos: 0=off, 1=PvP only, 2=PvP + matchmaking/coop wave rooms. Admin only. Global.'
   },
+  sv_spawn_worm: {
+    value: 0,
+    def: 0,
+    help: 'Set to 1 to spawn a worm enemy (admin, solo/coop wave room). Resets to 0.'
+  },
   cl_grid: {
     value: 1,
     def: 1,
@@ -1250,6 +1255,19 @@ function setCvar(name, raw) {
   if (name === 'sv_demo') {
     c.value = Math.max(0, Math.min(2, n | 0));
     syncDemoCvar();
+  }
+  if (name === 'sv_spawn_worm') {
+    c.value = 0;
+    if ((n | 0) !== 0) {
+      if (!consoleAdmin) return false;
+      if (!ws || ws.readyState !== 1 || !inGame) {
+        conPrint('sv_spawn_worm needs an active wave match', 'err');
+        return true;
+      }
+      ws.send(JSON.stringify({ t: 'adminSpawn', kind: 'worm' }));
+      conPrint('spawn worm', 'info');
+    }
+    return true;
   }
   if (name === 'cl_background_bake' || name === 'cl_background_bake_quality') {
     if (name === 'cl_background_bake_quality') {
@@ -6964,6 +6982,7 @@ function emitShipDamageSmoke(id, x, y, angle, vx, vy, hp, maxHpOpt) {
 function enemyMaxHp(kind) {
   if (kind === 'ufo') return 300;
   if (kind === 'carrier') return 90;
+  if (kind === 'worm') return 120;
   return 95;
 }
 
@@ -7099,6 +7118,7 @@ function emitThrustIdleFx(x, y, angle, vx, vy, skipShip, color) {
 function enemyThrustColor(kind) {
   if (kind === 'ufo') return COL.enemyUfo;
   if (kind === 'carrier') return COL.enemyCarrier;
+  if (kind === 'worm') return COL.enemy;
   return COL.enemy;
 }
 
@@ -9863,7 +9883,7 @@ const ENEMY_SPRITE_SPECS = [
   { id: 'enemy_174', name: 'Craft 174', file: 'Spaceship (174).png', fw: 79, fh: 61, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_175', name: 'Craft 175', file: 'Spaceship (175).png', fw: 110, fh: 51, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_181', name: 'Craft 181', file: 'Spaceship (181).png', fw: 89, fh: 46, states: ['idle'], frames: [1], single: true },
-  { id: 'enemy_184', name: 'Craft 184', file: 'Spaceship (184).png', fw: 81, fh: 39, states: ['idle'], frames: [1], single: true },
+  { id: 'enemy_184', name: 'Worm 184', file: 'Spaceship (184).png', fw: 81, fh: 39, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_185', name: 'Craft 185', file: 'Spaceship (185).png', fw: 119, fh: 40, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_188', name: 'Craft 188', file: 'Spaceship (188).png', fw: 126, fh: 48, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_211', name: 'Craft 211', file: 'Spaceship (211).png', fw: 76, fh: 73, states: ['idle'], frames: [1], single: true },
@@ -10505,16 +10525,22 @@ const SPRITE_SHIP_PX_SCALE = 1;
 
 /** Sprite cut vertically onto a pitched roof (two faces meeting at the keel ridge).
  *  bankOverride: use enemy bank instead of player av smoothing.
- *  sizeScale: extra multiplier (default 1). Plane size follows sprite fw×fh. */
-function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor) {
+ *  sizeScale: extra multiplier (default 1). Plane size follows sprite fw×fh.
+ *  opts.tube: also draw two mirrored under-planes (4 faces) for a full tube/worm.
+ *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
+function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor, opts) {
   const spec = opt && opt.sprite;
   if (!spec) return;
   const entry = spriteShipTexById.get(spec.id);
   if (!entry || !entry.ready || !entry.tex) return;
 
-  const bank = (bankOverride != null && Number.isFinite(bankOverride))
+  let bank = (bankOverride != null && Number.isFinite(bankOverride))
     ? bankOverride * 0.5
     : shipBankSmoothed(id, av, dt) * 0.5;
+  const spinRate = opts && opts.spinRate;
+  if (spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
+    bank += performance.now() * 0.001 * spinRate + (id | 0) * 0.73;
+  }
   const sc = SPRITE_SHIP_PX_SCALE * (sizeScale > 0 ? sizeScale : 1);
   // Nose–tail from frame height; wing span from frame width — true pixel proportions.
   const halfL = Math.max(1, spec.fh) * 0.5 * sc;
@@ -10527,40 +10553,74 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const state = tinyShipDesiredState(spec, !!moving, spriteShipAttacking(id));
   const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
   const uMid = (uv.u0 + uv.u1) * 0.5;
+  const uvsL = [
+    [uMid, uv.v0],
+    [uv.u0, uv.v0],
+    [uv.u0, uv.v1],
+    [uMid, uv.v1]
+  ];
+  const uvsR = [
+    [uMid, uv.v0],
+    [uv.u1, uv.v0],
+    [uv.u1, uv.v1],
+    [uMid, uv.v1]
+  ];
 
   // Left / right halves share the ridge (y=0,z=0); tips fold down like a roof.
   const panels = [
     {
-      // nose-ridge, nose-left, tail-left, tail-ridge
       verts: [
         [halfL, 0, 0],
         [halfL, -wingY, -drop],
         [-halfL, -wingY, -drop],
         [-halfL, 0, 0]
       ],
-      uvs: [
-        [uMid, uv.v0],
-        [uv.u0, uv.v0],
-        [uv.u0, uv.v1],
-        [uMid, uv.v1]
-      ]
+      uvs: uvsL
     },
     {
-      // nose-ridge, nose-right, tail-right, tail-ridge
       verts: [
         [halfL, 0, 0],
         [halfL, wingY, -drop],
         [-halfL, wingY, -drop],
         [-halfL, 0, 0]
       ],
-      uvs: [
-        [uMid, uv.v0],
-        [uv.u1, uv.v0],
-        [uv.u1, uv.v1],
-        [uMid, uv.v1]
-      ]
+      uvs: uvsR
     }
   ];
+  // Worm / tube: mirror the two roof planes under the ridge.
+  if (opts && opts.tube) {
+    panels.push(
+      {
+        verts: [
+          [halfL, 0, 0],
+          [halfL, -wingY, drop],
+          [-halfL, -wingY, drop],
+          [-halfL, 0, 0]
+        ],
+        uvs: uvsL
+      },
+      {
+        verts: [
+          [halfL, 0, 0],
+          [halfL, wingY, drop],
+          [-halfL, wingY, drop],
+          [-halfL, 0, 0]
+        ],
+        uvs: uvsR
+      }
+    );
+  }
+
+  // Painter's algorithm when spinning / 4-sided.
+  if (panels.length > 2 || (spinRate && spinRate !== 0)) {
+    for (let p = 0; p < panels.length; p++) {
+      const { depth } = projectMesh3D(panels[p].verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
+      let z = 0;
+      for (let i = 0; i < depth.length; i++) z += depth[i];
+      panels[p]._z = z / Math.max(1, depth.length);
+    }
+    panels.sort((a, b) => a._z - b._z);
+  }
 
   const tint = color || COL.self || [0.35, 0.85, 1];
   const outlineTint = outlineColor || tint;
@@ -15364,7 +15424,8 @@ const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 const ENEMY_R = {
   common: 6 * RES_SCALE,
   ufo: 9 * RES_SCALE,
-  carrier: 12 * RES_SCALE
+  carrier: 12 * RES_SCALE,
+  worm: 10 * RES_SCALE
 };
 /**
  * UFO (Heavy 370) after 270° CW: fw=52, fh=84.
@@ -15727,6 +15788,10 @@ function pickForwardGunLocals(mesh) {
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
+const ENEMY_WORM_SPRITE_ID = 'enemy_184';
+const ENEMY_WORM_SPRITE_SCALE = 1;
+/** Continuous roll around nose / length axis (rad/s). */
+const ENEMY_WORM_SPIN_RATE = 3.2;
 const ENEMY_COMMON_MESH = (() => {
   return cloneShipMeshScaled(SHIP_MESHES[0], ENEMY_COMMON_SCALE);
 })();
@@ -15896,6 +15961,22 @@ function drawEnemyCommon(x, y, angle, color, id, dt) {
       noEmit: true,
       strongEmit: false
     });
+  }
+  return bank;
+}
+
+/** Worm: craft 184 on 4 planes (roof + mirrored under), spinning along length. */
+function drawEnemyWorm(x, y, angle, color, id, dt) {
+  const bank = enemyBankSmoothed(id, angle, dt);
+  const opt = getShipOptionById(ENEMY_WORM_SPRITE_ID);
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(
+      x, y, angle, 0, id, dt, opt, true, color,
+      bank, ENEMY_WORM_SPRITE_SCALE, COL.enemyOutline,
+      { tube: true, spinRate: ENEMY_WORM_SPIN_RATE }
+    );
+  } else {
+    drawEnemyCommon(x, y, angle, color, id, dt);
   }
   return bank;
 }
@@ -16312,7 +16393,10 @@ function drawEnemies(dt) {
     const y = p.y + vs.y;
     if (p.kind === 'ufo') drawEnemyUfo(x, y, p.angle, COL.enemyUfo, id, dt);
     else if (p.kind === 'carrier') drawEnemyCarrier(x, y, p.angle, e.weapon);
-    else {
+    else if (p.kind === 'worm') {
+      const bank = drawEnemyWorm(x, y, p.angle, COL.enemy, id, dt);
+      enemyDrawBank.set(id, bank);
+    } else {
       const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
     }
@@ -21524,7 +21608,7 @@ function runConsole(line) {
   if (cmdName === 'spawn') {
     if (!conRequireAdmin()) return;
     if (!args.length) {
-      conPrint('usage: spawn big|medium|small|huge|meteor|common|ufo', 'err');
+      conPrint('usage: spawn big|medium|small|huge|meteor|common|ufo|worm', 'err');
       return;
     }
     if (!ws || ws.readyState !== 1) {
@@ -21544,7 +21628,7 @@ function runConsole(line) {
     conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
     conPrint('give <weapon|powerup|admingun>  — grant loadout (admin, in-game)', 'info');
-    conPrint('spawn big|medium|small|huge|meteor|common|ufo  — off-screen spawn (admin, in-game)', 'info');
+    conPrint('spawn big|medium|small|huge|meteor|common|ufo|worm  — off-screen spawn (admin, in-game)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');
     conPrint('cl_allToDefault 1  — reset all cl_ cvars to defaults', 'info');

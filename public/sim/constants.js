@@ -372,7 +372,8 @@ const ENEMY_SNAP_INTERVAL = Math.round(0.5 * TPS);
 const ENEMY_R = {
   common: 6 * RES_SCALE,
   ufo: 9 * RES_SCALE,
-  carrier: 12 * RES_SCALE
+  carrier: 12 * RES_SCALE,
+  worm: 10 * RES_SCALE
 };
 /**
  * UFO (Heavy 370) after 270° CW load: fw=52, fh=84.
@@ -385,7 +386,8 @@ ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 const ENEMY_HP = {
   common: 95,
   ufo: 300,
-  carrier: 90
+  carrier: 90,
+  worm: 120
 };
 const ENEMY_CARRIER_WEAPONS = ['laser', 'plasma', 'rail'];
 const ENEMY_LASER_AIM_DELAY = 12; // frames

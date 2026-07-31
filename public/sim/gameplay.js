@@ -620,6 +620,7 @@ function makeEnemy(kind, wave, weapon) {
   let k = 'common';
   if (kind === 'ufo') k = 'ufo';
   else if (kind === 'carrier') k = 'carrier';
+  else if (kind === 'worm') k = 'worm';
   // Random 4–6s before first shot (reuse fireCd / shootCd — no extra timer).
   const firstShotCd = Math.round(
     (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
@@ -638,8 +639,8 @@ function makeEnemy(kind, wave, weapon) {
     vy: 0,
     angle: 0,
     dir: 0,
-    hp: ENEMY_HP[k],
-    r: k === 'ufo' ? ENEMY_UFO_HIT_R : ENEMY_R[k],
+    hp: ENEMY_HP[k] != null ? ENEMY_HP[k] : ENEMY_HP.common,
+    r: k === 'ufo' ? ENEMY_UFO_HIT_R : (ENEMY_R[k] || ENEMY_R.common),
     tx: 0,
     ty: 0,
     fireCd: firstShotCd,
@@ -1008,6 +1009,9 @@ function enemyTryFire(room, e) {
     updateCarrierWeapon(room, e, target);
     return;
   }
+
+  // Worm is visual/test for now — wanders, does not shoot.
+  if (e.kind === 'worm') return;
 
   if ((e.fireCd | 0) > 0) return;
 
@@ -2263,7 +2267,7 @@ function resolveAdminGiveItem(raw) {
 
 /**
  * Admin console `spawn <kind>` — off-screen asteroid / enemy with normal entry path.
- * kinds: big medium small huge meteor common ufo
+ * kinds: big medium small huge meteor common ufo worm
  */
 function handleAdminSpawn(ws, kindRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -2289,7 +2293,7 @@ function handleAdminSpawn(ws, kindRaw) {
     emitAsteroidFire(room, a);
     return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
   }
-  if (kind === 'common' || kind === 'ufo') {
+  if (kind === 'common' || kind === 'ufo' || kind === 'worm') {
     if (!room.practice) return { ok: 0, err: 'enemies only in solo/coop wave rooms' };
     if (!room.enemies) room.enemies = [];
     if (!room.nextEnemyId) room.nextEnemyId = 1;
@@ -2303,7 +2307,7 @@ function handleAdminSpawn(ws, kindRaw) {
   }
   return {
     ok: 0,
-    err: 'usage: spawn big|medium|small|huge|meteor|common|ufo'
+    err: 'usage: spawn big|medium|small|huge|meteor|common|ufo|worm'
   };
 }
 
