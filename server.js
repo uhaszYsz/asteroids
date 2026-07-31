@@ -4152,7 +4152,9 @@ function handlePlayerDeath(room, victim) {
 
   // Perf-test rooms: instant respawn with a new random gun (no freeze / no match end).
   if (room.perfTest) {
-    if (creditedKillerId) killer.score = (killer.score | 0) + 1;
+    for (const p of room.players.values()) {
+      if (p.id !== victim.id && !p.bot) p.score = (p.score | 0) + 1;
+    }
     equipRandomPerfWeapon(victim);
     respawnPlayer(room, victim, true, PERF_BOT_HP);
     victim.godLeft = Math.round(0.35 * TPS);
@@ -4172,8 +4174,10 @@ function handlePlayerDeath(room, victim) {
     victim.lives = Math.max(0, (victim.lives | 0) - 1);
   }
 
-  // PvP: only the last damaging player gets the frag (environment deaths = no score).
-  if (creditedKillerId) killer.score = (killer.score | 0) + 1;
+  // PvP: any death scores for living humans (asteroid / self / frag — not frags-only).
+  for (const p of room.players.values()) {
+    if (!room.practice && p.id !== victim.id && !p.bot) p.score = (p.score | 0) + 1;
+  }
 
   for (const p of room.players.values()) {
     p.vx = 0;
