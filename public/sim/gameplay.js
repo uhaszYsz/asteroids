@@ -667,7 +667,8 @@ function makeEnemy(kind, wave, weapon) {
     wormPhase: 0,
     wormAimLeft: 0,
     wormAtk: 0,
-    spinAng: 0
+    spinAng: 0,
+    astCheckLeft: 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -944,6 +945,31 @@ function interruptAllWormAttacks(room) {
       pickEnemyWanderTarget(e);
       emitEnemyUpdate(room, e);
     }
+  }
+}
+
+/** Every ~0.2s: crush overlapping asteroids (no coin credit). */
+function wormCrushAsteroids(room, e) {
+  if (!e || e.kind !== 'worm' || !room) return;
+  e.astCheckLeft = (e.astCheckLeft | 0) - 1;
+  if ((e.astCheckLeft | 0) > 0) return;
+  e.astCheckLeft = ENEMY_WORM_AST_CHECK;
+
+  const er = e.r || ENEMY_R.worm || 10;
+  const queryR = er + (ASTEROID_R.huge || ASTEROID_R.big || 40);
+  const crush = [];
+  forEachAsteroidNear(room, e.x, e.y, queryR, (a) => {
+    if (!a || a.noCollide || a.hp <= 0) return false;
+    if (!asteroidOverlapsPlayfield(a)) return false;
+    if (!circleVsAsteroidPoly({ x: e.x, y: e.y, r: er }, a)) return false;
+    crush.push(a);
+    return false;
+  });
+  for (let i = 0; i < crush.length; i++) {
+    const a = crush[i];
+    if (!a || room.asteroids.indexOf(a) < 0 || a.hp <= 0) continue;
+    a.lastHitBy = 0;
+    damageAsteroid(room, a, (a.hp | 0) + 1, 0);
   }
 }
 
@@ -1439,6 +1465,7 @@ function updateEnemies(room) {
       e.vy = 0;
       e.tx = e.x;
       e.ty = e.y;
+      wormCrushAsteroids(room, e);
       enemyTryFire(room, e);
       continue;
     }
@@ -1452,6 +1479,7 @@ function updateEnemies(room) {
       emitEnemyUpdate(room, e);
     }
 
+    if (e.kind === 'worm') wormCrushAsteroids(room, e);
     enemyTryFire(room, e);
   }
 

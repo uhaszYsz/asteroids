@@ -413,6 +413,8 @@ const ENEMY_PLASMA_RANGE = 240 * RES_SCALE;
 const ENEMY_WORM_AIM_TICKS = Math.round(3 * TPS);
 /** Max turn toward player while worm is stopped for its laser attack. */
 const ENEMY_WORM_AIM_TURN = (0.9 * Math.PI) / 180;
+/** Worm vs asteroid crush check interval. */
+const ENEMY_WORM_AST_CHECK = Math.round(0.2 * TPS);
 /**
  * Worm super-laser. Width is 3× typical player laser draw width
  * (~4×RES_SCALE mid of the 2..6 flicker band).
