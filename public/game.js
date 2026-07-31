@@ -1,4 +1,17 @@
 const RES_SCALE = 2;
+// #region agent log
+function __agentLog(payload) {
+  try {
+    const b = JSON.stringify(Object.assign({ sessionId: 'f03469', timestamp: Date.now() }, payload));
+    fetch('/__agent_debug', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: b }).catch(function () {});
+    fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f03469' },
+      body: b
+    }).catch(function () {});
+  } catch (_) {}
+}
+// #endregion
 const W = 420 * RES_SCALE, H = 240 * RES_SCALE;
 const canvas = document.getElementById('c');
 const statusEl = document.getElementById('status');
@@ -11007,7 +11020,7 @@ function tryStartLocalBurst() {
   if (localShoot.bursting || localShoot.reloadLeft > 0 || localShoot.shootAmmo <= 0 || (localShoot.shootCd | 0) > 0) {
     // #region agent log
     if (isOfflineLocalPlay() && currentWeaponName() === 'laser') {
-      fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'E',location:'game.js:tryStartLocalBurst',message:'client burst rejected',data:{bursting:!!localShoot.bursting,reload:localShoot.reloadLeft|0,ammo:localShoot.shootAmmo|0,cd:localShoot.shootCd|0,god:player.godLeft|0},timestamp:Date.now()})}).catch(()=>{});
+      __agentLog({sessionId:'f03469',hypothesisId:'E',location:'game.js:tryStartLocalBurst',message:'client burst rejected',data:{bursting:!!localShoot.bursting,reload:localShoot.reloadLeft|0,ammo:localShoot.shootAmmo|0,cd:localShoot.shootCd|0,god:player.godLeft|0},timestamp:Date.now()});
     }
     // #endregion
     return false;
@@ -11016,7 +11029,7 @@ function tryStartLocalBurst() {
   localShoot.bursting = true;
   // #region agent log
   if (isOfflineLocalPlay()) {
-    fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'D',location:'game.js:tryStartLocalBurst',message:'client burst started',data:{wpn:currentWeaponName(),ammo:localShoot.shootAmmo|0,seq:inputSeq|0,acked:ackedSeq|0,unacked:unackedInputCount(),local:1},timestamp:Date.now()})}).catch(()=>{});
+    __agentLog({sessionId:'f03469',hypothesisId:'D',location:'game.js:tryStartLocalBurst',message:'client burst started',data:{wpn:currentWeaponName(),ammo:localShoot.shootAmmo|0,seq:inputSeq|0,acked:ackedSeq|0,unacked:unackedInputCount(),local:1},timestamp:Date.now()});
   }
   // #endregion
   if (selectedWeapon === 3) {
@@ -17835,7 +17848,7 @@ function sendPendingInputs() {
   // #region agent log
   if (isOfflineLocalPlay() && frames.some(f => f.sp)) {
     const spFrames = frames.filter(f => f.sp).map(f => f.seq);
-    fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'D',location:'game.js:sendPendingInputs',message:'sending sp frames',data:{spFrames,n:frames.length,unacked:unacked.length,acked:ackedSeq|0,inputSeq:inputSeq|0,lastSent:lastSentSeq|0},timestamp:Date.now()})}).catch(()=>{});
+    __agentLog({sessionId:'f03469',hypothesisId:'D',location:'game.js:sendPendingInputs',message:'sending sp frames',data:{spFrames,n:frames.length,unacked:unacked.length,acked:ackedSeq|0,inputSeq:inputSeq|0,lastSent:lastSentSeq|0},timestamp:Date.now()});
   }
   // #endregion
   ws.send(JSON.stringify({
@@ -19769,7 +19782,7 @@ async function ensureLocalSoloSocket() {
   usingLocalSolo = true;
   connected = true;
   // #region agent log
-  fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:723,local:1},timestamp:Date.now(),runId:'cors-fix'})}).catch(()=>{});
+  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:724,local:1},runId:'same-origin'});
   // #endregion
   resetClockSync();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;

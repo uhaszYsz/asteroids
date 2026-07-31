@@ -1,4 +1,19 @@
 /** @file server/constants.js — loaded into shared server scope (do not require() alone). */
+// #region agent log
+function __agentLog(payload) {
+  try {
+    const b = JSON.stringify(Object.assign({ sessionId: 'f03469', timestamp: Date.now() }, payload));
+    if (typeof fetch === 'function') {
+      fetch('/__agent_debug', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: b }).catch(function () {});
+      fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f03469' },
+        body: b
+      }).catch(function () {});
+    }
+  } catch (_) {}
+}
+// #endregion
 const PORT = Number(process.env.PORT) || 8765;
 const HOST = process.env.HOST || '0.0.0.0';
 const RES_SCALE = 2;

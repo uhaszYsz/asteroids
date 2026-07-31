@@ -33,6 +33,23 @@ const server = http.createServer((req, res) => {
     }));
     return;
   }
+  // #region agent log
+  if (req.url === '/__agent_debug' && req.method === 'POST') {
+    const chunks = [];
+    req.on('data', (c) => { if (chunks.length < 32) chunks.push(c); });
+    req.on('end', () => {
+      try {
+        const line = Buffer.concat(chunks).toString('utf8').replace(/\s+$/, '');
+        if (line && line.length < 8000) {
+          fs.appendFileSync(path.join(__dirname, 'debug-f03469.log'), line + '\n');
+        }
+      } catch (_) {}
+      res.writeHead(204);
+      res.end();
+    });
+    return;
+  }
+  // #endregion
   let file = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   try { file = decodeURIComponent(file); } catch (_) {}
   file = String(file || '').replace(/\\/g, '/').replace(/^\/+/, '');

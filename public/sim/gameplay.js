@@ -3666,7 +3666,7 @@ function tryStartBurst(p) {
   if (p.bursting || p.reloadLeft > 0 || p.shootAmmo <= 0 || (p.shootCd | 0) > 0) {
     // #region agent log
     if (p.weapon === 'laser' && (p.inp && (p.inp.sp | 0))) {
-      try { fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'E',location:'gameplay.js:tryStartBurst',message:'server burst rejected',data:{id:p.id|0,wpn:p.weapon,bursting:!!p.bursting,reload:p.reloadLeft|0,ammo:p.shootAmmo|0,cd:p.shootCd|0,god:p.godLeft|0},timestamp:Date.now()})}).catch(function(){}); } catch (_) {}
+      __agentLog({sessionId:'f03469',hypothesisId:'E',location:'gameplay.js:tryStartBurst',message:'server burst rejected',data:{id:p.id|0,wpn:p.weapon,bursting:!!p.bursting,reload:p.reloadLeft|0,ammo:p.shootAmmo|0,cd:p.shootCd|0,god:p.godLeft|0},timestamp:Date.now()});
     }
     // #endregion
     return;
@@ -3674,7 +3674,7 @@ function tryStartBurst(p) {
   if (p.weapon === 'railgun' && (p.railChargeLeft | 0) > 0) return;
   p.bursting = true;
   // #region agent log
-  try { fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'E',location:'gameplay.js:tryStartBurst',message:'server burst started',data:{id:p.id|0,wpn:p.weapon,ammo:p.shootAmmo|0,lastSeq:p.lastSeq|0},timestamp:Date.now()})}).catch(function(){}); } catch (_) {}
+  __agentLog({sessionId:'f03469',hypothesisId:'E',location:'gameplay.js:tryStartBurst',message:'server burst started',data:{id:p.id|0,wpn:p.weapon,ammo:p.shootAmmo|0,lastSeq:p.lastSeq|0},timestamp:Date.now()});
   // #endregion
   if (p.weapon === 'railgun') {
     const w = effectiveWeapon(p, 'railgun');
@@ -4014,7 +4014,7 @@ function fireShotgun(room, p) {
 function fireLaser(room, p, weaponName) {
   const name = weaponName || 'laser';
   // #region agent log
-  try { fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'F',location:'gameplay.js:fireLaser',message:'server fireLaser',data:{id:p.id|0,ammo:p.shootAmmo|0,cd:p.shootCd|0,ang:p.angle},timestamp:Date.now()})}).catch(function(){}); } catch (_) {}
+  __agentLog({sessionId:'f03469',hypothesisId:'F',location:'gameplay.js:fireLaser',message:'server fireLaser',data:{id:p.id|0,ammo:p.shootAmmo|0,cd:p.shootCd|0,ang:p.angle},timestamp:Date.now()});
   // #endregion
   const w = effectiveWeapon(p, name);
   const dmg = effectiveBulletDmg(p, name);
