@@ -53,7 +53,7 @@ const WEAPONS = {
     reload: 40,
     shotgun: 5,
     spread: 30,
-    shotgunSpeeds: [4 * RES_SCALE, 9 * RES_SCALE],
+    shotgunSpeeds: [7.5 * RES_SCALE, 10.5 * RES_SCALE],
     relative: false
   },
   /** Charge 0.5s then one raycast; 45-tick cooldown between shots; infinite reloads. */

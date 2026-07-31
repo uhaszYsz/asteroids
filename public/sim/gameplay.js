@@ -3943,7 +3943,7 @@ function fireProjectile(room, p, typeName) {
 function fireShotgun(room, p) {
   const w = effectiveWeapon(p, 'shotgun');
   const count = Math.max(1, w.shotgun | 0);
-  const [spdMin, spdMax] = w.shotgunSpeeds || [2 * RES_SCALE, 4.5 * RES_SCALE];
+  const [spdMin, spdMax] = w.shotgunSpeeds || [7.5 * RES_SCALE, 10.5 * RES_SCALE];
   const pose = predictedFirePose(room, p);
   const x = pose.x + Math.cos(pose.angle) * MUZZLE;
   const y = pose.y + Math.sin(pose.angle) * MUZZLE;

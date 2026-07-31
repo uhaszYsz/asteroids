@@ -10714,7 +10714,7 @@ const WEAPONS = {
     reload: 40,
     shotgun: 5,
     spread: 30,
-    shotgunSpeeds: [4 * RES_SCALE, 9 * RES_SCALE]
+    shotgunSpeeds: [7.5 * RES_SCALE, 10.5 * RES_SCALE]
   },
   railgun: { ammo: 1, cooldown: 45, reload: 1, charge: Math.round(0.5 * TPS) },
   plasma: { ammo: 50, cooldown: 2, reload: Math.round(2 * TPS), speed: 9 * RES_SCALE * 1.7 },
@@ -11480,7 +11480,7 @@ function currentWeaponBulletSpeed() {
   const n = currentWeaponName();
   const w = effectiveLocalWeapon(n);
   if (n === 'shotgun') {
-    const sp = w.shotgunSpeeds || [4 * RES_SCALE, 9 * RES_SCALE];
+    const sp = w.shotgunSpeeds || [7.5 * RES_SCALE, 10.5 * RES_SCALE];
     return (sp[0] + sp[1]) * 0.5;
   }
   if (w.speed != null && w.speed > 0) return w.speed;
@@ -14459,7 +14459,7 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
   const spawnSt = row[6];
   const count = Math.max(1, row[8] | 0);
   const w = WEAPONS.shotgun;
-  const [spdMin, spdMax] = w.shotgunSpeeds || [4 * RES_SCALE, 9 * RES_SCALE];
+  const [spdMin, spdMax] = w.shotgunSpeeds || [7.5 * RES_SCALE, 10.5 * RES_SCALE];
   const spreadRad = ((w.spread != null ? w.spread : 30) || 0) * Math.PI / 180;
   const rnd = makeShotgunRng(x, y);
   if (withMuzzle) {
