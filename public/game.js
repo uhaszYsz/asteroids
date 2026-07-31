@@ -18479,6 +18479,7 @@ function enterGameFromWelcome(msg) {
   // New room timeline — must reset or practice-room syncTick drops all match snaps.
   syncTick = msg.tick | 0;
   syncSt = msg.st != null ? msg.st : Date.now();
+  if (isOfflineLocalPlay()) syncStPerf = performance.now();
   serverGhost.valid = false;
   remotes.clear();
   clearRemoteHist();
@@ -19217,6 +19218,7 @@ function handleWsMessage(e) {
       if (msg.tick != null && msg.st != null) {
         syncTick = msg.tick | 0;
         syncSt = msg.st;
+        if (isOfflineLocalPlay()) syncStPerf = performance.now();
         resetTickClock();
       }
       if (msg.players) {
@@ -19815,7 +19817,7 @@ async function ensureLocalSoloSocket() {
   usingLocalSolo = true;
   connected = true;
   // #region agent log
-  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:727,local:1,maxUnack:2,ntpOff:1},runId:'post-fix'});
+  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:728,local:1,maxUnack:2,ntpOff:1},runId:'post-fix'});
   // #endregion
   resetClockSync();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
