@@ -55,9 +55,11 @@ function allowSocketMessage(ws) {
 
 /** Cap accepted input frames/sec. Returns how many frames may be taken now. */
 function allowInputFrames(ws, count) {
-  if (!ws.rl) initClientLimits(ws);
   const n = Math.max(0, count | 0);
   if (!n) return 0;
+  // In-browser local host: no network attacker — never drop catch-up / shoot pulses.
+  if (ws && ws.__local) return n;
+  if (!ws.rl) initClientLimits(ws);
   const now = Date.now();
   const rl = ws.rl;
   rl.inTokens = rlRefill(rl.inTokens, rl.inLast, RATE_INPUT_FRAMES_PER_SEC, RATE_INPUT_FRAMES_BURST, now);
@@ -162,7 +164,13 @@ function enqueuePlayerInputs(ws, pl, frames) {
   let staleSp = 0;
   let acceptedSp = 0;
   for (let i = 0; i < slice.length && accepted < budget; i++) {
-    if (pl.inputQueue.length >= MAX_INPUT_QUEUE) trimInputQueue(pl, MAX_INPUT_QUEUE - 1);
+    if (pl.inputQueue.length >= MAX_INPUT_QUEUE) {
+      if (ws && ws.__local) {
+        // Local: keep growing rather than dropping; client unacked cap is the brake.
+      } else {
+        trimInputQueue(pl, MAX_INPUT_QUEUE - 1);
+      }
+    }
     const cleaned = sanitizeInputFrame(slice[i], pl.lastSeq | 0, maxQueuedSeq);
     if (!cleaned) {
       rlStrike(ws);
@@ -194,9 +202,11 @@ function enqueuePlayerInputs(ws, pl, frames) {
   // #endregion
   if (accepted) {
     pl.inputQueue.sort((a, b) => a.seq - b.seq);
-    // Soft trim first so mild overproduce never sits for hundreds of ms.
-    trimInputQueue(pl, SOFT_INPUT_QUEUE);
-    trimInputQueue(pl, MAX_INPUT_QUEUE);
+    // Remote only: shed backlog. Local host must not drop shoot pulses.
+    if (!(ws && ws.__local)) {
+      trimInputQueue(pl, SOFT_INPUT_QUEUE);
+      trimInputQueue(pl, MAX_INPUT_QUEUE);
+    }
   }
 }
 

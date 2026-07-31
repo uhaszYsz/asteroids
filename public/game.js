@@ -14131,7 +14131,9 @@ function isOfflineLocalPlay() {
  * hitch/catchup/clock drift cannot build a sticky multi-second shoot delay.
  */
 function maxUnackedInputs() {
-  if (isOfflineLocalPlay()) return 64;
+  // Local host applies 1 frame/tick in-process. Staying tight prevents a sticky
+  // inputQueue (laggy shots) and stops soft-trim/rate-limit from eating `sp`.
+  if (isOfflineLocalPlay()) return 2;
   const rttTicks = Math.ceil(Math.max(0, pingMs) / TICK_MS);
   const jitterTicks = Math.ceil(Math.max(0, pingJitter) / TICK_MS);
   const dly = adaptiveInputDelay();
@@ -14145,8 +14147,6 @@ function unackedInputCount() {
 
 /** False when producing another frame would deepen a sticky server input queue. */
 function canProduceInputFrame() {
-  // Local host applies 1:1 in-process — never stall shoots waiting on net ack depth.
-  if (isOfflineLocalPlay()) return true;
   return unackedInputCount() < maxUnackedInputs();
 }
 
@@ -19784,7 +19784,7 @@ async function ensureLocalSoloSocket() {
   usingLocalSolo = true;
   connected = true;
   // #region agent log
-  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:725,local:1},runId:'asteroids-path'});
+  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:726,local:1,maxUnack:2},runId:'post-fix'});
   // #endregion
   resetClockSync();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
