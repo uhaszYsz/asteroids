@@ -305,9 +305,11 @@ const TURN_DECEL_FRAMES = 5;
 /** Opposite turn: double deaccel-to-zero rate (half the coast frames). */
 const TURN_DECEL_REVERSE_FRAMES = Math.max(1, (TURN_DECEL_FRAMES / 2) | 0);
 /** Asteroid collide damage scales with relative impact speed vs MAX_SPEED (1.0 → full HP before scale). */
-/** Stun spin on asteroid hit (°/tick), and end when |av| drops under STUN_END_DEG. */
-const STUN_SPIN = 20 * Math.PI / 180;
-const STUN_END_AV = 5 * Math.PI / 180;
+/** Stun spin on asteroid hit (°/tick); ends when |av| drops under STUN_END_AV. */
+const STUN_SPIN = 17 * Math.PI / 180;
+const STUN_END_AV = 3 * Math.PI / 180;
+/** While stunned, angular speed cannot exceed this (°/tick). */
+const STUN_AV_MAX = 17 * Math.PI / 180;
 /** While stunned with no steer: coast av toward 0 over this many ticks (~3s). */
 const STUN_DECEL_TICKS = Math.round(3 * TPS);
 /** Ignore re-collides briefly after a bounce. */

@@ -2400,6 +2400,9 @@ function applyTurn(p, l, r, sh) {
       // Clamp every tick so precision can kick in mid-turn (not only at spin-up).
       if (p.av > avMax) p.av = avMax;
       if (p.av < -avMax) p.av = -avMax;
+    } else {
+      if (p.av > STUN_AV_MAX) p.av = STUN_AV_MAX;
+      if (p.av < -STUN_AV_MAX) p.av = -STUN_AV_MAX;
     }
   } else if (p.av !== 0) {
     const frames = stunned ? STUN_DECEL_TICKS : TURN_DECEL_FRAMES;

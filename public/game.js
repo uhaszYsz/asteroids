@@ -874,8 +874,9 @@ const PLAYER_HIT_OFFSET_BACK = 3 * RES_SCALE;
 const MUZZLE = 10 * RES_SCALE;
 const MAX_HP = 100;
 /** Asteroid collide damage scales with relative impact speed vs MAX_SPEED (1.0 → full HP). */
-const STUN_SPIN = 20 * Math.PI / 180;
-const STUN_END_AV = 5 * Math.PI / 180;
+const STUN_SPIN = 17 * Math.PI / 180;
+const STUN_END_AV = 3 * Math.PI / 180;
+const STUN_AV_MAX = 17 * Math.PI / 180;
 const STUN_DECEL_TICKS = Math.round(3 * TPS);
 const COLLIDE_IFRAME_TICKS = Math.round(0.35 * TPS);
 const GODMODE_TICKS = Math.round(5 * TPS);
@@ -17399,6 +17400,9 @@ function applyTurn(o, l, r, sh) {
     if (!stunned) {
       if (o.av > avMax) o.av = avMax;
       if (o.av < -avMax) o.av = -avMax;
+    } else {
+      if (o.av > STUN_AV_MAX) o.av = STUN_AV_MAX;
+      if (o.av < -STUN_AV_MAX) o.av = -STUN_AV_MAX;
     }
   } else if (o.av !== 0) {
     const frames = stunned ? STUN_DECEL_TICKS : TURN_DECEL_FRAMES;
