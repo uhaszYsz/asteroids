@@ -407,7 +407,7 @@ const ENEMY_SPINNER = {
   spinGrow: 2,
   hullSpin: 13,
   speed: ENEMY_COMMON_BULLET_SPEED,
-  dmg: ENEMY_COMMON_BULLET_DMG
+  dmg: 12
 };
 const ENEMY_CARRIER_WEAPONS = ['laser', 'plasma', 'rail'];
 const ENEMY_LASER_AIM_DELAY = 12; // frames
