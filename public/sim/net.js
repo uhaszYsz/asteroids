@@ -315,6 +315,7 @@ function packBullet(b) {
       b.homing != null ? +b.homing : ROCKET_HOMING_DEFAULT,
       b.hp != null ? (b.hp | 0) : ROCKET_HP_DEFAULT
     );
+    if (b.flightAng != null && Number.isFinite(+b.flightAng)) row.push(+b.flightAng);
   } else if (b.type === 'enemyWorm') {
     row.push(
       b.length != null ? +b.length : 15,

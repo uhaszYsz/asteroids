@@ -11059,8 +11059,8 @@ const WEAPON_MAX_LEVEL = 3;
 let selectedWeapon = 1; // 1 default … 8 asteroidgun
 /** Mirror of server WEAPONS — used only to gate local muzzle/fake shot FX. */
 const WEAPONS = {
-  default: { ammo: 3, cooldown: 2, reload: 32, speed: 8 * RES_SCALE * 1.15 * 0.85 },
-  rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 8 * RES_SCALE * 0.85 },
+  default: { ammo: 3, cooldown: 2, reload: 32, speed: 15 },
+  rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 15 },
   laser: { ammo: 30, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
   shotgun: {
     ammo: 2,
@@ -15146,6 +15146,7 @@ function bulletTrueAt(b) {
     let y = b.spawnY;
     let vx = b.vx;
     let vy = b.vy;
+    let flightAng = b.flightAng != null && Number.isFinite(+b.flightAng) ? +b.flightAng : null;
     const accel = +b.accel || 0;
     const maxSpd = b.maxSpeed != null && +b.maxSpeed > 0 ? +b.maxSpeed : 0;
     const homeDeg = +b.homing || 0;
@@ -15163,18 +15164,23 @@ function bulletTrueAt(b) {
       }
     }
     for (let i = 0; i < steps; i++) {
-      let spd = Math.hypot(vx, vy);
-      let ang = spd > 1e-6 ? Math.atan2(vy, vx) : 0;
-      if (accel > 0) {
-        const next = spd + accel;
-        spd = maxSpd > 0 ? Math.min(maxSpd, next) : next;
-      }
+      let ang = flightAng != null
+        ? flightAng
+        : (Math.hypot(vx, vy) > 1e-6 ? Math.atan2(vy, vx) : 0);
       if (homeDeg > 0 && tx != null) {
         const want = Math.atan2(ty - y, tx - x);
         ang = enemyTurnAngleToward(ang, want, homeRad);
+        flightAng = ang;
       }
-      vx = Math.cos(ang) * spd;
-      vy = Math.sin(ang) * spd;
+      const c = Math.cos(ang);
+      const s = Math.sin(ang);
+      let spd = vx * c + vy * s;
+      if (accel > 0) {
+        spd += accel;
+        if (maxSpd > 0) spd = Math.min(maxSpd, spd);
+      }
+      vx = c * spd;
+      vy = s * spd;
       x += vx;
       y += vy;
     }
@@ -15332,6 +15338,7 @@ function unpackBullet(row) {
     b.maxSpeed = row[9] != null ? +row[9] : 0;
     b.homing = row[10] != null ? +row[10] : 0;
     b.hp = row[11] != null ? (row[11] | 0) : 190;
+    if (row[12] != null && Number.isFinite(+row[12])) b.flightAng = +row[12];
   } else if (b.type === 'enemyWorm') {
     b.length = row[8] != null ? +row[8] : 15;
     b.width = row[9] != null ? +row[9] : 15;
@@ -19757,6 +19764,7 @@ function handleWsMessage(e) {
           if (row[9] != null) b.maxSpeed = +row[9];
           if (row[10] != null) b.homing = +row[10];
           if (row[11] != null) b.hp = row[11] | 0;
+          if (row[12] != null && Number.isFinite(+row[12])) b.flightAng = +row[12];
         }
       } else {
         addBullet(unpackBullet(row), false, false);

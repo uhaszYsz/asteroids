@@ -4433,7 +4433,9 @@ function fireProjectile(room, p, typeName) {
   const pose = predictedFirePose(room, p);
   const x = pose.x + Math.cos(pose.angle) * MUZZLE;
   const y = pose.y + Math.sin(pose.angle) * MUZZLE;
-  const vel = bulletVelocity(p, pose.angle, w.speed, !!w.relative);
+  const isRocket = typeName === 'rocket';
+  const speed = isRocket ? ROCKET_LAUNCH_SPEED : w.speed;
+  const vel = bulletVelocity(p, pose.angle, speed, !isRocket && !!w.relative);
   const b = {
     id: room.nextBulletId++,
     owner: p.id,
@@ -4444,11 +4446,13 @@ function fireProjectile(room, p, typeName) {
     vy: vel.vy,
     spawnSt: Date.now()
   };
-  if (typeName === 'rocket') {
+  if (isRocket) {
     b.hp = ROCKET_HP_DEFAULT;
     b.accel = ROCKET_ACCEL_DEFAULT;
-    b.maxSpeed = 0;
+    b.maxSpeed = w.speed > 0 ? w.speed : 15;
     b.homing = ROCKET_HOMING_DEFAULT;
+    b.flightAng = pose.angle;
+    b.netLeft = ROCKET_NET_INTERVAL;
   }
   room.bullets.push(b);
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
@@ -5396,27 +5400,33 @@ function rocketHomingTarget(room, b) {
   return best;
 }
 
-/** Accel + per-rocket homing (degrees/tick). Mutates vx/vy. */
+/** Accel + per-rocket homing (degrees/tick). Mutates vx/vy.
+ *  Speed is signed along flightAng (or velocity heading) so launch can be reverse. */
 function applyRocketFlight(room, b) {
   if (!b || b.type !== 'rocket') return;
-  let spd = Math.hypot(b.vx, b.vy);
-  let ang = spd > 1e-6 ? Math.atan2(b.vy, b.vx) : 0;
   const accel = +b.accel || 0;
   const maxSpd = b.maxSpeed != null && +b.maxSpeed > 0 ? +b.maxSpeed : 0;
-  if (accel > 0) {
-    const next = spd + accel;
-    spd = maxSpd > 0 ? Math.min(maxSpd, next) : next;
-  }
+  let ang = b.flightAng != null && Number.isFinite(+b.flightAng)
+    ? +b.flightAng
+    : (Math.hypot(b.vx, b.vy) > 1e-6 ? Math.atan2(b.vy, b.vx) : 0);
   const homeDeg = +b.homing || 0;
   if (homeDeg > 0) {
     const target = rocketHomingTarget(room, b);
     if (target) {
       const want = Math.atan2(target.y - b.y, target.x - b.x);
       ang = turnAngleToward(ang, want, (homeDeg * Math.PI) / 180);
+      b.flightAng = ang;
     }
   }
-  b.vx = Math.cos(ang) * spd;
-  b.vy = Math.sin(ang) * spd;
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  let spd = b.vx * c + b.vy * s;
+  if (accel > 0) {
+    spd += accel;
+    if (maxSpd > 0) spd = Math.min(maxSpd, spd);
+  }
+  b.vx = c * spd;
+  b.vy = s * spd;
 }
 
 function maybeResyncRocketNet(room, b) {

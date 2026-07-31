@@ -44,8 +44,8 @@ const MUZZLE = 10 * RES_SCALE;
 const WEAPON_SLOTS = ['default', 'rocket', 'laser', 'shotgun', 'railgun', 'plasma', 'voidcannon', 'asteroidgun'];
 const WEAPON_MAX_LEVEL = 3;
 const WEAPONS = {
-  default: { ammo: 3, cooldown: 2, reload: 32, speed: 8 * RES_SCALE * 1.15 * 0.85 },
-  rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 8 * RES_SCALE * 0.85 },
+  default: { ammo: 3, cooldown: 2, reload: 32, speed: 15 },
+  rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 15 },
   laser: { ammo: 30, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
   shotgun: {
     ammo: 2,
@@ -467,10 +467,12 @@ const ENEMY_WORM_SHOTGUN = {
   sizeMax: 30,
   dmg: 18
 };
+/** Player rocket: launch reverse along aim, then accel up to WEAPONS.rocket.speed. */
+const ROCKET_LAUNCH_SPEED = -3;
 /** Player (and default) rocket hull HP — depleted by hitscans / bullets before detonate. */
 const ROCKET_HP_DEFAULT = 190;
-/** Default rocket accel (px/tick). 0 = constant speed. */
-const ROCKET_ACCEL_DEFAULT = 0;
+/** Player rocket accel (px/tick along flight axis). */
+const ROCKET_ACCEL_DEFAULT = 0.25;
 /** Default rocket homing turn (degrees/tick). 0 = disabled. */
 const ROCKET_HOMING_DEFAULT = 0;
 /** How often accel/homing rockets resync pose to clients. */
