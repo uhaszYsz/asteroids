@@ -8458,7 +8458,10 @@ function drawSceneLines(dt) {
     const size = a.size || (a.big ? 'big' : 'medium');
     const sid = asteroidShapeId(a);
     const specialTint = !!(a.playerShot || a.special === 'meteor' || a.special === 'golden');
-    drawAsteroid2D(ax, ay, p.angle, sid, a.r || 16, col, size, asteroidUsesDetailMaps(a), specialTint);
+    drawAsteroid2D(
+      ax, ay, p.angle, sid, a.r || 16, col, size,
+      asteroidUsesDetailMaps(a), specialTint, asteroidOutlineBlinkMul(a)
+    );
     if ((a.special === 'meteor' || a.playerShot) && !deathSpectating) {
       const boost = (a._meteorBurnBoostUntil && performance.now() < a._meteorBurnBoostUntil) ? 3 : 1;
       emitMeteorBurnFx(
@@ -8515,6 +8518,29 @@ function asteroidClientBornAt(a) {
 function asteroidClientLifeExpired(a) {
   if (!a || a.playerShot || a.centerRock) return false;
   return serverNow() - asteroidClientBornAt(a) >= ASTEROID_LIFE_MS;
+}
+
+/** Remaining world-rock lifetime in ms (∞ for shots / center rock). */
+function asteroidClientLifeLeftMs(a) {
+  if (!a || a.playerShot || a.centerRock) return Infinity;
+  return ASTEROID_LIFE_MS - (serverNow() - asteroidClientBornAt(a));
+}
+
+/**
+ * Silhouette blink for dying rocks.
+ *  life left (0, 5s]: 1 blink / 0.8s
+ *  life left ≤ 0 (expired, waiting to leave play): 3 blinks / s
+ * Returns 1 = full outline, ~0.2 = dark/dim half of the blink.
+ */
+function asteroidOutlineBlinkMul(a) {
+  const left = asteroidClientLifeLeftMs(a);
+  if (!Number.isFinite(left)) return 1;
+  let periodMs = 0;
+  if (left <= 0) periodMs = 1000 / 3;
+  else if (left <= 5000) periodMs = 800;
+  else return 1;
+  const t = performance.now() / periodMs;
+  return (t - Math.floor(t)) < 0.5 ? 1 : 0.22;
 }
 
 /**
@@ -8975,8 +9001,11 @@ function asteroidUsesDetailMaps(a) {
   return size === 'medium' || size === 'big' || size === 'huge';
 }
 
-function drawAsteroid2D(cx, cy, angle, id, radius, color, size, detailMaps, specialTint) {
-  drawAsteroid3D(cx, cy, angle, id, radius, color, size || 'medium', detailMaps, specialTint);
+function drawAsteroid2D(cx, cy, angle, id, radius, color, size, detailMaps, specialTint, outlineBlink) {
+  drawAsteroid3D(
+    cx, cy, angle, id, radius, color, size || 'medium',
+    detailMaps, specialTint, outlineBlink
+  );
 }
 
 /**
@@ -9749,7 +9778,7 @@ function asteroidFaceShade(wx, wy, wz, f, cx, cy, lightX, lightY, lightZ) {
 const _astFaceNScratch = [0, 0, 1];
 const _astLDirScratch = [0, 0, 1];
 
-function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, specialTint) {
+function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, specialTint, outlineBlink) {
   const mesh = getAsteroidWireMesh(id, radius, size);
   const osc = asteroidOscAngles(id);
   const mvSrc = mesh.verts;
@@ -9769,7 +9798,11 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
   const faceA = Math.max(0, Math.min(1, Number(cv('cl_ast_face_alpha'))));
   const faceTexOn = (cv('cl_ast_face_tex') | 0) !== 0 && asteroidFaceTexReady;
   let faceTintPow = Math.max(0, Math.min(1, Number(cv('cl_ast_face_tint'))));
-  const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
+  let outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
+  const blinkMul = outlineBlink != null && Number.isFinite(outlineBlink) ? outlineBlink : 1;
+  // Dim silhouette on blink-off: darker color + lower alpha.
+  const blinkColorMul = 0.35 + 0.65 * blinkMul;
+  outlineA *= 0.25 + 0.75 * blinkMul;
   const outlineTexOn = (cv('cl_ast_outline_tex') | 0) !== 0 && asteroidFaceTexReady;
   const wireA = Math.max(0, Math.min(1, Number(cv('cl_ast_wire_alpha'))));
   const wireW = Math.max(0.5, Number(cv('cl_ast_wire_width')) || 2);
@@ -9900,22 +9933,22 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
   if (outlineA > 0.001) {
     const nEq = mesh.n | 0;
     const outlineW = 2;
-    wire[0] = Math.min(1, lineCol[0]);
-    wire[1] = Math.min(1, lineCol[1]);
-    wire[2] = Math.min(1, lineCol[2]);
+    wire[0] = Math.min(1, lineCol[0] * blinkColorMul);
+    wire[1] = Math.min(1, lineCol[1] * blinkColorMul);
+    wire[2] = Math.min(1, lineCol[2] * blinkColorMul);
     // Untextured solid lines: Godot emission = albedo + tint×energy.
     const emitSolid = !outlineTexOn && outlineEmitPow > 0.001;
     if (emitSolid) {
       const e = outlineEmitPow;
-      wire[0] = Math.min(1, lineCol[0] + lineCol[0] * e);
-      wire[1] = Math.min(1, lineCol[1] + lineCol[1] * e);
-      wire[2] = Math.min(1, lineCol[2] + lineCol[2] * e);
+      wire[0] = Math.min(1, wire[0] + lineCol[0] * e * blinkMul);
+      wire[1] = Math.min(1, wire[1] + lineCol[1] * e * blinkMul);
+      wire[2] = Math.min(1, wire[2] + lineCol[2] * e * blinkMul);
     }
     const emitGlow = _astEmitColScratch;
     if (emitSolid) {
-      emitGlow[0] = lineCol[0];
-      emitGlow[1] = lineCol[1];
-      emitGlow[2] = lineCol[2];
+      emitGlow[0] = lineCol[0] * blinkColorMul;
+      emitGlow[1] = lineCol[1] * blinkColorMul;
+      emitGlow[2] = lineCol[2] * blinkColorMul;
     }
     const glowA = emitSolid ? Math.min(1, outlineA * outlineEmitPow * 0.55) : 0;
     const glowW = outlineW + 2;
@@ -9923,7 +9956,7 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
     for (let i = 0; i < nEq; i++) {
       const j = (i + 1) % nEq;
       if (outlineTexOn) {
-        drawAsteroidEdgeTex(xy, mv, i, j, radius, id, wire, outlineA, outlineW, 1, outlineEmitPow);
+        drawAsteroidEdgeTex(xy, mv, i, j, radius, id, wire, outlineA, outlineW, 1, outlineEmitPow * blinkMul);
       } else {
         drawThickSegment(
           xy[i * 2], xy[i * 2 + 1],
