@@ -2689,12 +2689,14 @@ function gridBlastBulletTrailOpts(vx, vy) {
   };
 }
 
-/** Rocket flight — directional implosion along velocity (amp3, r1, dir_power0.25, ripple). */
-function gridBlastRocketTrailOpts(vx, vy) {
+/** Rocket flight — directional implosion along velocity (amp3, r1, dir_power0.25, ripple).
+ *  dirPowerMult: scales directional deform (worm rockets use 0.25). */
+function gridBlastRocketTrailOpts(vx, vy, dirPowerMult) {
   const spd = Math.hypot(vx, vy);
   if (!(spd > 1e-6)) return null;
+  const dp = dirPowerMult != null && Number.isFinite(dirPowerMult) ? dirPowerMult : 1;
   return {
-    amp: 16 * RES_SCALE * 3 * 0.25,
+    amp: 16 * RES_SCALE * 3 * 0.25 * dp,
     width: 1,
     ripple: 3,
     freq: 1.75,
