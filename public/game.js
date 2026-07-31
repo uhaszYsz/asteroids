@@ -10699,8 +10699,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const halfL = Math.max(1, spec.fh) * 0.5 * sc;
   const halfW = Math.max(1, spec.fw) * 0.5 * sc;
   const tube = !flat && !hexDome && !!(opts && opts.tube);
-  // Tube: wing tips on z=0 so roof + mirror share those side edges.
-  const pitch = SPRITE_ROOF_PITCH;
+  // Tube (worm): half the normal roof bend; tips stay on z=0 so roof+mirror share edges.
+  const pitch = tube ? SPRITE_ROOF_PITCH * 0.5 : SPRITE_ROOF_PITCH;
   const cp = Math.cos(pitch);
   const sp = Math.sin(pitch);
   const wingY = halfW * cp;
