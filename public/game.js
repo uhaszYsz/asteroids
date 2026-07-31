@@ -10663,6 +10663,79 @@ function spriteWorldZToClip(worldZ) {
   const z = -worldZ / SPRITE_SHIP_DEPTH_RANGE;
   return z > 0.99 ? 0.99 : (z < -0.99 ? -0.99 : z);
 }
+
+/** Solid tris that write the same clip-Z as sprite ship planes (charge vs worm tube). */
+const depthSolidVS = `
+  attribute vec2 aPos;
+  attribute float aDepth;
+  uniform vec2 uRes;
+  varying vec2 vWorld;
+  void main() {
+    vec2 p = floor(aPos + 0.5) / uRes * 2.0 - 1.0;
+    gl_Position = vec4(p.x, -p.y, aDepth, 1.0);
+    vWorld = aPos;
+  }
+`;
+const depthSolidFS = `
+  precision mediump float;
+  uniform vec3 uCol;
+  uniform float uAlpha;
+  varying vec2 vWorld;
+` + SCENE_LIGHT_GLSL + `
+  void main() {
+    gl_FragColor = applyNightLit(uCol, uAlpha, vWorld);
+  }
+`;
+const depthSolidProg = gl.createProgram();
+gl.bindAttribLocation(depthSolidProg, 0, 'aPos');
+gl.bindAttribLocation(depthSolidProg, 1, 'aDepth');
+gl.attachShader(depthSolidProg, shader(gl.VERTEX_SHADER, depthSolidVS));
+gl.attachShader(depthSolidProg, shader(gl.FRAGMENT_SHADER, depthSolidFS));
+linkProgram(depthSolidProg);
+const dsURes = gl.getUniformLocation(depthSolidProg, 'uRes');
+const dsUCol = gl.getUniformLocation(depthSolidProg, 'uCol');
+const dsUAlpha = gl.getUniformLocation(depthSolidProg, 'uAlpha');
+const dsAPos = gl.getAttribLocation(depthSolidProg, 'aPos');
+const dsADepth = gl.getAttribLocation(depthSolidProg, 'aDepth');
+const depthSolidBuf = gl.createBuffer();
+const depthSolidMesh = new Float32Array(2048);
+const depthSolidLightU = {
+  night: gl.getUniformLocation(depthSolidProg, 'uFlashNight'),
+  ships: gl.getUniformLocation(depthSolidProg, 'uShipLight[0]'),
+  wrap: gl.getUniformLocation(depthSolidProg, 'uLightWrap')
+};
+
+/** Draw screen-space tris with sprite-ship clip depth. stride: x,y,clipZ per vert. */
+function drawDepthSolidTris(mesh, floatCount, color, alpha, additive) {
+  const nFloat = floatCount | 0;
+  const nVert = (nFloat / 3) | 0;
+  if (nVert < 3) return;
+  gl.useProgram(depthSolidProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, depthSolidBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh.subarray(0, nFloat), gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(dsAPos);
+  gl.enableVertexAttribArray(dsADepth);
+  gl.vertexAttribPointer(dsAPos, 2, gl.FLOAT, false, 12, 0);
+  gl.vertexAttribPointer(dsADepth, 1, gl.FLOAT, false, 12, 8);
+  gl.uniform2f(dsURes, W, H);
+  gl.uniform3fv(dsUCol, color || COL_WHITE);
+  gl.uniform1f(dsUAlpha, alpha == null ? 1 : alpha);
+  bindSceneLightUniforms(depthSolidLightU);
+  const a = alpha == null ? 1 : alpha;
+  const add = !!additive;
+  const nightBlend = _lightFlashNight > 0.5;
+  if (nightBlend || a < 1 || add) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, add ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+  } else {
+    gl.disable(gl.BLEND);
+  }
+  gl.drawArrays(gl.TRIANGLES, 0, nVert);
+  if (!nightBlend && (a < 1 || add)) gl.disable(gl.BLEND);
+  gl.disableVertexAttribArray(dsAPos);
+  gl.disableVertexAttribArray(dsADepth);
+}
+
 const spriteShipVS = `
   attribute vec2 aPos;
   attribute vec2 aUV;
@@ -11176,6 +11249,10 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     gl.drawArrays(gl.TRIANGLES, 0, nVert);
   }
   if (tube) {
+    // Charge sphere (etc.) while worm depth buffer is still valid.
+    if (opts && typeof opts.onTubeDepth === 'function') {
+      try { opts.onTubeDepth(); } catch (_) { /* ignore */ }
+    }
     gl.disable(gl.POLYGON_OFFSET_FILL);
     gl.disable(gl.DEPTH_TEST);
   }
@@ -17021,12 +17098,71 @@ function drawEnemyWorm(x, y, angle, color, id, dt) {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       bank, ENEMY_WORM_SPRITE_SCALE, COL.enemyOutline,
-      { tube: true, spinAngle: wormLengthSpinAngle(id) }
+      {
+        tube: true,
+        spinAngle: wormLengthSpinAngle(id),
+        onTubeDepth: () => drawWormChargeInTubeDepth(id, x, y, angle, bank)
+      }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
   }
   return bank;
+}
+
+/** Charge sphere + suck particles while worm tube depth buffer is live. */
+function drawWormChargeInTubeDepth(id, x, y, angle, baseBank) {
+  const ch = enemyCharges.get(id | 0);
+  if (!ch || ch.kind !== 'worm') return;
+  const now = performance.now();
+  if (now >= ch.until) {
+    clearEnemyCharge(id);
+    return;
+  }
+  const e = enemies.get(id | 0);
+  if (!e || e.kind !== 'worm' || (e.hp | 0) <= 0) {
+    clearEnemyCharge(id);
+    return;
+  }
+  if ((e.wormPhase | 0) >= 2) {
+    clearEnemyCharge(id);
+    return;
+  }
+  const t = Math.min(1, Math.max(0, (now - ch.start) / Math.max(1, ch.ms)));
+  const shrink = t * t;
+  const rBig = 5.2 * RES_SCALE;
+  const rSmall = 1.15 * RES_SCALE;
+  let r = rBig + (rSmall - rBig) * shrink;
+  let shake = 0;
+  if (t > 0.58) {
+    const u = (t - 0.58) / 0.42;
+    shake = u * u * 2.4 * RES_SCALE;
+    r *= 1 - 0.08 * Math.sin(now * 0.09);
+  }
+  const alpha = 0.22 + 0.55 * t;
+  const halfL = wormSpriteHalfLength();
+  const visBank = wormSpriteVisualBank(id, baseBank);
+  let sx = x;
+  let sy = y;
+  const tipLy = Math.sin(now * 0.045 + id * 1.9) * RES_SCALE;
+  const tipLz = 0;
+  if (shake > 0) {
+    const ph = now * 0.055 + id * 2.1;
+    sx += Math.cos(ph) * shake;
+    sy += Math.sin(ph * 1.37) * shake;
+  }
+  const wr = r * 2;
+  const suckParts = updateWormChargeSuck(
+    id, sx, sy, angle, visBank, halfL, tipLy, tipLz, wr, now
+  );
+  drawEnemyChargeSphere(sx, sy, wr, angle, visBank, COL_CHARGE_RED, alpha, {
+    lift: SPRITE_ROOF_LIFT,
+    localX: halfL,
+    localY: tipLy,
+    localZ: tipLz,
+    depthParts: suckParts,
+    hwDepth: true
+  });
 }
 
 /** Spinner: round sprite on hex dome; +Z tip circles at 20° lean, 4°/tick. */
@@ -17313,10 +17449,11 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const oz = opts && opts.localZ != null ? +opts.localZ : 0;
   const lift = opts && opts.lift != null ? opts.lift : SHIP3D_LIFT;
   const depthParts = opts && opts.depthParts;
+  const hwDepth = !!(opts && opts.hwDepth);
   const src = mesh.verts;
   const n = src.length;
   // Banked world positions (pre-lift) for correct 3D facing — screen-space cull
-  // breaks when lift ≠ 0 (worm tip), leaving wireframe-only.
+  // breaks when lift ≠ 0 (worm tip), leaving empty fills.
   const bx = new Float64Array(n);
   const by = new Float64Array(n);
   const bz = new Float64Array(n);
@@ -17350,34 +17487,87 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
     const i0 = f[0], i1 = f[1], i2 = f[2];
     const ax = bx[i1] - bx[i0];
     const ay = by[i1] - by[i0];
-    const az = bz[i1] - bz[i0];
     const px = bx[i2] - bx[i0];
     const py = by[i2] - by[i0];
-    const pz = bz[i2] - bz[i0];
     // Outward normal; higher world-Z is closer → keep faces with +Z normal.
     const nz = ax * py - ay * px;
     if (nz <= 0) continue;
     const z = (depth[i0] + depth[i1] + depth[i2]) / 3;
     if (z < zMin) zMin = z;
     if (z > zMax) zMax = z;
-    faceItems.push({
-      kind: 'face',
-      z,
-      poly: [
-        xy[i0 * 2], xy[i0 * 2 + 1],
-        xy[i1 * 2], xy[i1 * 2 + 1],
-        xy[i2 * 2], xy[i2 * 2 + 1]
-      ]
-    });
+    faceItems.push({ kind: 'face', z, i0, i1, i2 });
   }
   const zSpan = Math.max(1e-4, zMax - zMin);
   const base = color || COL_CHARGE_RED;
-  // Solid filled body (not wireframe-dominated).
-  const fillA = Math.min(1, Math.max(0.62, alpha == null ? 0.7 : alpha));
+  const fillA = Math.min(1, Math.max(0.75, alpha == null ? 0.85 : alpha));
   const emitPow = 0.5;
 
-  // Painter's: sphere faces + optional suck particles share one depth order.
-  const items = faceItems.slice();
+  if (hwDepth) {
+    // Same clip-Z as worm tube — filled faces only (no wireframe).
+    gl.depthMask(true);
+    gl.depthFunc(gl.LESS);
+    let o = 0;
+    for (let i = 0; i < faceItems.length; i++) {
+      const it = faceItems[i];
+      const ids = [it.i0, it.i1, it.i2];
+      for (let v = 0; v < 3; v++) {
+        const vi = ids[v];
+        if (o + 3 > depthSolidMesh.length) break;
+        depthSolidMesh[o++] = xy[vi * 2];
+        depthSolidMesh[o++] = xy[vi * 2 + 1];
+        depthSolidMesh[o++] = spriteWorldZToClip(depth[vi]);
+      }
+    }
+    const midShade = 0.7;
+    const solidCol = [
+      Math.min(1, base[0] * midShade + 0.12),
+      Math.min(1, base[1] * midShade),
+      Math.min(1, base[2] * midShade)
+    ];
+    drawDepthSolidTris(depthSolidMesh, o, solidCol, fillA, false);
+    // Emission — depth test only, no write
+    gl.depthMask(false);
+    gl.depthFunc(gl.LEQUAL);
+    drawDepthSolidTris(depthSolidMesh, o, base, fillA * emitPow * 0.55, true);
+    if (depthParts && depthParts.length) {
+      let po = 0;
+      for (let i = 0; i < depthParts.length; i++) {
+        const p = depthParts[i];
+        const clipZ = spriteWorldZToClip(p.z);
+        const rad = p.size;
+        const segs = 8;
+        for (let si = 0; si < segs; si++) {
+          const a0 = (si / segs) * Math.PI * 2;
+          const a1 = ((si + 1) / segs) * Math.PI * 2;
+          if (po + 9 > depthSolidMesh.length) break;
+          depthSolidMesh[po++] = p.x;
+          depthSolidMesh[po++] = p.y;
+          depthSolidMesh[po++] = clipZ;
+          depthSolidMesh[po++] = p.x + Math.cos(a0) * rad;
+          depthSolidMesh[po++] = p.y + Math.sin(a0) * rad;
+          depthSolidMesh[po++] = clipZ;
+          depthSolidMesh[po++] = p.x + Math.cos(a1) * rad;
+          depthSolidMesh[po++] = p.y + Math.sin(a1) * rad;
+          depthSolidMesh[po++] = clipZ;
+        }
+      }
+      drawDepthSolidTris(depthSolidMesh, po, COL_CHARGE_RED, 1, true);
+    }
+    gl.depthMask(true);
+    gl.depthFunc(gl.LESS);
+    return;
+  }
+
+  // Painter's path (commons / UFO) — faces only, no wireframe.
+  const items = faceItems.map((it) => ({
+    kind: 'face',
+    z: it.z,
+    poly: [
+      xy[it.i0 * 2], xy[it.i0 * 2 + 1],
+      xy[it.i1 * 2], xy[it.i1 * 2 + 1],
+      xy[it.i2 * 2], xy[it.i2 * 2 + 1]
+    ]
+  }));
   if (depthParts && depthParts.length) {
     for (let i = 0; i < depthParts.length; i++) {
       const p = depthParts[i];
@@ -17399,22 +17589,6 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
     ];
     drawFilledPoly(it.poly, col, fillA, false);
     drawFilledPoly(it.poly, base, fillA * emitPow * 0.55, true);
-  }
-  // Light wireframe accent on top of solid fill.
-  const edgeW = 2;
-  const edgeCol = [1, 0.2, 0.15];
-  const edgeA = Math.min(1, fillA * 0.85);
-  for (const e of mesh.edges) {
-    drawThickSegment(
-      xy[e[0] * 2], xy[e[0] * 2 + 1],
-      xy[e[1] * 2], xy[e[1] * 2 + 1],
-      edgeW, edgeCol, edgeA, false
-    );
-    drawThickSegment(
-      xy[e[0] * 2], xy[e[0] * 2 + 1],
-      xy[e[1] * 2], xy[e[1] * 2 + 1],
-      edgeW + 1, edgeCol, edgeA * emitPow * 0.4, true
-    );
   }
 }
 
@@ -17503,44 +17677,7 @@ function drawEnemyCommonCharges() {
     }
 
     if (kind === 'worm') {
-      // Embed sphere at tube tip [halfL, 0, 0] — same bank + SPRITE_ROOF_LIFT as planes.
-      const halfL = wormSpriteHalfLength();
-      const visBank = wormSpriteVisualBank(id, bank);
-      const vs = voidShakeOffset('e', id);
-      let sx = p.x + vs.x;
-      let sy = p.y + vs.y;
-      // Continuous ±1px shake along worm width (local Y).
-      const tipLy = Math.sin(now * 0.045 + id * 1.9) * RES_SCALE;
-      const tipLz = 0;
-      // Late charge: keep the stronger world-space shake.
-      if (shake > 0) {
-        const ph = now * 0.055 + id * 2.1;
-        sx += Math.cos(ph) * shake;
-        sy += Math.sin(ph * 1.37) * shake;
-      }
-      const wr = r * 2;
-      const suckParts = updateWormChargeSuck(
-        id, sx, sy, p.angle, visBank, halfL, tipLy, tipLz, wr, now
-      );
-      drawEnemyChargeSphere(sx, sy, wr, p.angle, visBank, COL_CHARGE_RED, alpha, {
-        lift: SPRITE_ROOF_LIFT,
-        localX: halfL,
-        localY: tipLy,
-        localZ: tipLz,
-        depthParts: suckParts
-      });
-      if (t > 0.75) {
-        const flash = (t - 0.75) / 0.25;
-        const tip = projectMesh3D(
-          [[halfL, tipLy, tipLz]], sx, sy, p.angle, visBank, SPRITE_ROOF_LIFT
-        );
-        drawFilledPoly(
-          circleVerts(tip.xy[0], tip.xy[1], (1.2 + flash * 2.2) * RES_SCALE * 2, 16),
-          COL_CHARGE_RED,
-          0.2 + flash * 0.55,
-          false
-        );
-      }
+      // Worm charge is drawn inside the tube depth pass (drawWormChargeInTubeDepth).
       continue;
     }
 
