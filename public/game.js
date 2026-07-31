@@ -10621,6 +10621,7 @@ const SPRITE_SHIP_PX_SCALE = 1;
  *  sizeScale: extra multiplier (default 1). Plane size follows sprite fw×fh.
  *  opts.tube: also draw two mirrored under-planes (4 faces) for a full tube/worm.
  *  opts.flat: single z=0 quad (full sprite) — no roof fold.
+ *  opts.hexDome: low-poly hex bulge — 6 tris, rim z=0, center z=domeZ (default 14).
  *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor, opts) {
   const spec = opt && opt.sprite;
@@ -10629,18 +10630,19 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   if (!entry || !entry.ready || !entry.tex) return;
 
   const flat = !!(opts && opts.flat);
-  let bank = flat ? 0 : ((bankOverride != null && Number.isFinite(bankOverride))
+  const hexDome = !!(opts && opts.hexDome);
+  let bank = (flat || hexDome) ? 0 : ((bankOverride != null && Number.isFinite(bankOverride))
     ? bankOverride * 0.5
     : shipBankSmoothed(id, av, dt) * 0.5);
   const spinRate = opts && opts.spinRate;
-  if (!flat && spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
+  if (!flat && !hexDome && spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
     bank += performance.now() * 0.001 * spinRate + (id | 0) * 0.73;
   }
   const sc = SPRITE_SHIP_PX_SCALE * (sizeScale > 0 ? sizeScale : 1);
   // Nose–tail from frame height; wing span from frame width — true pixel proportions.
   const halfL = Math.max(1, spec.fh) * 0.5 * sc;
   const halfW = Math.max(1, spec.fw) * 0.5 * sc;
-  const tube = !flat && !!(opts && opts.tube);
+  const tube = !flat && !hexDome && !!(opts && opts.tube);
   // Worm bend was half-pitch; 2× that = full SPRITE_ROOF_PITCH.
   // wingY/drop keep outer edges on z=0 (90° copies → edges on y=0).
   const pitch = SPRITE_ROOF_PITCH;
@@ -10652,6 +10654,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const state = tinyShipDesiredState(spec, !!moving, spriteShipAttacking(id));
   const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
   const uMid = (uv.u0 + uv.u1) * 0.5;
+  const vMid = (uv.v0 + uv.v1) * 0.5;
   const uvsL = [
     [uMid, uv.v0],
     [uv.u0, uv.v0],
@@ -10666,7 +10669,32 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   ];
 
   let panels;
-  if (flat) {
+  if (hexDome) {
+    // PSX hex dome: 6 tris, rim on z=0, apex raised (wypukły).
+    const R = Math.max(halfL, halfW);
+    const domeZ = (opts.domeZ != null && Number.isFinite(+opts.domeZ)) ? +opts.domeZ : 14;
+    const uHalf = (uv.u1 - uv.u0) * 0.5;
+    const vHalf = (uv.v1 - uv.v0) * 0.5;
+    const rimUV = (lx, ly) => [
+      uMid + (ly / R) * uHalf,
+      vMid + (-lx / R) * vHalf
+    ];
+    panels = [];
+    const cVert = [0, 0, domeZ];
+    const cUv = [uMid, vMid];
+    for (let i = 0; i < 6; i++) {
+      const a0 = (i / 6) * Math.PI * 2 - Math.PI / 2;
+      const a1 = ((i + 1) / 6) * Math.PI * 2 - Math.PI / 2;
+      const x0 = Math.cos(a0) * R;
+      const y0 = Math.sin(a0) * R;
+      const x1 = Math.cos(a1) * R;
+      const y1 = Math.sin(a1) * R;
+      panels.push({
+        verts: [cVert, [x0, y0, 0], [x1, y1, 0]],
+        uvs: [cUv, rimUV(x0, y0), rimUV(x1, y1)]
+      });
+    }
+  } else if (flat) {
     // One billboard-style quad on the playfield plane (full frame UVs).
     panels = [
       {
@@ -10778,17 +10806,17 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   // Debug / tune: draw the folded roof quads themselves (0.6 alpha), then sprite on top.
   if (showPlanes) {
     for (let p = 0; p < panels.length; p++) {
-      const { xy } = projectMesh3D(panels[p].verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
-      const quad = [
-        xy[0], xy[1],
-        xy[2], xy[3],
-        xy[4], xy[5],
-        xy[6], xy[7]
-      ];
-      drawFilledPoly(quad, tint, 0.6);
-      for (let e = 0; e < 4; e++) {
+      const verts = panels[p].verts;
+      const { xy } = projectMesh3D(verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
+      const n = verts.length;
+      const poly = [];
+      for (let i = 0; i < n; i++) {
+        poly.push(xy[i * 2], xy[i * 2 + 1]);
+      }
+      drawFilledPoly(poly, tint, 0.6);
+      for (let e = 0; e < n; e++) {
         const a = e;
-        const b = (e + 1) % 4;
+        const b = (e + 1) % n;
         drawThickSegment(
           xy[a * 2], xy[a * 2 + 1],
           xy[b * 2], xy[b * 2 + 1],
@@ -10819,15 +10847,21 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-  const windFwd = [0, 1, 2, 0, 2, 3];
-  const windBack = [0, 2, 1, 0, 3, 2];
+  const windFwdQ = [0, 1, 2, 0, 2, 3];
+  const windBackQ = [0, 2, 1, 0, 3, 2];
+  const windFwdT = [0, 1, 2];
+  const windBackT = [0, 2, 1];
+  /** @returns {number} GL triangle vertex count (double-sided). */
   function fillPanelMesh(panel) {
     const { xy } = projectMesh3D(panel.verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
     const uvs = panel.uvs;
+    const tri = panel.verts.length === 3;
+    const fwd = tri ? windFwdT : windFwdQ;
+    const back = tri ? windBackT : windBackQ;
     let o = 0;
     for (let pass = 0; pass < 2; pass++) {
-      const idx = pass === 0 ? windFwd : windBack;
-      for (let v = 0; v < 6; v++) {
+      const idx = pass === 0 ? fwd : back;
+      for (let v = 0; v < idx.length; v++) {
         const i = idx[v];
         spriteShipMesh[o++] = xy[i * 2];
         spriteShipMesh[o++] = xy[i * 2 + 1];
@@ -10835,7 +10869,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         spriteShipMesh[o++] = uvs[i][1];
       }
     }
-    gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh.subarray(0, o), gl.DYNAMIC_DRAW);
+    return o / 4;
   }
 
   // Player-color silhouette outline around sprite pixels (not roof plane edges).
@@ -10844,11 +10879,11 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     gl.uniform1f(ssUOutline, 1);
     gl.uniform1f(ssUAlpha, outlineA);
     for (let p = 0; p < panels.length; p++) {
-      fillPanelMesh(panels[p]);
+      const nVert = fillPanelMesh(panels[p]);
       for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
         const dir = SPRITE_SHIP_OUTLINE_DIRS[d];
         gl.uniform2f(ssUOffset, dir[0] * outlineW, dir[1] * outlineW);
-        gl.drawArrays(gl.TRIANGLES, 0, 12);
+        gl.drawArrays(gl.TRIANGLES, 0, nVert);
       }
     }
   }
@@ -10859,8 +10894,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.uniform1f(ssUAlpha, 1);
   gl.uniform2f(ssUOffset, 0, 0);
   for (let p = 0; p < panels.length; p++) {
-    fillPanelMesh(panels[p]);
-    gl.drawArrays(gl.TRIANGLES, 0, 12);
+    const nVert = fillPanelMesh(panels[p]);
+    gl.drawArrays(gl.TRIANGLES, 0, nVert);
   }
 
   gl.disable(gl.BLEND);
@@ -15125,7 +15160,8 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
       });
     }
     if (!tiny) {
-      const rg = gridBlastRocketTrailOpts(vx, vy);
+      // Enemy/worm rockets: owner < 0 — quieter directional grid deform.
+      const rg = gridBlastRocketTrailOpts(vx, vy, (ownerId | 0) < 0 ? 0.25 : 1);
       if (rg) pushGridShock(x, y, Object.assign(rg, { ironWake: false }));
     }
     return null;
@@ -16558,7 +16594,7 @@ function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
   return bank;
 }
 
-/** Spinner: compact craft on one flat plane; hull angle comes from server (constant spin). */
+/** Spinner: compact craft on a 6-tri hex dome (rim z=0, center z=14); hull angle from server. */
 function drawEnemySpinner(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_SPINNER_SPRITE_ID);
@@ -16566,7 +16602,7 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
-      { flat: true }
+      { hexDome: true, domeZ: 14 }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
