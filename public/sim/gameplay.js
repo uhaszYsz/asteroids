@@ -1922,12 +1922,12 @@ function splitAsteroid(room, parent) {
     : (2 + (Math.random() * 2 | 0));  // medium → small: 2–3
   // Soft medium cap: never suppress shards from a destroyed big (that looked like
   // the rock "vanished"). Over-cap mediums are culled when they leave the screen.
+  const parentHue = parent.hue != null
+    ? wrapHue01(parent.hue)
+    : asteroidHueFromShape(parent.shapeId != null ? parent.shapeId : parent.aid);
   for (let i = 0; i < count; i++) {
     const ang = Math.random() * Math.PI * 2;
     const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
-    const parentHue = parent.hue != null
-      ? wrapHue01(parent.hue)
-      : asteroidHueFromShape(parent.shapeId != null ? parent.shapeId : parent.aid);
     const child = makeAsteroid({
       size: childSize,
       allowSpecial: true,
@@ -1941,6 +1941,27 @@ function splitAsteroid(room, parent) {
     clampSpeed(child);
     pushAsteroid(room, child);
     emitAsteroidFire(room, child);
+  }
+  // Big also sprays 1–3 bonus smalls on top of the medium shards.
+  if (parent.big) {
+    const smallN = 1 + (Math.random() * 3 | 0);
+    for (let i = 0; i < smallN; i++) {
+      const ang = Math.random() * Math.PI * 2;
+      const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
+      const child = makeAsteroid({
+        size: 'small',
+        allowSpecial: true,
+        x: parent.x + Math.cos(ang) * parent.r * 0.25,
+        y: parent.y + Math.sin(ang) * parent.r * 0.25,
+        vx: parent.vx * 0.4 + Math.cos(ang) * kick,
+        vy: parent.vy * 0.4 + Math.sin(ang) * kick,
+        edgeWrapMax: 1,
+        hue: shardHueFromParent(parentHue)
+      });
+      clampSpeed(child);
+      pushAsteroid(room, child);
+      emitAsteroidFire(room, child);
+    }
   }
 }
 
