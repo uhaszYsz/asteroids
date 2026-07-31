@@ -4875,21 +4875,6 @@ function scratchThickCap(p, cx, cy, hw, segs) {
 
 /** Thick segment as a solid filled quad (no parallel-line gaps).
  *  Pass additive=true for emissive glow (SRC_ALPHA, ONE). */
-function drawCircleOutline(cx, cy, r, width, color, alpha, segments) {
-  const n = Math.max(12, segments | 0 || 48);
-  const rad = Math.max(0.5, +r || 0);
-  let x0 = cx + rad;
-  let y0 = cy;
-  for (let i = 1; i <= n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    const x1 = cx + Math.cos(a) * rad;
-    const y1 = cy + Math.sin(a) * rad;
-    drawThickSegment(x0, y0, x1, y1, width, color, alpha);
-    x0 = x1;
-    y0 = y1;
-  }
-}
-
 function drawThickSegment(x0, y0, x1, y1, width, color, alpha, additive) {
   const a = alpha == null ? 1 : alpha;
   const add = !!additive;
@@ -10639,7 +10624,6 @@ const SPRITE_SHIP_PX_SCALE = 1;
  *  opts.hexDome: low-poly hex bulge — 6 tris, rim z=0, center z=domeZ (default 14).
  *  opts.tiltXDeg: fixed roll around +X (degrees).
  *  opts.yawSpinDegPerTick: continuous yaw around Z (degrees per sim tick).
- *  opts.circleOutlineW: skip sprite silhouette; draw a round ring (screen px width).
  *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor, opts) {
   const spec = opt && opt.sprite;
@@ -10697,14 +10681,18 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
 
   let panels;
   if (hexDome) {
-    // PSX hex dome: 6 tris, rim on z=0, apex raised (wypukły).
-    const R = Math.max(halfL, halfW);
+    // Low-poly hex is only the 3D surface. Sprite UVs are planar (same as flat quad)
+    // so the original round art stays round. Hex is oversized so the circle fits inside
+    // (inscribed radius = max half-extents; flats don't clip the disc).
+    const spriteR = Math.max(halfL, halfW);
+    const R = spriteR / Math.cos(Math.PI / 6);
     const domeZ = (opts.domeZ != null && Number.isFinite(+opts.domeZ)) ? +opts.domeZ : 14;
     const uHalf = (uv.u1 - uv.u0) * 0.5;
     const vHalf = (uv.v1 - uv.v0) * 0.5;
-    const rimUV = (lx, ly) => [
-      uMid + (ly / R) * uHalf,
-      vMid + (-lx / R) * vHalf
+    // Same mapping as the flat sprite rect — not radial-to-hex (that hex-cuts the art).
+    const planarUV = (lx, ly) => [
+      uMid + (halfW > 0 ? (ly / halfW) * uHalf : 0),
+      vMid + (halfL > 0 ? (-lx / halfL) * vHalf : 0)
     ];
     panels = [];
     const cVert = [0, 0, domeZ];
@@ -10718,7 +10706,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
       const y1 = Math.sin(a1) * R;
       panels.push({
         verts: [cVert, [x0, y0, 0], [x1, y1, 0]],
-        uvs: [cUv, rimUV(x0, y0), rimUV(x1, y1)]
+        uvs: [cUv, planarUV(x0, y0), planarUV(x1, y1)]
       });
     }
   } else if (flat) {
@@ -10901,13 +10889,30 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   }
 
   // Player-color silhouette outline around sprite pixels (not roof plane edges).
-  const circleOW = opts && opts.circleOutlineW != null ? +opts.circleOutlineW : 0;
-  if (outlineA > 0.001 && !(circleOW > 0)) {
+  // Hex dome: outline once on the flat full frame (same pulse as every other ship) —
+  // per-tri outlines would seam the mesh.
+  if (outlineA > 0.001) {
     gl.uniform3f(ssUTint, outlineTint[0], outlineTint[1], outlineTint[2]);
     gl.uniform1f(ssUOutline, 1);
     gl.uniform1f(ssUAlpha, outlineA);
-    for (let p = 0; p < panels.length; p++) {
-      const nVert = fillPanelMesh(panels[p]);
+    const outlinePanels = hexDome
+      ? [{
+          verts: [
+            [halfL, -halfW, 0],
+            [halfL, halfW, 0],
+            [-halfL, halfW, 0],
+            [-halfL, -halfW, 0]
+          ],
+          uvs: [
+            [uv.u0, uv.v0],
+            [uv.u1, uv.v0],
+            [uv.u1, uv.v1],
+            [uv.u0, uv.v1]
+          ]
+        }]
+      : panels;
+    for (let p = 0; p < outlinePanels.length; p++) {
+      const nVert = fillPanelMesh(outlinePanels[p]);
       for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
         const dir = SPRITE_SHIP_OUTLINE_DIRS[d];
         gl.uniform2f(ssUOffset, dir[0] * outlineW, dir[1] * outlineW);
@@ -10928,12 +10933,6 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
 
   gl.disable(gl.BLEND);
   gl.disableVertexAttribArray(ssAUV);
-
-  // Round ring outline (spinner etc.) — not a silhouette of the mesh / sprite.
-  if (circleOW > 0 && outlineA > 0.001) {
-    const R = Math.max(halfL, halfW);
-    drawCircleOutline(x, y, R, circleOW, outlineTint, outlineA);
-  }
 }
 
 function drawShip3D(x, y, angle, av, color, id, dt, moving) {
@@ -16639,7 +16638,7 @@ function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
   return bank;
 }
 
-/** Spinner: hex dome sprite; 7° X tilt; spins 4°/tick around Z; round 2px outline. */
+/** Spinner: round sprite on hex dome; 20° X tilt; spins 4°/tick around Z. */
 function drawEnemySpinner(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_SPINNER_SPRITE_ID);
@@ -16647,7 +16646,7 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
-      { hexDome: true, domeZ: 14, tiltXDeg: 20, yawSpinDegPerTick: 4, circleOutlineW: 2 }
+      { hexDome: true, domeZ: 14, tiltXDeg: 20, yawSpinDegPerTick: 4 }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
