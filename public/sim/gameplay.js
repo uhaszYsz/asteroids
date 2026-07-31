@@ -1001,11 +1001,7 @@ function wormCrushAsteroids(room, e) {
   forEachAsteroidNear(room, e.x, e.y, queryR, (a) => {
     if (!a || a.noCollide || a.hp <= 0) return false;
     if (!asteroidOverlapsPlayfield(a)) return false;
-    let hit = false;
-    for (const cir of enemyHitCircles(e)) {
-      if (circleVsAsteroidPoly(cir, a)) { hit = true; break; }
-    }
-    if (!hit) return false;
+    if (!circleHitsEnemyRect(a.x, a.y, asteroidHitR(a), e)) return false;
     crush.push(a);
     return false;
   });
@@ -1618,26 +1614,20 @@ function damageEnemy(room, e, dmg) {
 }
 
 function enemyUsesRectHit(e) {
-  return !!(e && e.kind === 'ufo');
+  return !!(e && (e.kind === 'ufo' || e.kind === 'worm'));
 }
 
-function enemyUsesDualHit(e) {
-  return !!(e && e.kind === 'worm');
-}
-
-/** Hit volumes along facing (worm = two touching circles; others = one at center). */
-function enemyHitCircles(e) {
-  if (!e) return [];
-  if (enemyUsesDualHit(e)) {
-    const c = Math.cos(e.angle || 0);
-    const s = Math.sin(e.angle || 0);
-    const o = ENEMY_WORM_HIT_OFFSET;
-    const r = ENEMY_WORM_HIT_R;
-    return [
-      { x: e.x + c * o, y: e.y + s * o, r },
-      { x: e.x - c * o, y: e.y - s * o, r }
-    ];
+/** Full length/width of oriented enemy hit box (UFO or worm). */
+function enemyRectDims(e) {
+  if (e && e.kind === 'worm') {
+    return { len: ENEMY_WORM_HIT_LEN, wid: ENEMY_WORM_HIT_WID };
   }
+  return { len: ENEMY_UFO_HIT_LEN, wid: ENEMY_UFO_HIT_WID };
+}
+
+/** Hit volumes (circle enemies only — rect kinds use enemyRectDims). */
+function enemyHitCircles(e) {
+  if (!e || enemyUsesRectHit(e)) return [];
   const r = e.r || ENEMY_R[e.kind] || ENEMY_R.common || 10;
   return [{ x: e.x, y: e.y, r }];
 }
@@ -1655,8 +1645,9 @@ function enemyLocalDelta(e, px, py) {
 }
 
 function circleHitsEnemyRect(cx, cy, cr, e) {
-  const hl = ENEMY_UFO_HIT_LEN * 0.5;
-  const hw = ENEMY_UFO_HIT_WID * 0.5;
+  const d = enemyRectDims(e);
+  const hl = d.len * 0.5;
+  const hw = d.wid * 0.5;
   const { lx, ly } = enemyLocalDelta(e, cx, cy);
   const qx = Math.max(-hl, Math.min(hl, lx));
   const qy = Math.max(-hw, Math.min(hw, ly));
@@ -1701,8 +1692,9 @@ function raycastOrientedRect(ox, oy, dx, dy, cx, cy, angle, hl, hw, maxDist) {
 }
 
 function raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist) {
-  const hl = ENEMY_UFO_HIT_LEN * 0.5;
-  const hw = ENEMY_UFO_HIT_WID * 0.5;
+  const d = enemyRectDims(e);
+  const hl = d.len * 0.5;
+  const hw = d.wid * 0.5;
   let best = null;
   for (let oxw = -W; oxw <= W; oxw += W) {
     for (let oyw = -H; oyw <= H; oyw += H) {
@@ -1722,8 +1714,9 @@ function raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist) {
 
 function distToEnemyHit(px, py, e) {
   if (enemyUsesRectHit(e)) {
-    const hl = ENEMY_UFO_HIT_LEN * 0.5;
-    const hw = ENEMY_UFO_HIT_WID * 0.5;
+    const d = enemyRectDims(e);
+    const hl = d.len * 0.5;
+    const hw = d.wid * 0.5;
     const { lx, ly } = enemyLocalDelta(e, px, py);
     const qx = Math.max(-hl, Math.min(hl, lx));
     const qy = Math.max(-hw, Math.min(hw, ly));
@@ -1731,8 +1724,8 @@ function distToEnemyHit(px, py, e) {
   }
   let best = Infinity;
   for (const cir of enemyHitCircles(e)) {
-    const d = Math.max(0, Math.sqrt(torusDistSq(px, py, cir.x, cir.y)) - cir.r);
-    if (d < best) best = d;
+    const dist = Math.max(0, Math.sqrt(torusDistSq(px, py, cir.x, cir.y)) - cir.r);
+    if (dist < best) best = dist;
   }
   return best;
 }
@@ -4020,9 +4013,7 @@ function resolvePlayerShotEnemyHits(room) {
       if (!e || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
       const hit = enemyUsesRectHit(e)
         ? circleHitsEnemyRect(shot.x, shot.y, shot.r || 10, e)
-        : enemyUsesDualHit(e)
-          ? enemyHitCircles(e).some((cir) => circleVsAsteroidPoly(cir, shot))
-          : circleVsAsteroidPoly({ x: e.x, y: e.y, r: e.r || 10 }, shot);
+        : circleVsAsteroidPoly({ x: e.x, y: e.y, r: e.r || 10 }, shot);
       if (!hit) continue;
       // Damage only — leave velocities alone (no push / stun).
       shot.enemyHitCd = 6;
@@ -4774,10 +4765,11 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
       if (toroidal) {
         hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist);
       } else {
+        const d = enemyRectDims(e);
         const t = raycastOrientedRect(
           ox, oy, dx, dy,
           e.x, e.y, e.angle || 0,
-          ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5,
+          d.len * 0.5, d.wid * 0.5,
           maxDist
         );
         if (t != null) hit = { t, x: ox + dx * t, y: oy + dy * t };

@@ -393,12 +393,19 @@ const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 /**
- * Worm: two equal hit circles along facing. Centers at ±R so they touch at midbody.
- * Broadphase e.r covers both from center (offset + radius = 2R).
+ * Worm hit OBB (oriented box along facing).
+ * Length = 4× legacy circle radius. Width = 70% of both tube roof planes tip-to-tip
+ * (sprite 184 fw×scale, tube pitch = half SPRITE_ROOF_PITCH).
  */
 const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
-const ENEMY_WORM_HIT_OFFSET = ENEMY_WORM_HIT_R;
-ENEMY_R.worm = ENEMY_WORM_HIT_OFFSET + ENEMY_WORM_HIT_R;
+const ENEMY_WORM_HIT_LEN = 4 * ENEMY_WORM_HIT_R;
+const ENEMY_WORM_SPRITE_FW = 81;
+const ENEMY_WORM_SPRITE_SCALE = 1.6;
+const ENEMY_WORM_TUBE_PITCH = 0.58 * 0.5;
+const ENEMY_WORM_HIT_WID = 0.7 * 2
+  * (ENEMY_WORM_SPRITE_FW * 0.5 * ENEMY_WORM_SPRITE_SCALE)
+  * Math.cos(ENEMY_WORM_TUBE_PITCH);
+ENEMY_R.worm = Math.hypot(ENEMY_WORM_HIT_LEN * 0.5, ENEMY_WORM_HIT_WID * 0.5);
 const ENEMY_HP = {
   common: 95,
   ufo: 300,

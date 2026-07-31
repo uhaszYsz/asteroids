@@ -16219,10 +16219,16 @@ const ENEMY_UFO_HIT_LEN = 84;
 const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
-/** Worm: two equal hit circles along facing; centers ±R so they touch midbody. */
+/** Worm: oriented hit box — length 4× circle-R; width 70% of both tube planes. */
 const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
-const ENEMY_WORM_HIT_OFFSET = ENEMY_WORM_HIT_R;
-ENEMY_R.worm = ENEMY_WORM_HIT_OFFSET + ENEMY_WORM_HIT_R;
+const ENEMY_WORM_HIT_LEN = 4 * ENEMY_WORM_HIT_R;
+const ENEMY_WORM_HIT_FW = 81;
+const ENEMY_WORM_HIT_SCALE = 1.6;
+const ENEMY_WORM_HIT_TUBE_PITCH = 0.58 * 0.5;
+const ENEMY_WORM_HIT_WID = 0.7 * 2
+  * (ENEMY_WORM_HIT_FW * 0.5 * ENEMY_WORM_HIT_SCALE)
+  * Math.cos(ENEMY_WORM_HIT_TUBE_PITCH);
+ENEMY_R.worm = Math.hypot(ENEMY_WORM_HIT_LEN * 0.5, ENEMY_WORM_HIT_WID * 0.5);
 
 function enemyWanderSpeedOf(e) {
   const s = e && +e.speed;
@@ -16253,25 +16259,19 @@ function enemyHitR(e) {
 }
 
 function enemyUsesRectHit(e) {
-  return !!(e && e.kind === 'ufo');
+  return !!(e && (e.kind === 'ufo' || e.kind === 'worm'));
 }
 
-function enemyUsesDualHit(e) {
-  return !!(e && e.kind === 'worm');
-}
-
-/** Match server enemyHitCircles (pose may be predicted). */
-function enemyHitCirclesAt(x, y, angle, e) {
-  if (enemyUsesDualHit(e)) {
-    const c = Math.cos(angle || 0);
-    const s = Math.sin(angle || 0);
-    const o = ENEMY_WORM_HIT_OFFSET;
-    const r = ENEMY_WORM_HIT_R;
-    return [
-      { x: x + c * o, y: y + s * o, r },
-      { x: x - c * o, y: y - s * o, r }
-    ];
+function enemyRectDims(e) {
+  if (e && e.kind === 'worm') {
+    return { len: ENEMY_WORM_HIT_LEN, wid: ENEMY_WORM_HIT_WID };
   }
+  return { len: ENEMY_UFO_HIT_LEN, wid: ENEMY_UFO_HIT_WID };
+}
+
+/** Circle enemies only. */
+function enemyHitCirclesAt(x, y, angle, e) {
+  if (enemyUsesRectHit(e)) return [];
   return [{ x, y, r: enemyHitR(e) }];
 }
 
@@ -16311,8 +16311,9 @@ function raycastOrientedRect(ox, oy, dx, dy, cx, cy, angle, hl, hw, maxDist) {
 }
 
 function raycastEnemyRectToroidal(ox, oy, dx, dy, e, angle, maxDist) {
-  const hl = ENEMY_UFO_HIT_LEN * 0.5;
-  const hw = ENEMY_UFO_HIT_WID * 0.5;
+  const d = enemyRectDims(e);
+  const hl = d.len * 0.5;
+  const hw = d.wid * 0.5;
   let best = null;
   for (let oxw = -W; oxw <= W; oxw += W) {
     for (let oyw = -H; oyw <= H; oyw += H) {
@@ -17269,8 +17270,10 @@ function drawEnemies(dt) {
       enemyDrawBank.set(id, bank);
     }
     if (showHit) {
-      if (enemyUsesRectHit(e)) drawHitRect(x, y, p.angle, ENEMY_UFO_HIT_LEN, ENEMY_UFO_HIT_WID, COL.debug);
-      else {
+      if (enemyUsesRectHit(e)) {
+        const d = enemyRectDims(e);
+        drawHitRect(x, y, p.angle, d.len, d.wid, COL.debug);
+      } else {
         for (const cir of enemyHitCirclesAt(x, y, p.angle, e)) {
           drawHitCircle(cir.x, cir.y, cir.r, COL.debug);
         }
