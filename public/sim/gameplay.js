@@ -3089,9 +3089,18 @@ function bulletBroadR(b) {
   if (cfg.col === 'line') {
     return Math.max(bulletLineLength(b, cfg), bulletLineWidth(b, cfg)) * 0.5 + 1;
   }
-  let br = cfg.size || 2 * RES_SCALE;
+  let br = bulletCircleSize(b, cfg);
   if (cfg.col === 'ellipse') br = Math.max(br, br * (cfg.scaleY || 1));
   return br;
+}
+
+function bulletCircleSize(b, cfg) {
+  const type = (b && b.type) || 'default';
+  if (type === 'enemy' || type === 'enemySpinner' || type === 'enemyWorm') {
+    return enemyShotCoreRadius(type, b && b.length, b && b.width);
+  }
+  if (b && b.size != null && Number.isFinite(+b.size) && +b.size > 0) return +b.size;
+  return (cfg && cfg.size) || 2 * RES_SCALE;
 }
 
 /**
@@ -3235,7 +3244,7 @@ function hitBulletAsteroid(b, a) {
   if (!hitBulletTarget(b, a.x, a.y, asteroidHitR(a), false)) return false;
   if (a.size === 'small') return true;
   const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
-  let br = cfg.size || 2 * RES_SCALE;
+  let br = bulletCircleSize(b, cfg);
   if (cfg.col === 'line') br = Math.max(bulletLineWidth(b, cfg) || 1, 1.5 * RES_SCALE);
   if (cfg.col === 'ellipse') br = Math.max(br, br * (cfg.scaleY || 1) * 0.55);
   return !!circleVsAsteroidPoly({ x: b.x, y: b.y, r: br }, a);
@@ -5047,7 +5056,7 @@ function hitBulletTarget(b, tx, ty, tr, torus) {
       b.x, b.y, bulletLineLength(b, cfg), bulletLineWidth(b, cfg), angle, tx, ty, tr, torus
     );
   }
-  return hitCircleCircle(b.x, b.y, cfg.size, tx, ty, tr, torus);
+  return hitCircleCircle(b.x, b.y, bulletCircleSize(b, cfg), tx, ty, tr, torus);
 }
 
 function hitBulletPlayer(b, p) {

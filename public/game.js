@@ -15276,15 +15276,31 @@ function bulletAt(b) {
 
 /**
  * Common / spinner / worm shot: soft circle (glow + white core).
- * scale: 1 = common (L15). Spinner = 20/15. Worm pellets pass their own scale.
- * Visual only — collision sizes stay on BULLET_TYPES / per-bullet L×W.
+ * Collision radius = white core (ENEMY_SHOT_CORE_*). Glow is visual only.
  */
+const ENEMY_SHOT_VIS_SCALE = 2;
+const ENEMY_SHOT_CORE_BASE = 2.4 * RES_SCALE;
+const ENEMY_SHOT_GLOW_BASE = 4.2 * RES_SCALE;
+
+function enemyShotTypeScale(type, length, width) {
+  if (type === 'enemySpinner') return 20 / 15;
+  if (type === 'enemyWorm') {
+    const L = length != null && Number.isFinite(+length) ? +length : 15;
+    const Ww = width != null && Number.isFinite(+width) ? +width : 15;
+    return Math.max(L, Ww) / 15;
+  }
+  return 1;
+}
+
+function enemyShotCoreRadius(type, length, width) {
+  return ENEMY_SHOT_CORE_BASE * enemyShotTypeScale(type, length, width) * ENEMY_SHOT_VIS_SCALE;
+}
+
 function drawEnemyCommonShot(x, y, ang, scale) {
-  const s = (scale > 0 ? scale : 1) * 2;
+  const s = (scale > 0 ? scale : 1) * ENEMY_SHOT_VIS_SCALE;
   const red = COL.enemyBullet || [1.0, 0.18, 0.12];
-  const glowR = 4.2 * RES_SCALE * s;
-  const coreR = 2.4 * RES_SCALE * s;
-  // Equal axes → true circle (not flight-aligned oval).
+  const glowR = ENEMY_SHOT_GLOW_BASE * s;
+  const coreR = ENEMY_SHOT_CORE_BASE * s;
   drawSoftOval(x, y, 0, glowR, glowR, red, 0.7, true);
   drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false);
 }
@@ -18919,19 +18935,22 @@ const BULLET_HIT_DEBUG = {
   plasma: { col: 'circle', size: 5 * RES_SCALE },
   voidcannon: { col: 'circle', size: 27 * RES_SCALE },
   turret: { col: 'circle', size: 2 * RES_SCALE },
-  enemy: { col: 'line', length: 15, width: 3 },
-  enemySpinner: { col: 'line', length: 20, width: 20 },
-  enemyWorm: { col: 'line', length: 15, width: 15 },
+  enemy: { col: 'circle', size: 0 },
+  enemySpinner: { col: 'circle', size: 0 },
+  enemyWorm: { col: 'circle', size: 0 },
   enemyRocket: { col: 'circle', size: 1 }
 };
 
 /** Radius of the debug circle covering this bullet's collision shape. */
 function bulletHitDebugRadius(b) {
-  const cfg = BULLET_HIT_DEBUG[b && b.type] || BULLET_HIT_DEBUG.default;
+  const type = b && b.type;
+  if (type === 'enemy' || type === 'enemySpinner' || type === 'enemyWorm') {
+    return enemyShotCoreRadius(type, b.length, b.width);
+  }
+  const cfg = BULLET_HIT_DEBUG[type] || BULLET_HIT_DEBUG.default;
   if (cfg.col === 'line') {
     const L = b && b.length != null && Number.isFinite(+b.length) ? +b.length : cfg.length;
     const Ww = b && b.width != null && Number.isFinite(+b.width) ? +b.width : cfg.width;
-    // Circumradius of the oriented L×W hit box (server hitLineCircle).
     return 0.5 * Math.hypot(L || 0, Ww || 0);
   }
   if (cfg.col === 'ellipse') {

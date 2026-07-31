@@ -102,15 +102,36 @@ const BULLET_TYPES = {
   plasma: { dmg: 7, col: 'circle', size: 5 * RES_SCALE, scaleY: 1, length: 5 * RES_SCALE, width: 2.5 * RES_SCALE },
   voidcannon: { dmg: 5, col: 'circle', size: 27 * RES_SCALE, scaleY: 1, length: 0, width: 0 },
   turret: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
-  /** Solo enemy line shot — skips asteroids. */
-  enemy: { dmg: 18, col: 'line', length: 15, width: 3, skipAsteroids: true },
-  /** Spinner radial burst — square line shot. */
-  enemySpinner: { dmg: 18, col: 'line', length: 20, width: 20, skipAsteroids: true },
-  /** Worm 360° shotgun pellet — length/width set per bullet (7–30). */
-  enemyWorm: { dmg: 18, col: 'line', length: 15, width: 15, skipAsteroids: true },
+  /**
+   * NPC glowing shots — circle hit = white core radius (see enemyShotCoreRadius).
+   * Visual glow is larger; length/width kept only as size tags for worm scale.
+   */
+  enemy: { dmg: 18, col: 'circle', size: 0, skipAsteroids: true, length: 15, width: 3 },
+  enemySpinner: { dmg: 18, col: 'circle', size: 0, skipAsteroids: true, length: 20, width: 20 },
+  /** Worm 360° shotgun pellet — length/width set per bullet (7–30) drive core scale. */
+  enemyWorm: { dmg: 18, col: 'circle', size: 0, skipAsteroids: true, length: 15, width: 15 },
   /** UFO micro-rocket — 1px hit radius, skips asteroids. */
   enemyRocket: { dmg: 18, col: 'circle', size: 1, scaleY: 1, length: 0, width: 0, skipAsteroids: true }
 };
+
+/** Matches client drawEnemyCommonShot: typeScale × visScale × base core half-radius. */
+const ENEMY_SHOT_VIS_SCALE = 2;
+const ENEMY_SHOT_CORE_BASE = 2.4 * RES_SCALE;
+const ENEMY_SHOT_GLOW_BASE = 4.2 * RES_SCALE;
+
+function enemyShotTypeScale(type, length, width) {
+  if (type === 'enemySpinner') return 20 / 15;
+  if (type === 'enemyWorm') {
+    const L = length != null && Number.isFinite(+length) ? +length : 15;
+    const Ww = width != null && Number.isFinite(+width) ? +width : 15;
+    return Math.max(L, Ww) / 15;
+  }
+  return 1;
+}
+
+function enemyShotCoreRadius(type, length, width) {
+  return ENEMY_SHOT_CORE_BASE * enemyShotTypeScale(type, length, width) * ENEMY_SHOT_VIS_SCALE;
+}
 
 function freshWeaponLevels() {
   return {
