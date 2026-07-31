@@ -17112,7 +17112,7 @@ function spawnWormChargeSuckPart(sphereR) {
     z: Math.cos(v) * rad,
     life: 0.22 + Math.random() * 0.38,
     age: 0,
-    size: (0.55 + Math.random() * 0.85) * RES_SCALE
+    size: (0.55 + Math.random() * 0.85) * RES_SCALE * 2.5
   };
 }
 
@@ -17162,9 +17162,8 @@ function updateAndDrawWormChargeSuck(id, sx, sy, angle, bank, halfL, tipLy, tipL
   }
   drawn.sort((a, b) => a.z - b.z);
   for (const d of drawn) {
-    const a = Math.min(1, (alpha == null ? 0.7 : alpha) * (0.35 + 0.65 * d.lifeT));
     const s = d.size * (0.55 + 0.45 * d.lifeT);
-    drawFilledPoly(circleVerts(d.x, d.y, s, 8), COL_CHARGE_RED, a, false);
+    drawFilledPoly(circleVerts(d.x, d.y, s, 8), COL_CHARGE_RED, 1, true);
   }
 }
 
@@ -17290,7 +17289,8 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const zSpan = Math.max(1e-4, zMax - zMin);
   const base = color || COL_CHARGE_RED;
   const fillA = alpha == null ? 0.35 : alpha;
-  // Solid (non-additive) shaded fill.
+  // Emission power 0.5 — solid base + half-strength additive glow.
+  const emitPow = 0.5;
   for (const o of order) {
     const f = faces[o.i];
     const ax = xy[f[1] * 2] - xy[f[0] * 2];
@@ -17304,20 +17304,28 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
       Math.min(1, base[1] * shade),
       Math.min(1, base[2] * shade)
     ];
-    drawFilledPoly([
+    const poly = [
       xy[f[0] * 2], xy[f[0] * 2 + 1],
       xy[f[1] * 2], xy[f[1] * 2 + 1],
       xy[f[2] * 2], xy[f[2] * 2 + 1]
-    ], col, fillA, false);
+    ];
+    drawFilledPoly(poly, col, fillA, false);
+    drawFilledPoly(poly, base, fillA * emitPow * 0.55, true);
   }
-  // Solid wireframe — 3 px.
+  // Wireframe: solid + half emission glow.
   const edgeW = 3;
   const edgeCol = [1, 0.2, 0.15];
+  const edgeA = Math.min(1, fillA + 0.45);
   for (const e of mesh.edges) {
     drawThickSegment(
       xy[e[0] * 2], xy[e[0] * 2 + 1],
       xy[e[1] * 2], xy[e[1] * 2 + 1],
-      edgeW, edgeCol, Math.min(1, fillA + 0.45), false
+      edgeW, edgeCol, edgeA, false
+    );
+    drawThickSegment(
+      xy[e[0] * 2], xy[e[0] * 2 + 1],
+      xy[e[1] * 2], xy[e[1] * 2 + 1],
+      edgeW + 2, edgeCol, edgeA * emitPow * 0.55, true
     );
   }
 }
