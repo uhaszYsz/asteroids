@@ -17210,7 +17210,7 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const zSpan = Math.max(1e-4, zMax - zMin);
   const base = color || COL_CHARGE_RED;
   const fillA = alpha == null ? 0.35 : alpha;
-  // Additive emission fill.
+  // Additive emission fill (SRC_ALPHA, ONE).
   for (const o of order) {
     const f = faces[o.i];
     const ax = xy[f[1] * 2] - xy[f[0] * 2];
@@ -17218,11 +17218,13 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
     const bx = xy[f[2] * 2] - xy[f[0] * 2];
     const by = xy[f[2] * 2 + 1] - xy[f[0] * 2 + 1];
     if (ax * by - ay * bx >= 0) continue;
-    const shade = 0.4 + 0.6 * ((o.z - zMin) / zSpan);
+    const shade = 0.45 + 0.7 * ((o.z - zMin) / zSpan);
+    // Godot-style solid emission: albedo + tint×energy.
+    const emit = 0.85;
     const col = [
-      Math.min(1, base[0] * shade + 0.15),
-      Math.min(1, base[1] * shade),
-      Math.min(1, base[2] * shade)
+      Math.min(1, base[0] * shade + base[0] * emit),
+      Math.min(1, base[1] * shade + base[1] * emit * 0.55),
+      Math.min(1, base[2] * shade + base[2] * emit * 0.45)
     ];
     drawFilledPoly([
       xy[f[0] * 2], xy[f[0] * 2 + 1],
@@ -17230,14 +17232,20 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
       xy[f[2] * 2], xy[f[2] * 2 + 1]
     ], col, fillA, true);
   }
-  // Bright red wireframe — 3 px.
+  // Additive wireframe + soft outer glow.
   const edgeW = 3;
-  const edgeCol = [1, 0.2, 0.15];
+  const edgeCol = [1, 0.22, 0.16];
+  const edgeA = Math.min(1, fillA + 0.45);
   for (const e of mesh.edges) {
     drawThickSegment(
       xy[e[0] * 2], xy[e[0] * 2 + 1],
       xy[e[1] * 2], xy[e[1] * 2 + 1],
-      edgeW, edgeCol, Math.min(1, fillA + 0.45)
+      edgeW, edgeCol, edgeA, true
+    );
+    drawThickSegment(
+      xy[e[0] * 2], xy[e[0] * 2 + 1],
+      xy[e[1] * 2], xy[e[1] * 2 + 1],
+      edgeW + 2, edgeCol, edgeA * 0.4, true
     );
   }
 }
