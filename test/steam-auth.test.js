@@ -1,11 +1,24 @@
 'use strict';
 
-const { describe, it } = require('node:test');
+const { describe, it, before } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+process.env.ACCOUNTS_DB_PATH = path.join(
+  os.tmpdir(),
+  `asteroids-steam-accounts-test-${process.pid}-${Date.now()}.db`
+);
+
 const accounts = require('../accounts-db');
 const steamAuth = require('../steam-auth');
 
 describe('steam account helpers', () => {
+  before(async () => {
+    await accounts.ready;
+  });
+
   it('steamAccountKey formats SteamID64', () => {
     assert.equal(accounts.steamAccountKey('76561198012345678'), 'S76561198012345678');
     assert.equal(accounts.steamAccountKey('abc'), null);
@@ -60,4 +73,12 @@ describe('steam-auth module', () => {
     assert.equal(r.ok, false);
     assert.equal(r.err, 'ticket');
   });
+});
+
+process.on('exit', () => {
+  const p = process.env.ACCOUNTS_DB_PATH;
+  if (!p) return;
+  for (const f of [p, p + '-wal', p + '-shm']) {
+    try { fs.unlinkSync(f); } catch (_) {}
+  }
 });

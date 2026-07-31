@@ -8580,7 +8580,13 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Dedicated server listening on http://${HOST}:${PORT}`);
-  console.log(`Matchmaking: ${PLAYERS_PER_MATCH} players per match`);
+accountsDb.ready.then(() => {
+  server.listen(PORT, HOST, () => {
+    console.log(`Dedicated server listening on http://${HOST}:${PORT}`);
+    console.log(`Matchmaking: ${PLAYERS_PER_MATCH} players per match`);
+    console.log(`Accounts DB: ${accountsDb.DB_PATH}`);
+  });
+}).catch((err) => {
+  console.error('Failed to open accounts database:', err && err.message ? err.message : err);
+  process.exit(1);
 });

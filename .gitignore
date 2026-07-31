@@ -1,6 +1,10 @@
 node_modules/
 demos/
 *.json.gz
+accounts.db
+accounts.db-wal
+accounts.db-shm
+accounts.json.bak
 desktop/bin/
 desktop/.tmp/
 desktop/dist/

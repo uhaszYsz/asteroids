@@ -1,16 +1,40 @@
 'use strict';
 
+/**
+ * Accounts store — SQLite (same approach as pro/server/database.js).
+ * Hot path stays sync via an in-memory cache; SQLite is the durable source of truth.
+ */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const sqlite3 = require('sqlite3');
 
-const FILE = path.join(__dirname, 'accounts.json');
+const DB_PATH = process.env.ACCOUNTS_DB_PATH
+  ? path.resolve(process.env.ACCOUNTS_DB_PATH)
+  : path.join(__dirname, 'accounts.db');
+const JSON_LEGACY = path.join(__dirname, 'accounts.json');
 
 const DEFAULT_PLAYER_COLOR = '#59D9FF';
 const DEFAULT_SHOOT_COLOR = '#59F2FF';
 
 /** @type {{ users: Record<string, object> }} */
 let data = { users: {} };
+
+/** @type {import('sqlite3').Database | null} */
+let db = null;
+let readyDone = false;
+
+/** @type {{ resolve: Function, reject: Function }} */
+let readyResolve;
+const ready = new Promise((resolve, reject) => {
+  readyResolve = { resolve, reject };
+});
+
+function ensureReady() {
+  if (!readyDone) {
+    throw new Error('accounts-db not ready; await accounts.ready first');
+  }
+}
 
 /** Accept #RGB / #RRGGBB → normalized #RRGGBB uppercase, or null. */
 function normalizeColor(raw) {
@@ -44,11 +68,226 @@ function steamAccountKey(steamId) {
   return 'S' + id;
 }
 
+function hashPin(pin, salt) {
+  return crypto.scryptSync(String(pin), String(salt), 32).toString('hex');
+}
+
+/** PIN must be exactly 4 digits. */
+function normalizePin(pin) {
+  const s = String(pin == null ? '' : pin).replace(/\D/g, '').slice(0, 4);
+  return s.length === 4 ? s : null;
+}
+
+function rowToUser(row) {
+  if (!row) return null;
+  let friends = [];
+  try {
+    friends = JSON.parse(row.friends || '[]');
+  } catch (_) {
+    friends = [];
+  }
+  if (!Array.isArray(friends)) friends = [];
+  return migrateUser({
+    pinHash: row.pin_hash || undefined,
+    salt: row.salt || undefined,
+    steamId: row.steam_id || undefined,
+    displayName: row.display_name || undefined,
+    matchesWon: row.matches_won | 0,
+    bestWaves: row.best_waves | 0,
+    bestWavesDuo: row.best_waves_duo | 0,
+    friends,
+    playerColor: row.player_color,
+    shootColor: row.shoot_color,
+    createdAt: row.created_at || undefined,
+    lastSteamLoginAt: row.last_steam_login_at || undefined
+  });
+}
+
+function userToParams(username, u) {
+  migrateUser(u);
+  return [
+    username,
+    u.pinHash || null,
+    u.salt || null,
+    u.steamId || null,
+    u.displayName || null,
+    u.matchesWon | 0,
+    u.bestWaves | 0,
+    u.bestWavesDuo | 0,
+    JSON.stringify(u.friends || []),
+    u.playerColor || DEFAULT_PLAYER_COLOR,
+    u.shootColor || DEFAULT_SHOOT_COLOR,
+    u.createdAt || null,
+    u.lastSteamLoginAt || null
+  ];
+}
+
+const UPSERT_SQL = `
+INSERT INTO users (
+  username, pin_hash, salt, steam_id, display_name,
+  matches_won, best_waves, best_waves_duo, friends,
+  player_color, shoot_color, created_at, last_steam_login_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(username) DO UPDATE SET
+  pin_hash = excluded.pin_hash,
+  salt = excluded.salt,
+  steam_id = excluded.steam_id,
+  display_name = excluded.display_name,
+  matches_won = excluded.matches_won,
+  best_waves = excluded.best_waves,
+  best_waves_duo = excluded.best_waves_duo,
+  friends = excluded.friends,
+  player_color = excluded.player_color,
+  shoot_color = excluded.shoot_color,
+  created_at = excluded.created_at,
+  last_steam_login_at = excluded.last_steam_login_at
+`;
+
+function runAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(err) {
+      if (err) reject(err);
+      else resolve(this);
+    });
+  });
+}
+
+function allAsync(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows || []);
+    });
+  });
+}
+
+function persistUser(username, u) {
+  if (!db) return;
+  const params = userToParams(username, u);
+  db.run(UPSERT_SQL, params, (err) => {
+    if (err) console.error('accounts upsert failed:', err.message || err);
+  });
+}
+
+function deleteUserRow(username) {
+  if (!db) return;
+  db.run('DELETE FROM users WHERE username = ?', [username], (err) => {
+    if (err) console.error('accounts delete failed:', err.message || err);
+  });
+}
+
+function persistMany(usernames) {
+  if (!db) return;
+  db.serialize(() => {
+    db.run('BEGIN');
+    for (const name of usernames) {
+      const u = data.users[name];
+      if (!u) continue;
+      db.run(UPSERT_SQL, userToParams(name, u));
+    }
+    db.run('COMMIT', (err) => {
+      if (err) console.error('accounts commit failed:', err.message || err);
+    });
+  });
+}
+
+function loadLegacyJson() {
+  try {
+    if (!fs.existsSync(JSON_LEGACY)) return null;
+    const parsed = JSON.parse(fs.readFileSync(JSON_LEGACY, 'utf8'));
+    if (!parsed || typeof parsed !== 'object') return null;
+    const users = parsed.users && typeof parsed.users === 'object' ? parsed.users : {};
+    for (const k of Object.keys(users)) users[k] = migrateUser(users[k]);
+    return users;
+  } catch (err) {
+    console.error('accounts.json migrate read failed:', err.message || err);
+    return null;
+  }
+}
+
+async function migrateJsonIfNeeded(rowCount) {
+  if (rowCount > 0) return;
+  // Never touch accounts.json when tests/override point at another DB file.
+  if (process.env.ACCOUNTS_DB_PATH) return;
+  const users = loadLegacyJson();
+  if (!users || !Object.keys(users).length) return;
+  console.log(`Migrating ${Object.keys(users).length} accounts from accounts.json → SQLite…`);
+  await runAsync('BEGIN');
+  try {
+    for (const [username, u] of Object.entries(users)) {
+      await runAsync(UPSERT_SQL, userToParams(username, migrateUser(u)));
+    }
+    await runAsync('COMMIT');
+    try {
+      const bak = JSON_LEGACY + '.bak';
+      if (!fs.existsSync(bak)) fs.renameSync(JSON_LEGACY, bak);
+      else fs.renameSync(JSON_LEGACY, JSON_LEGACY + '.' + Date.now() + '.bak');
+      console.log('accounts.json archived after SQLite migrate');
+    } catch (err) {
+      console.warn('Could not rename accounts.json after migrate:', err.message || err);
+    }
+  } catch (err) {
+    try { await runAsync('ROLLBACK'); } catch (_) {}
+    throw err;
+  }
+}
+
+async function init() {
+  await new Promise((resolve, reject) => {
+    db = new sqlite3.Database(DB_PATH, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+
+  await runAsync('PRAGMA foreign_keys = ON');
+  await runAsync('PRAGMA journal_mode = WAL');
+
+  await runAsync(`
+    CREATE TABLE IF NOT EXISTS users (
+      username TEXT PRIMARY KEY NOT NULL,
+      pin_hash TEXT,
+      salt TEXT,
+      steam_id TEXT,
+      display_name TEXT,
+      matches_won INTEGER NOT NULL DEFAULT 0,
+      best_waves INTEGER NOT NULL DEFAULT 0,
+      best_waves_duo INTEGER NOT NULL DEFAULT 0,
+      friends TEXT NOT NULL DEFAULT '[]',
+      player_color TEXT NOT NULL DEFAULT '#59D9FF',
+      shoot_color TEXT NOT NULL DEFAULT '#59F2FF',
+      created_at INTEGER,
+      last_steam_login_at INTEGER
+    )
+  `);
+
+  const countRows = await allAsync('SELECT COUNT(*) AS n FROM users');
+  const n = (countRows[0] && countRows[0].n) | 0;
+  await migrateJsonIfNeeded(n);
+
+  const rows = await allAsync('SELECT * FROM users');
+  const users = {};
+  for (const row of rows) {
+    users[row.username] = rowToUser(row);
+  }
+  data = { users };
+  readyDone = true;
+  console.log(`Accounts SQLite ready (${Object.keys(users).length} users) → ${DB_PATH}`);
+}
+
+init()
+  .then(() => readyResolve.resolve())
+  .catch((err) => {
+    console.error('accounts DB init failed:', err.message || err);
+    readyResolve.reject(err);
+  });
+
 /**
  * Create or load a Steam-backed account (no PIN).
  * @returns {{ ok: 1, key: string, user: object, created: boolean } | { ok: 0, err: string }}
  */
 function upsertSteamUser(steamId, personaName) {
+  ensureReady();
   const key = steamAccountKey(steamId);
   if (!key) return { ok: 0, err: 'steamid' };
   const existing = data.users[key];
@@ -59,7 +298,7 @@ function upsertSteamUser(steamId, personaName) {
       if (dn) existing.displayName = dn;
     }
     existing.lastSteamLoginAt = Date.now();
-    save();
+    persistUser(key, existing);
     return { ok: 1, key, user: existing, created: false };
   }
   const dn = String(personaName || '').trim().slice(0, 32) || key;
@@ -75,50 +314,18 @@ function upsertSteamUser(steamId, personaName) {
     createdAt: Date.now(),
     lastSteamLoginAt: Date.now()
   };
-  save();
+  persistUser(key, data.users[key]);
   return { ok: 1, key, user: data.users[key], created: true };
 }
 
-function load() {
-  try {
-    if (!fs.existsSync(FILE)) return;
-    const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    if (!parsed || typeof parsed !== 'object') return;
-    const users = parsed.users && typeof parsed.users === 'object' ? parsed.users : {};
-    for (const k of Object.keys(users)) users[k] = migrateUser(users[k]);
-    data = { users };
-  } catch (err) {
-    console.error('accounts load failed:', err.message || err);
-    data = { users: {} };
-  }
-}
-
-function save() {
-  try {
-    const tmp = FILE + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2));
-    fs.renameSync(tmp, FILE);
-  } catch (err) {
-    console.error('accounts save failed:', err.message || err);
-  }
-}
-
-function hashPin(pin, salt) {
-  return crypto.scryptSync(String(pin), String(salt), 32).toString('hex');
-}
-
-/** PIN must be exactly 4 digits. */
-function normalizePin(pin) {
-  const s = String(pin == null ? '' : pin).replace(/\D/g, '').slice(0, 4);
-  return s.length === 4 ? s : null;
-}
-
 function getUser(username) {
+  ensureReady();
   if (!username) return null;
   return data.users[username] || null;
 }
 
 function createUser(username, pin) {
+  ensureReady();
   if (!username) return { ok: 0, err: 'name' };
   if (data.users[username]) return { ok: 0, err: 'taken' };
   const clean = normalizePin(pin);
@@ -135,11 +342,12 @@ function createUser(username, pin) {
     shootColor: DEFAULT_SHOOT_COLOR,
     createdAt: Date.now()
   };
-  save();
+  persistUser(username, data.users[username]);
   return { ok: 1, user: data.users[username] };
 }
 
 function verifyUser(username, pin) {
+  ensureReady();
   const u = data.users[username];
   if (!u) return { ok: 0, err: 'missing' };
   const clean = normalizePin(pin);
@@ -150,39 +358,43 @@ function verifyUser(username, pin) {
 }
 
 function addWin(username) {
+  ensureReady();
   const u = data.users[username];
   if (!u) return 0;
   migrateUser(u);
   u.matchesWon = (u.matchesWon | 0) + 1;
-  save();
+  persistUser(username, u);
   return u.matchesWon | 0;
 }
 
 function setBestWaves(username, wave) {
+  ensureReady();
   const u = data.users[username];
   if (!u) return 0;
   migrateUser(u);
   const w = Math.max(0, wave | 0);
   if (w > (u.bestWaves | 0)) {
     u.bestWaves = w;
-    save();
+    persistUser(username, u);
   }
   return u.bestWaves | 0;
 }
 
 function setBestWavesDuo(username, wave) {
+  ensureReady();
   const u = data.users[username];
   if (!u) return 0;
   migrateUser(u);
   const w = Math.max(0, wave | 0);
   if (w > (u.bestWavesDuo | 0)) {
     u.bestWavesDuo = w;
-    save();
+    persistUser(username, u);
   }
   return u.bestWavesDuo | 0;
 }
 
 function setColors(username, playerColor, shootColor) {
+  ensureReady();
   const u = data.users[username];
   if (!u) return { ok: 0, err: 'missing' };
   migrateUser(u);
@@ -191,35 +403,44 @@ function setColors(username, playerColor, shootColor) {
   if (!pc || !sc) return { ok: 0, err: 'color' };
   u.playerColor = pc;
   u.shootColor = sc;
-  save();
+  persistUser(username, u);
   return { ok: 1, playerColor: pc, shootColor: sc };
 }
 
 function renameUser(oldName, newName) {
+  ensureReady();
   if (!oldName || !newName || oldName === newName) return { ok: 1 };
   if (!data.users[oldName]) return { ok: 0, err: 'missing' };
   const u = migrateUser(data.users[oldName]);
   // Steam accounts keep a fixed key; only the display name changes.
   if (u.steamId) {
     u.displayName = String(newName).trim().slice(0, 32) || u.displayName;
-    save();
+    persistUser(oldName, u);
     return { ok: 1, user: u, displayOnly: true };
   }
   if (data.users[newName]) return { ok: 0, err: 'taken' };
   data.users[newName] = u;
   delete data.users[oldName];
+  const touched = [newName];
   for (const k of Object.keys(data.users)) {
     const ou = data.users[k];
     if (!Array.isArray(ou.friends)) continue;
+    let changed = false;
     for (let i = 0; i < ou.friends.length; i++) {
-      if (ou.friends[i] === oldName) ou.friends[i] = newName;
+      if (ou.friends[i] === oldName) {
+        ou.friends[i] = newName;
+        changed = true;
+      }
     }
+    if (changed) touched.push(k);
   }
-  save();
+  deleteUserRow(oldName);
+  persistMany(touched);
   return { ok: 1, user: data.users[newName] };
 }
 
 function listFriends(username) {
+  ensureReady();
   const u = getUser(username);
   if (!u) return [];
   migrateUser(u);
@@ -228,6 +449,7 @@ function listFriends(username) {
 
 /** Mutual friend add (both registered). */
 function addFriend(username, friendName) {
+  ensureReady();
   if (!username || !friendName || username === friendName) return { ok: 0, err: 'name' };
   const u = data.users[username];
   const f = data.users[friendName];
@@ -236,27 +458,31 @@ function addFriend(username, friendName) {
   migrateUser(f);
   if (!u.friends.includes(friendName)) u.friends.push(friendName);
   if (!f.friends.includes(username)) f.friends.push(username);
-  save();
+  persistMany([username, friendName]);
   return { ok: 1, friends: u.friends.slice() };
 }
 
 function removeFriend(username, friendName) {
+  ensureReady();
   if (!username || !friendName) return { ok: 0, err: 'name' };
   const u = data.users[username];
   if (!u) return { ok: 0, err: 'missing' };
   migrateUser(u);
   u.friends = (u.friends || []).filter((n) => n !== friendName);
+  const touched = [username];
   const f = data.users[friendName];
   if (f) {
     migrateUser(f);
     f.friends = (f.friends || []).filter((n) => n !== username);
+    touched.push(friendName);
   }
-  save();
+  persistMany(touched);
   return { ok: 1, friends: u.friends.slice() };
 }
 
 /** Public leaderboard rows (no secrets). */
 function listLeaderboard() {
+  ensureReady();
   const rows = [];
   for (const name of Object.keys(data.users)) {
     const u = migrateUser(data.users[name]);
@@ -272,9 +498,9 @@ function listLeaderboard() {
   return rows;
 }
 
-load();
-
 module.exports = {
+  ready,
+  DB_PATH,
   normalizePin,
   normalizeColor,
   DEFAULT_PLAYER_COLOR,

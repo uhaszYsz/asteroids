@@ -67,14 +67,20 @@ async function waitForHealth(port, timeoutMs = 15000) {
  */
 async function startServer() {
   const port = await freePort();
+  const accountsDbPath = path.join(
+    require('os').tmpdir(),
+    `asteroids-smoke-accounts-${process.pid}-${port}.db`
+  );
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
     cwd: ROOT,
     env: Object.assign({}, process.env, {
       PORT: String(port),
-      HOST: '127.0.0.1'
+      HOST: '127.0.0.1',
+      ACCOUNTS_DB_PATH: accountsDbPath
     }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
+  child._accountsDbPath = accountsDbPath;
 
   let stderr = '';
   child.stderr.on('data', (chunk) => {
@@ -114,6 +120,13 @@ async function startServer() {
       });
       // Ignore exit code; SIGTERM/kill on Windows is noisy.
       void exitCode;
+      const p = child._accountsDbPath;
+      if (p) {
+        const fs = require('fs');
+        for (const f of [p, p + '-wal', p + '-shm']) {
+          try { fs.unlinkSync(f); } catch (_) {}
+        }
+      }
     }
   };
 }
