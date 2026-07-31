@@ -358,7 +358,9 @@ wss.on('connection', (ws) => {
 
     if (msg.t === 'soloRestart') {
       if (ws.state === 'playing') return;
-      const mode = ws.queueMode || 'pvp';
+      // Do NOT default null queueMode to 'pvp' — that breaks dedicated solo restart
+      // after soloOver (queueMode is cleared to null).
+      const mode = ws.queueMode;
       if (mode === 'coop') {
         // Wait-waves run on the client local host; server only keeps the queue seat.
         if (!coopQueue.includes(ws)) coopQueue.push(ws);

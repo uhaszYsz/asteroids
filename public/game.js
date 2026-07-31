@@ -12466,7 +12466,11 @@ function showSoloOverScreen(wave, score) {
     waitBannerEl.classList.remove('hidden');
     waitBannerEl.style.top = '';
     waitBannerEl.style.bottom = '';
-    waitBannerEl.textContent = 'Still matchmaking…';
+    waitBannerEl.textContent = waitingOnlineQueue
+      ? (onlineQueueNeed
+        ? ('Still matchmaking… (' + (onlineQueueWaiting | 0) + '/' + (onlineQueueNeed | 0) + ')')
+        : 'Still matchmaking…')
+      : 'Game over';
   }
 }
 
@@ -18597,8 +18601,8 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'welcome') {
-      // Real PvP (waitingReady) / coop (coop:1). Local wait-waves also send welcome.
-      if (waitingOnlineQueue && (msg.waitingReady || msg.coop)) {
+      // Real online PvP/coop only — never promote local wait-wave practice welcomes.
+      if (waitingOnlineQueue && !msg.practice && (msg.waitingReady || msg.coop)) {
         promoteOnlineMatchFromWait(msg);
         return;
       }
@@ -19421,7 +19425,12 @@ if (soloRestartBtn) {
     if (!connected || !ws || ws.readyState !== 1) return;
     if (!soloOverOpen) return;
     hideSoloOverScreen();
-    // Wait-waves restart on local host; online queue stays on remote.
+    // Wait-waves / dedicated solo both restart on the active local host socket.
+    // Online queue seat (if any) stays on remoteWs via server soloRestart / queued.
+    if (waitingOnlineQueue && ws.__local) {
+      ws.send(JSON.stringify({ t: 'soloRestart' }));
+      return;
+    }
     ws.send(JSON.stringify({ t: 'soloRestart' }));
   });
 }
