@@ -15277,9 +15277,10 @@ function bulletAt(b) {
 /**
  * Common / spinner / worm shot: soft circle (glow + white core).
  * scale: 1 = common (L15). Spinner = 20/15. Worm pellets pass their own scale.
+ * Visual only — collision sizes stay on BULLET_TYPES / per-bullet L×W.
  */
 function drawEnemyCommonShot(x, y, ang, scale) {
-  const s = scale > 0 ? scale : 1;
+  const s = (scale > 0 ? scale : 1) * 1.3;
   const red = COL.enemyBullet || [1.0, 0.18, 0.12];
   const glowR = 4.2 * RES_SCALE * s;
   const coreR = 2.4 * RES_SCALE * s;
