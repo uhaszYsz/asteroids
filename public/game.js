@@ -14998,14 +14998,16 @@ function bulletAt(b) {
 /**
  * Common shot: 2D twin ovals sized like the UFO rocket mesh (ENEMY_ROCKET3D ≈ ship×0.7/3).
  * Soft falloff shrinks the bright core, so half-sizes are padded to match that footprint.
+ * scale: 1 = common, 2 = spinner (2×).
  */
-function drawEnemyCommonShot(x, y, ang) {
+function drawEnemyCommonShot(x, y, ang, scale) {
+  const s = scale > 0 ? scale : 1;
   const red = COL.enemyBullet || [1.0, 0.18, 0.12];
   // UFO rocket spans ~5×8 px at RES_SCALE=2 — glow a bit larger, white core ≈ body.
-  const glowW = 4.2 * RES_SCALE;
-  const glowL = 6.0 * RES_SCALE;
-  const coreW = 2.4 * RES_SCALE;
-  const coreL = 4.8 * RES_SCALE;
+  const glowW = 4.2 * RES_SCALE * s;
+  const glowL = 6.0 * RES_SCALE * s;
+  const coreW = 2.4 * RES_SCALE * s;
+  const coreL = 4.8 * RES_SCALE * s;
   drawSoftOval(x, y, ang, glowW, glowL, red, 0.7, true);
   drawSoftOval(x, y, ang, coreW, coreL, COL_WHITE, 1, false);
 }
@@ -15078,8 +15080,8 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
     emitVoidVortex(x, y, vx, vy);
     return null;
   }
-  if (type === 'enemy') {
-    drawEnemyCommonShot(x, y, ang);
+  if (type === 'enemy' || type === 'enemySpinner') {
+    drawEnemyCommonShot(x, y, ang, type === 'enemySpinner' ? 2 : 1);
     return null;
   }
   if ((type === 'default' || !type || type === 'shotgun') && defaultTrail) {
@@ -15204,7 +15206,7 @@ function addBullet(b, withMuzzle, liveFire) {
   if (b.type === 'rocket' || b.type === 'enemyRocket') startRocketTravelSfx(b);
   if (b.type === 'voidcannon') startVoidTravelSfx(b);
   if (withMuzzle) {
-    if (b.owner != null && b.type !== 'enemy' && b.type !== 'enemyRocket' && b.type !== 'turret') {
+    if (b.owner != null && b.type !== 'enemy' && b.type !== 'enemySpinner' && b.type !== 'enemyRocket' && b.type !== 'turret') {
       pulseSpriteShipAttack(b.owner);
     }
     const ang = Math.atan2(b.vy, b.vx);
@@ -15233,8 +15235,8 @@ function addBullet(b, withMuzzle, liveFire) {
     } else if (b.type === 'turret') {
       emitMuzzleFx(origin.x, origin.y, ang, COL.powerTurret, 7, sv.vx, sv.vy);
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.35, pool: 8 });
-    } else if (b.type === 'enemy') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, 7, sv.vx, sv.vy);
+    } else if (b.type === 'enemy' || b.type === 'enemySpinner') {
+      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, b.type === 'enemySpinner' ? 12 : 7, sv.vx, sv.vy);
     }
   }
 }

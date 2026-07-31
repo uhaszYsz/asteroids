@@ -1243,9 +1243,10 @@ function updateCarrierWeapon(room, e, target) {
   }
 }
 
-function fireEnemyLineBullet(room, e, ang, spd, dmg) {
+function fireEnemyLineBullet(room, e, ang, spd, dmg, typeName) {
   const speed = spd != null ? spd : ENEMY_BULLET_SPEED;
-  const damage = dmg != null ? dmg : BULLET_TYPES.enemy.dmg;
+  const type = typeName || 'enemy';
+  const damage = dmg != null ? dmg : ((BULLET_TYPES[type] && BULLET_TYPES[type].dmg) || BULLET_TYPES.enemy.dmg);
   const x = e.x + Math.cos(ang) * (e.r + 4);
   const y = e.y + Math.sin(ang) * (e.r + 4);
   const now = Date.now();
@@ -1253,7 +1254,7 @@ function fireEnemyLineBullet(room, e, ang, spd, dmg) {
     id: room.nextBulletId++,
     owner: 0,
     enemyOwner: e.id,
-    type: 'enemy',
+    type,
     dmg: damage,
     x, y,
     spawnX: x,
@@ -1306,7 +1307,7 @@ function updateSpinnerWeapon(room, e) {
   for (let i = 0; i < 4; i++) {
     fireEnemyLineBullet(
       room, e, base + i * step,
-      ENEMY_SPINNER.speed, ENEMY_SPINNER.dmg
+      ENEMY_SPINNER.speed, ENEMY_SPINNER.dmg, 'enemySpinner'
     );
   }
   e.spinAng = base + (ENEMY_SPINNER.spin * Math.PI) / 180;
@@ -5258,7 +5259,7 @@ function updateTurrets(room) {
 function steerHomingBullet(room, b) {
   if (!b) return;
   if (!HOMING_BULLET_TYPES.has(b.type || 'default')) return;
-  if (b.type === 'enemy' || b.type === 'enemyRocket') return;
+  if (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyRocket') return;
   // Per-rocket homing (degrees/tick) is handled in applyRocketFlight.
   if ((+b.homing || 0) > 0) return;
   const owner = room.players.get(b.owner);
@@ -5452,7 +5453,7 @@ function updateBullets(room) {
       if (p.bot && !room.perfTest) continue;
       if (blocksFriendlyFire(room, b.owner)) continue;
       // Enemy bullets: no lag-comp rewind from fake owner.
-      const target = (b.type === 'enemy' || b.type === 'enemyRocket')
+      const target = (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyRocket')
         ? p
         : lagCompPose(room, b.owner, p);
       if (hitBulletPlayer(b, target)) {
@@ -5494,7 +5495,7 @@ function updateBullets(room) {
     }
 
     // Player projectiles can destroy solo enemies.
-    if (room.practice && room.enemies && b.type !== 'enemy' && b.type !== 'enemyRocket' && b.owner > 0) {
+    if (room.practice && room.enemies && b.type !== 'enemy' && b.type !== 'enemySpinner' && b.type !== 'enemyRocket' && b.owner > 0) {
       let hitEnemy = false;
       for (let ei = room.enemies.length - 1; ei >= 0; ei--) {
         const e = room.enemies[ei];

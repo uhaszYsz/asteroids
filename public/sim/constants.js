@@ -104,6 +104,8 @@ const BULLET_TYPES = {
   turret: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   /** Solo enemy line shot — skips asteroids. */
   enemy: { dmg: 18, col: 'line', length: 15, width: 3, skipAsteroids: true },
+  /** Spinner radial burst — 2× common line shot. */
+  enemySpinner: { dmg: 18, col: 'line', length: 30, width: 6, skipAsteroids: true },
   /** UFO micro-rocket — 1px hit radius, skips asteroids. */
   enemyRocket: { dmg: 18, col: 'circle', size: 1, scaleY: 1, length: 0, width: 0, skipAsteroids: true }
 };
@@ -398,9 +400,9 @@ const ENEMY_HP = {
 /** Spinner: 4-way radial burst; shoot angle advances `spin` degrees after each volley. */
 const ENEMY_SPINNER = {
   ammo: 50,
-  cooldown: 6,
+  cooldown: 10,
   reload: Math.round(5 * TPS),
-  spin: 20,
+  spin: 32,
   speed: ENEMY_COMMON_BULLET_SPEED,
   dmg: ENEMY_COMMON_BULLET_DMG
 };
