@@ -399,10 +399,10 @@ const ENEMY_HP = {
 };
 /** Spinner: 4-way radial burst; shoot angle advances `spin` degrees after each volley. */
 const ENEMY_SPINNER = {
-  ammo: 50,
+  ammo: 25,
   cooldown: 10,
   reload: Math.round(5 * TPS),
-  spin: 32,
+  spin: 23,
   speed: ENEMY_COMMON_BULLET_SPEED,
   dmg: ENEMY_COMMON_BULLET_DMG
 };
