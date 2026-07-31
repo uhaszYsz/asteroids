@@ -5696,15 +5696,16 @@ function syncSoloWaitBanner() {
   waitBannerEl.style.top = '5px';
   waitBannerEl.style.bottom = 'auto';
   const w = soloWave > 0 ? soloWave : 1;
-  if (coopMode) {
+  if (waitingOnlineQueue) {
+    const n = onlineQueueWaiting | 0;
+    const need = Math.max(1, onlineQueueNeed | 0);
+    const kind = waitingOnlineQueue === 'coop' ? 'Coop' : 'Solo';
+    waitBannerEl.textContent = kind + ' waves · Wave ' + w + ' · Lives ' + soloLives
+      + ' · matchmaking ' + n + '/' + need;
+  } else if (coopMode) {
     waitBannerEl.textContent = 'Coop waves · Wave ' + w + ' · Lives ' + soloLives;
   } else if (soloOnlyMode) {
     waitBannerEl.textContent = 'Singleplayer · Wave ' + w + ' · Lives ' + soloLives;
-  } else if (waitingOnlineQueue) {
-    const n = onlineQueueWaiting | 0;
-    const need = Math.max(1, onlineQueueNeed | 0);
-    waitBannerEl.textContent = 'Solo waves · Wave ' + w + ' · Lives ' + soloLives
-      + ' · matchmaking ' + n + '/' + need;
   } else {
     waitBannerEl.textContent = 'Solo waves · Wave ' + w + ' · Lives ' + soloLives + ' · matchmaking…';
   }
@@ -13245,11 +13246,10 @@ function startPlayMode(mode) {
   onlineQueueWaiting = 0;
   onlineQueueNeed = 2;
   onlineSock.send(JSON.stringify({ t: 'queue', mode, name }));
+  // Hide menu now — do not leave Cancel sitting on the Play screen.
+  showQueue();
 
-  if (!localSoloAvailable()) {
-    showQueue();
-    return;
-  }
+  if (!localSoloAvailable()) return;
 
   ensureLocalSoloSocket().then(() => {
     if (!waitingOnlineQueue) {
@@ -13261,11 +13261,13 @@ function startPlayMode(mode) {
     // Wait-waves run on local host — apply saved appearance before welcome.
     syncAppearanceToSocket(ws);
     ws.send(JSON.stringify({ t: 'queue', mode: 'wait', waitFor: mode, name }));
-    showQueue();
   }).catch((err) => {
     console.error(err);
     // Still queued online — just no local wait-waves.
-    showQueue();
+    if (waitBannerEl && waitingOnlineQueue) {
+      waitBannerEl.classList.remove('hidden');
+      waitBannerEl.textContent = 'Matchmaking… (offline wait waves unavailable)';
+    }
   });
 }
 
@@ -14635,11 +14637,19 @@ function showMenu() {
 }
 
 function showQueue() {
-  // Offline solo welcome is immediate — don't flash Play/Settings under the canvas.
-  if (usingLocalSolo || (ws && ws.__local)) {
+  // Hide Play menu while matchmaking and/or local wait-waves boot.
+  if (usingLocalSolo || (ws && ws.__local) || waitingOnlineQueue) {
     if (menuEl) menuEl.classList.add('hidden');
     if (playBtn) playBtn.disabled = true;
     if (cancelBtn) cancelBtn.classList.add('visible');
+    if (waitBannerEl && waitingOnlineQueue && !practiceMode) {
+      waitBannerEl.classList.remove('hidden');
+      waitBannerEl.style.top = '';
+      waitBannerEl.style.bottom = '';
+      waitBannerEl.textContent = waitingOnlineQueue === 'coop'
+        ? 'Starting wait waves… (coop matchmaking)'
+        : 'Starting wait waves… (matchmaking)';
+    }
     return;
   }
   if (menuEl) menuEl.classList.remove('hidden');
@@ -18617,7 +18627,7 @@ function enterGameFromWelcome(msg) {
   enemyBankSmooth.clear();
   enemyDrawBank.clear();
   resumeBlendUntil = 0;
-  coopMode = !!(msg.coop || msg.mode === 'coop');
+  coopMode = !!msg.coop;
   soloOnlyMode = !!(msg.soloOnly || msg.mode === 'solo' || msg.mode === 'continue');
   setPracticeWaiting(!!msg.practice);
   refreshGridStaticPins();

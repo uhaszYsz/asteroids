@@ -1119,7 +1119,10 @@ function startPractice(ws, queueKind, opts) {
     waveCounts: soloWaveCounts(room.wave),
     lives: p.lives,
     soloOnly: room.soloOnly ? 1 : 0,
-    mode: room.soloOnly ? 'solo' : (queueKind || 'solo'),
+    // Never send mode:'coop'/'pvp' here — that flags a real online room on the client.
+    // Wait-waves are solo practice while matchmaking; real coop sets coop:1 in startCoop.
+    mode: room.soloOnly ? 'solo' : (queueKind ? 'wait' : 'solo'),
+    waitFor: queueKind || null,
     coins: p.coins | 0,
     score: p.coinsCollected | 0,
     levels: p.weaponLevels,
