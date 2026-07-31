@@ -84,7 +84,7 @@ const PLAYER_SHOT_HIT_BASE = 30;
 const PLAYER_SHOT_HIT_SPEED_BONUS = 30;
 /** Meteor Gun rock vs solo enemies — flat damage, no stun / no knockback. */
 const PLAYER_SHOT_ENEMY_DMG = 100;
-/** Hitting an enemy rocket nudges its heading away from the shooter. */
+/** Hitting a player rocket damages hull and randomizes its heading if it survives. */
 const ROCKET_DEFLECT_RAD = 10 * Math.PI / 180;
 /** Player rocket explosion blast (world px). Falloff maxDmg → 0 by surface distance. */
 const ROCKET_BLAST_RADIUS = 32 * RES_SCALE;

@@ -4380,14 +4380,20 @@ function detonateRocket(room, b, hitKind, _applyDirectIgnored) {
   });
 }
 
-/** Apply hull damage to a rocket; removes it when HP hits 0 (blast only for player rockets). */
+/** Apply hull damage to a rocket; removes it when HP hits 0 (blast only for player rockets).
+ *  Surviving player rockets also get a random new heading. */
 function damageRocket(room, rocket, dmg) {
   if (!isHittableRocket(rocket)) return false;
   if (!(dmg > 0)) return false;
   if (rocket.hp == null) rocket.hp = rocketDefaultHp(rocket);
   if ((rocket.hp | 0) <= 0) return true;
   rocket.hp -= dmg;
-  if (rocket.hp > 0) return false;
+  if (rocket.hp > 0) {
+    if (rocket.type === 'rocket' && (rocket.owner | 0) > 0) {
+      scramblePlayerRocketDirection(room, rocket);
+    }
+    return false;
+  }
   rocket.hp = 0;
   const idx = room.bullets.indexOf(rocket);
   if (idx >= 0) room.bullets.splice(idx, 1);
@@ -4397,6 +4403,24 @@ function damageRocket(room, rocket, dmg) {
     detonateRocket(room, rocket, 1);
   }
   return true;
+}
+
+/** Pick a random flight direction; keep speed (or a tiny floor if nearly stopped). */
+function scramblePlayerRocketDirection(room, rocket) {
+  if (!rocket || rocket.type !== 'rocket' || (rocket.owner | 0) <= 0) return;
+  let spd = Math.hypot(rocket.vx, rocket.vy);
+  if (!(spd > 1e-6)) {
+    spd = Math.max(0.5, ROCKET_LAUNCH_SPEED || 0.5);
+  }
+  const ang = Math.random() * Math.PI * 2;
+  rocket.vx = Math.cos(ang) * spd;
+  rocket.vy = Math.sin(ang) * spd;
+  rocket.flightAng = ang;
+  rocket.spawnX = rocket.x;
+  rocket.spawnY = rocket.y;
+  rocket.spawnSt = Date.now();
+  rocket.netLeft = ROCKET_NET_INTERVAL;
+  roomBroadcast(room, { t: 'bu', b: packBullet(rocket) });
 }
 
 /**
