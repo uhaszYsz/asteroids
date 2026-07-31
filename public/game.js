@@ -15281,6 +15281,8 @@ function bulletAt(b) {
 const ENEMY_SHOT_VIS_SCALE = 2;
 const ENEMY_SHOT_CORE_BASE = 2.4 * RES_SCALE;
 const ENEMY_SHOT_GLOW_BASE = 4.2 * RES_SCALE;
+/** Match softOval solid core (smoothstep starts at UV d=0.35). */
+const ENEMY_SHOT_HIT_FRAC = 0.35;
 
 function enemyShotTypeScale(type, length, width) {
   if (type === 'enemySpinner') return 20 / 15;
@@ -15293,7 +15295,8 @@ function enemyShotTypeScale(type, length, width) {
 }
 
 function enemyShotCoreRadius(type, length, width) {
-  return ENEMY_SHOT_CORE_BASE * enemyShotTypeScale(type, length, width) * ENEMY_SHOT_VIS_SCALE;
+  return ENEMY_SHOT_CORE_BASE * enemyShotTypeScale(type, length, width)
+    * ENEMY_SHOT_VIS_SCALE * ENEMY_SHOT_HIT_FRAC;
 }
 
 function drawEnemyCommonShot(x, y, ang, scale) {
