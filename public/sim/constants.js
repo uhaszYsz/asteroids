@@ -472,7 +472,7 @@ const ROCKET_LAUNCH_SPEED = 0;
 /** Player (and default) rocket hull HP — depleted by hitscans / bullets before detonate. */
 const ROCKET_HP_DEFAULT = 190;
 /** Player rocket accel (px/tick along flight axis). */
-const ROCKET_ACCEL_DEFAULT = 0.8;
+const ROCKET_ACCEL_DEFAULT = 0.6;
 /** Default rocket homing turn (degrees/tick). 0 = disabled. */
 const ROCKET_HOMING_DEFAULT = 0;
 /** How often accel/homing rockets resync pose to clients. */
