@@ -884,6 +884,11 @@ const SOFT_ERR_MAX_POS = 48 * RES_SCALE;
 const SOFT_ERR_MAX_ANG = 0.6;
 /** If visual/sim drift exceeds this after reconcile, hard teleport (no soft blend). */
 const LOCAL_DRIFT_SNAP_PX = 30;
+/** Ignore tiny reconcile deltas — kills micro softErr shutter from float/collision noise. */
+const LOCAL_RECON_DEADZONE_PX = 3.5;
+const LOCAL_RECON_DEADZONE_ANG = 0.025;
+/** After an RTT spike, skip pose reconcile briefly so the local ship keeps predicting smoothly. */
+const RTT_SPIKE_HOLD_MS = 180;
 /**
  * If local tick cursor falls this far behind (tab background), skip synthesizing
  * a flood of predict ticks and resync from the last server ghost with a soft blend.
@@ -13329,6 +13334,10 @@ let clockOffset = 0;
 let clockOffsetReady = false;
 let pingMs = 0;
 let pingJitter = 0;
+/** Raw last pong RTT (ms). */
+let lastRttMs = 0;
+/** performance.now() — while active, skip local pose reconcile (status/ack still apply). */
+let rttSpikeUntil = 0;
 let syncTick = 0;
 let syncSt = 0;
 /** Visual soft-correction residual after hard sim reconcile. */
@@ -13341,15 +13350,23 @@ function resetClockSync() {
   clockOffsetReady = false;
   pingMs = 0;
   pingJitter = 0;
+  lastRttMs = 0;
+  rttSpikeUntil = 0;
 }
 
 function applyNtp(ct, st, serverTick) {
   const t3 = Date.now();
   const rtt = Math.max(0, t3 - ct);
+  lastRttMs = rtt;
   // Ignore one-off delayed pongs for ping AND clock (tab timers, GC, spikes).
   const baseline = pingMs > 0 ? pingMs : 30;
   const saneRtt = rtt < baseline * 4 + 80;
   const offset = st - (ct + t3) * 0.5;
+
+  // Spike vs smoothed ping: hold local pose reconcile so the ship doesn't soft-correct.
+  if (pingMs > 0 && rtt > pingMs + 18 && rtt > pingMs * 1.25) {
+    rttSpikeUntil = Math.max(rttSpikeUntil, performance.now() + RTT_SPIKE_HOLD_MS);
+  }
 
   if (saneRtt) {
     const diff = pingMs ? Math.abs(rtt - pingMs) : 0;
@@ -17120,14 +17137,30 @@ function reconcileFromServer(row) {
   const ack = row[7] | 0;
   noteInputAck(ack);
 
-  const prevX = player.x + softErr.x;
-  const prevY = player.y + softErr.y;
-  const prevA = player.angle + softErr.angle;
-
   const srvAv = row[8] != null ? row[8] : 0;
   const srvStunned = !!(row[9] | 0);
   const srvGod = row[10] != null ? (row[10] | 0) : (player.godLeft || 0);
   const prevHp = player.hp | 0;
+  const blending = performance.now() < resumeBlendUntil;
+  const spike = !blending && performance.now() < rttSpikeUntil;
+
+  // Ping spike: keep local predicted pose (no softErr yank). Still take HP / stun / god.
+  if (spike) {
+    player.hp = row[6];
+    player.stunned = srvStunned;
+    player.godLeft = srvGod;
+    if (prevHp > 0 && (player.hp | 0) < prevHp && (player.hp | 0) > 0 && !deathSpectating) {
+      emitDamageTakenFx(player.x, player.y);
+    }
+    predReady = true;
+    if (clientTickCursor == null) clientTickCursor = Math.floor(estimatedServerTick());
+    return;
+  }
+
+  const prevX = player.x + softErr.x;
+  const prevY = player.y + softErr.y;
+  const prevA = player.angle + softErr.angle;
+
   const st = {
     x: row[1], y: row[2], vx: row[3], vy: row[4],
     angle: row[5], hp: row[6],
@@ -17164,9 +17197,13 @@ function reconcileFromServer(row) {
     softErr.y = shortestWrapDelta(player.y, prevY, H);
     softErr.angle = shortestAngleDelta(player.angle, prevA);
     const drift = Math.hypot(softErr.x, softErr.y);
-    const blending = performance.now() < resumeBlendUntil;
     const snapPx = blending ? RESUME_SOFT_ERR_MAX : LOCAL_DRIFT_SNAP_PX;
-    if (drift > snapPx) {
+    if (drift <= LOCAL_RECON_DEADZONE_PX && Math.abs(softErr.angle) <= LOCAL_RECON_DEADZONE_ANG) {
+      // Trust prediction — skip micro softErr (main shutter source at low ping).
+      softErr.x = 0;
+      softErr.y = 0;
+      softErr.angle = 0;
+    } else if (drift > snapPx) {
       softErr.x = 0;
       softErr.y = 0;
       softErr.angle = 0;
