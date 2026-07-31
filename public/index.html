@@ -2015,6 +2015,14 @@
           <span class="gp-check-sub">Hide everything except what the flashlight lights on the grid</span>
         </span>
       </label>
+      <div class="gp-sec-head" style="margin-top:10px">
+        <div class="gp-sec-title">Aim cone color</div>
+      </div>
+      <p class="gp-hint">Precision aim light tint — saved locally only (not on account).</p>
+      <div class="gp-color-row">
+        <input type="color" id="gp-aim-cone-color" value="#FFFFFF" />
+        <span class="gp-color-hex" id="gp-aim-cone-color-hex">#FFFFFF</span>
+      </div>
     </div>
   </div>
 </div>
@@ -2047,6 +2055,12 @@
       <option value="2">1680 × 960</option>
       <option value="3">2520 × 1440</option>
     </select>
+    <label class="sp-label" for="settings-aim-cone-color" style="margin-top:12px">Aim light cone</label>
+    <p class="sp-hint">Precision aim tint — local only, not saved to account.</p>
+    <div class="sp-color-row" style="display:flex;align-items:center;gap:10px;margin-top:6px">
+      <input id="settings-aim-cone-color" type="color" value="#FFFFFF" />
+      <span id="settings-aim-cone-color-hex" class="sp-hint" style="margin:0">#FFFFFF</span>
+    </div>
   </div>
 </div>
 <div id="account-panel" aria-hidden="true">
@@ -2228,6 +2242,6 @@
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=8"></script>
-<script src="game.js?v=704"></script>
+<script src="game.js?v=705"></script>
 </body>
 </html>

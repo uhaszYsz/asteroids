@@ -3663,8 +3663,13 @@ function bindSceneLightUniforms(u) {
 }
 const DYN_LIGHT_KEY = 'asteroids_dyn_light';
 const NIGHT_MODE_KEY = 'asteroids_night_mode';
+const AIM_CONE_COLOR_KEY = 'asteroids_aim_cone_color';
+/** Default matches prior hard-coded white cone tint. */
+const DEFAULT_AIM_CONE_COLOR_HEX = '#FFFFFF';
 let dynGridLightEnabled = true;
 let nightModeLightEnabled = false;
+let aimConeColorHex = DEFAULT_AIM_CONE_COLOR_HEX;
+let aimConeColorRgb = [1, 1, 1];
 try {
   const _dl = localStorage.getItem(DYN_LIGHT_KEY);
   if (_dl === '0') dynGridLightEnabled = false;
@@ -3672,7 +3677,36 @@ try {
   const _nm = localStorage.getItem(NIGHT_MODE_KEY);
   if (_nm === '1') nightModeLightEnabled = true;
   else if (_nm === '0') nightModeLightEnabled = false;
+  const _ac = normalizeColorHex(localStorage.getItem(AIM_CONE_COLOR_KEY));
+  if (_ac) {
+    const rgb = hexToRgb01(_ac);
+    if (rgb) {
+      aimConeColorHex = _ac;
+      aimConeColorRgb = rgb;
+    }
+  }
 } catch (_) { /* ignore */ }
+
+function setAimConeColor(hex) {
+  const clean = normalizeColorHex(hex) || DEFAULT_AIM_CONE_COLOR_HEX;
+  const rgb = hexToRgb01(clean) || [1, 1, 1];
+  aimConeColorHex = clean;
+  aimConeColorRgb = rgb;
+  try { localStorage.setItem(AIM_CONE_COLOR_KEY, clean); } catch (_) { /* ignore */ }
+  syncAimConeColorUi();
+}
+
+function syncAimConeColorUi() {
+  const hex = aimConeColorHex || DEFAULT_AIM_CONE_COLOR_HEX;
+  const gp = document.getElementById('gp-aim-cone-color');
+  const gpHex = document.getElementById('gp-aim-cone-color-hex');
+  const sp = document.getElementById('settings-aim-cone-color');
+  const spHex = document.getElementById('settings-aim-cone-color-hex');
+  if (gp) gp.value = hex.toLowerCase();
+  if (gpHex) gpHex.textContent = hex;
+  if (sp) sp.value = hex.toLowerCase();
+  if (spHex) spHex.textContent = hex;
+}
 
 function syncLightingUi() {
   if (settingsDynLightEl) settingsDynLightEl.checked = !!dynGridLightEnabled;
@@ -3680,6 +3714,7 @@ function syncLightingUi() {
   const gpNight = document.getElementById('gp-night-mode');
   if (gpDyn) gpDyn.checked = !!dynGridLightEnabled;
   if (gpNight) gpNight.checked = !!nightModeLightEnabled;
+  syncAimConeColorUi();
 }
 
 function setDynGridLightEnabled(on) {
@@ -3776,9 +3811,9 @@ function updateDynamicLightState() {
     _lightFlashAng = shootAng;
     _lightFlashLen = GRID_FLASH_MAX_LEN;
     _lightFlashHalf = _precisionConeHalf;
-    _lightFlashColR = 1;
-    _lightFlashColG = 1;
-    _lightFlashColB = 1;
+    _lightFlashColR = aimConeColorRgb[0];
+    _lightFlashColG = aimConeColorRgb[1];
+    _lightFlashColB = aimConeColorRgb[2];
     // Whole-cone alpha wiggle (~±12%).
     _lightFlashAmt = 0.88 + 0.12 * Math.sin(now * 0.0285);
     // Radar phase: bands travel cone length at current bullet speed (3 visible lights).
@@ -3788,9 +3823,9 @@ function updateDynamicLightState() {
     _precisionConeHalf = GRID_FLASH_HALF_START;
     _lightFlashX = _lightFlashY = _lightFlashAng = _lightFlashLen = 0;
     _lightFlashHalf = 0;
-    _lightFlashColR = 1;
-    _lightFlashColG = 1;
-    _lightFlashColB = 1;
+    _lightFlashColR = aimConeColorRgb[0];
+    _lightFlashColG = aimConeColorRgb[1];
+    _lightFlashColB = aimConeColorRgb[2];
     _lightFlashAmt = 1;
     _lightFlashRadar = 0;
   }
@@ -12871,10 +12906,26 @@ if (settingsBakeQualityEl) {
     gpNight.checked = !!nightModeLightEnabled;
     gpNight.addEventListener('change', () => setNightModeLightEnabled(!!gpNight.checked));
   }
+  const onAimColor = (ev) => {
+    if (!ev || !ev.target) return;
+    setAimConeColor(ev.target.value);
+  };
+  const gpAim = document.getElementById('gp-aim-cone-color');
+  const spAim = document.getElementById('settings-aim-cone-color');
+  if (gpAim) {
+    gpAim.addEventListener('input', onAimColor);
+    gpAim.addEventListener('change', onAimColor);
+  }
+  if (spAim) {
+    spAim.addEventListener('input', onAimColor);
+    spAim.addEventListener('change', onAimColor);
+  }
+  syncAimConeColorUi();
 })();
 syncSettingsResolutionUi();
 syncLightingUi();
 syncSettingsBakeQualityUi();
+syncAimConeColorUi();
 
 function accountErrText(err) {
   switch (String(err || '')) {
