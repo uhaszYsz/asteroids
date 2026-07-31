@@ -16283,7 +16283,7 @@ ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 /** Worm: oriented hit box — length 4× circle-R; width 70% of both tube planes. */
 const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
 const ENEMY_WORM_HIT_LEN = 8 * ENEMY_WORM_HIT_R;
-const ENEMY_WORM_HIT_FW = 81;
+const ENEMY_WORM_HIT_FW = 84;
 const ENEMY_WORM_HIT_SCALE = 1.6;
 const ENEMY_WORM_HIT_TUBE_PITCH = 0.58 * 0.5;
 const ENEMY_WORM_HIT_WID = 0.7 * 0.6 * 2
@@ -16696,7 +16696,7 @@ function pickForwardGunLocals(mesh) {
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
-const ENEMY_WORM_SPRITE_ID = 'enemy_184';
+const ENEMY_WORM_SPRITE_ID = 'enemy_367';
 const ENEMY_WORM_SPRITE_SCALE = 1.6;
 /** Continuous roll around nose / length axis (rad/s). Fixed — no attack multiplier. */
 const ENEMY_WORM_SPIN_RATE = 1.5;
@@ -16876,7 +16876,7 @@ function drawEnemyCommon(x, y, angle, color, id, dt) {
   return bank + vib;
 }
 
-/** Worm: craft 184 on 4 planes (roof + mirrored under), spinning along length. */
+/** Worm: craft 367 on tube planes (roof + mirror + 90°), spinning along length. */
 function drawEnemyWorm(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_WORM_SPRITE_ID);

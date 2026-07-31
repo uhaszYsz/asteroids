@@ -423,11 +423,11 @@ ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 /**
  * Worm hit OBB (oriented box along facing).
  * Length = 4× legacy circle radius. Width = 70% of both tube roof planes tip-to-tip
- * (sprite 184 fw×scale, tube pitch = half SPRITE_ROOF_PITCH).
+ * (sprite 367 fw×scale, tube pitch = half SPRITE_ROOF_PITCH).
  */
 const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
 const ENEMY_WORM_HIT_LEN = 8 * ENEMY_WORM_HIT_R;
-const ENEMY_WORM_SPRITE_FW = 81;
+const ENEMY_WORM_SPRITE_FW = 84;
 const ENEMY_WORM_SPRITE_SCALE = 1.6;
 const ENEMY_WORM_TUBE_PITCH = 0.58 * 0.5;
 const ENEMY_WORM_HIT_WID = 0.7 * 0.6 * 2
