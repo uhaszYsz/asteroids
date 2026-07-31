@@ -12868,6 +12868,8 @@ function startPlayMode(mode) {
 
   const sendLocalQueue = () => {
     if (!ws || ws.readyState !== 1) return;
+    // Local host boots as a fresh guest — push ship/colors before starting.
+    syncAppearanceToSocket(ws);
     if (mode === 'continue') {
       const snap = soloSnapshot || loadSoloSnapshot();
       if (!snap) return;
@@ -12911,6 +12913,8 @@ function startPlayMode(mode) {
       return;
     }
     if (!ws || !ws.__local || ws.readyState !== 1) return;
+    // Wait-waves run on local host — apply saved appearance before welcome.
+    syncAppearanceToSocket(ws);
     ws.send(JSON.stringify({ t: 'queue', mode: 'wait', waitFor: mode, name }));
     showQueue();
   }).catch((err) => {
@@ -12984,6 +12988,35 @@ function accountNetSocket() {
   return (ws && ws.readyState === 1) ? ws : null;
 }
 
+/** Current ship + colors for setColors / local-host sync. */
+function appearancePayload() {
+  const playerColor = normalizeColorHex(
+    accountPlayerColorEl ? accountPlayerColorEl.value : myPlayerColorHex
+  ) || myPlayerColorHex || DEFAULT_PLAYER_COLOR_HEX;
+  const shootColor = normalizeColorHex(
+    accountShootColorEl ? accountShootColorEl.value : myShootColorHex
+  ) || myShootColorHex || DEFAULT_SHOOT_COLOR_HEX;
+  const thrustColor = normalizeColorHex(
+    accountThrustColorEl ? accountThrustColorEl.value : myThrustColorHex
+  ) || myThrustColorHex || DEFAULT_THRUST_COLOR_HEX;
+  const shipId = normalizeClientShipId(accountDraftShipId || selectedShipMeshId);
+  return { playerColor, shootColor, thrustColor, shipId };
+}
+
+/** Push appearance onto a socket (remote account DB and/or local solo host). */
+function syncAppearanceToSocket(sock) {
+  if (!sock || sock.readyState !== 1) return false;
+  const a = appearancePayload();
+  sock.send(JSON.stringify({
+    t: 'setColors',
+    playerColor: a.playerColor,
+    shootColor: a.shootColor,
+    thrustColor: a.thrustColor,
+    shipId: a.shipId
+  }));
+  return true;
+}
+
 function sendAccountNameChange() {
   const sock = accountNetSocket();
   if (!sock) return;
@@ -12993,16 +13026,34 @@ function sendAccountNameChange() {
 }
 
 function sendAccountColors() {
-  const sock = accountNetSocket();
-  if (!sock) return;
-  const playerColor = accountPlayerColorEl ? accountPlayerColorEl.value : myPlayerColorHex;
-  const shootColor = accountShootColorEl ? accountShootColorEl.value : myShootColorHex;
-  const thrustColor = accountThrustColorEl ? accountThrustColorEl.value : myThrustColorHex;
-  const shipId = normalizeClientShipId(accountDraftShipId || selectedShipMeshId);
+  const a = appearancePayload();
   setAccountMsg('');
-  setMyColors(playerColor, shootColor, thrustColor);
-  setActiveShipMesh(shipId);
-  sock.send(JSON.stringify({ t: 'setColors', playerColor, shootColor, thrustColor, shipId }));
+  setMyColors(a.playerColor, a.shootColor, a.thrustColor);
+  setActiveShipMesh(a.shipId);
+  accountDraftShipId = a.shipId;
+  accountSession.shipId = a.shipId;
+  accountSession.playerColor = a.playerColor;
+  accountSession.shootColor = a.shootColor;
+  accountSession.thrustColor = a.thrustColor;
+
+  const remote = accountNetSocket();
+  let sent = false;
+  if (remote) {
+    remote.send(JSON.stringify({
+      t: 'setColors',
+      playerColor: a.playerColor,
+      shootColor: a.shootColor,
+      thrustColor: a.thrustColor,
+      shipId: a.shipId
+    }));
+    sent = true;
+  }
+  // Local solo/wait host is a separate session — keep it in sync too.
+  if (ws && ws.__local && ws.readyState === 1 && ws !== remote) {
+    syncAppearanceToSocket(ws);
+    sent = true;
+  }
+  if (!sent) setAccountMsg('Not connected.', false);
 }
 
 function clearAccountPreviewRegion() {
@@ -18573,6 +18624,29 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'setColors') {
+      // Local solo host is always a guest — its setColors ack must not wipe Steam/login.
+      const fromLocal = !!(e && e.target && e.target.__local);
+      if (fromLocal && (accountSession.registered || (remoteWs && remoteWs.readyState === 1))) {
+        if (msg.ok) {
+          setMyColors(
+            msg.playerColor || myPlayerColorHex,
+            msg.shootColor || myShootColorHex,
+            msg.thrustColor || myThrustColorHex
+          );
+          if (msg.shipId) {
+            const sid = normalizeClientShipId(msg.shipId);
+            setActiveShipMesh(sid);
+            accountDraftShipId = sid;
+            accountSession.shipId = sid;
+          }
+          if (msg.playerColor) accountSession.playerColor = normalizeColorHex(msg.playerColor) || accountSession.playerColor;
+          if (msg.shootColor) accountSession.shootColor = normalizeColorHex(msg.shootColor) || accountSession.shootColor;
+          if (msg.thrustColor) accountSession.thrustColor = normalizeColorHex(msg.thrustColor) || accountSession.thrustColor;
+          syncAccountColorInputs();
+          redrawAccountShipPreview(true);
+        }
+        return;
+      }
       applyAccountSession(msg);
       if (msg.ok) setAccountMsg('Saved.', true);
       else setAccountMsg(msg.err === 'color' ? 'Invalid color.'
