@@ -7956,6 +7956,7 @@ function emitBulletImpactFx(x, y, type, hitKind, bvx, bvy) {
 
 /** Brief red sparks when you take damage. */
 function emitDamageTakenFx(x, y) {
+  triggerHitVibration('p', myId);
   pushFxRing(x, y, COL.laserHit, { r0: 4, r1: 30, life: 280 });
   emitParticles({
     x, y,
@@ -10379,6 +10380,60 @@ const SHIP_BANK_MAX = 0.72;
 const SHIP_BANK_GAIN = 10;
 const shipBankSmooth = new Map();
 
+/** Length-axis hit shake: amp + freq → 0 in exactly HIT_VIB_DUR_S. */
+const HIT_VIB_DUR_S = 0.5;
+const HIT_VIB_F0 = 4;
+const HIT_VIB_AMP0 = 20 * Math.PI / 180;
+/** Envelope power (amp & freq). Applied at trigger; 1 = linear fade to 0. */
+const HIT_VIB_DECAY_POW = 1;
+const hitVibByKey = new Map();
+
+function hitVibKey(kind, id) {
+  return (kind || 'p') + ':' + (id | 0);
+}
+
+/** Restart length-axis vibration on this ship/enemy (full amp + 4 Hz). */
+function triggerHitVibration(kind, id) {
+  if (id == null) return;
+  hitVibByKey.set(hitVibKey(kind, id), {
+    start: performance.now(),
+    pow: HIT_VIB_DECAY_POW
+  });
+}
+
+/**
+ * Signed roll (rad) around length/+X. Starts toward + (right), swings while
+ * amplitude and frequency both fade to 0 at HIT_VIB_DUR_S.
+ */
+function hitVibrationRoll(kind, id) {
+  if (id == null) return 0;
+  const key = hitVibKey(kind, id);
+  const e = hitVibByKey.get(key);
+  if (!e) return 0;
+  const t = (performance.now() - e.start) * 0.001;
+  const T = HIT_VIB_DUR_S;
+  if (!(t >= 0) || t >= T) {
+    hitVibByKey.delete(key);
+    return 0;
+  }
+  const pow = e.pow != null && e.pow > 0 ? e.pow : 1;
+  const u = 1 - t / T;
+  const fade = Math.pow(u, pow);
+  const amp = HIT_VIB_AMP0 * fade;
+  // f(t) = f0 * (1-t/T)^pow ; phase = 2π ∫ f
+  let phase;
+  if (Math.abs(pow - 1) < 1e-9) {
+    phase = Math.PI * 2 * HIT_VIB_F0 * (t - (t * t) / (2 * T));
+  } else {
+    phase = Math.PI * 2 * HIT_VIB_F0 * (T / (pow + 1)) * (1 - Math.pow(u, pow + 1));
+  }
+  return amp * Math.sin(phase);
+}
+
+function clearHitVibration(kind, id) {
+  hitVibByKey.delete(hitVibKey(kind, id));
+}
+
 function shipBankTarget(av) {
   const t = -(av || 0) * SHIP_BANK_GAIN;
   if (t > SHIP_BANK_MAX) return SHIP_BANK_MAX;
@@ -10431,11 +10486,13 @@ function projectMesh3D(verts, cx, cy, yaw, bank, lift) {
  * Origin (bottom of the axis) stays put; the tip of +Z sweeps a circle
  * so the dome apex tracks that circulating direction.
  */
-function projectMesh3DPrecess(verts, cx, cy, precess, leanY, lift) {
+function projectMesh3DPrecess(verts, cx, cy, precess, leanY, lift, roll) {
   const cp = Math.cos(precess);
   const sp = Math.sin(precess);
   const cl = Math.cos(leanY);
   const sl = Math.sin(leanY);
+  const cr = Math.cos(roll || 0);
+  const sr = Math.sin(roll || 0);
   const L = lift != null ? lift : SHIP3D_LIFT;
   const n = verts.length;
   const xy = new Float64Array(n * 2);
@@ -10444,10 +10501,13 @@ function projectMesh3DPrecess(verts, cx, cy, precess, leanY, lift) {
     const lx = verts[i][0];
     const ly = verts[i][1];
     const lz = verts[i][2];
+    // Roll around +X (length) — hit vibration / bank
+    const y0 = ly * cr - lz * sr;
+    const z0 = ly * sr + lz * cr;
     // Ry(lean): tip local +Z toward +X
-    const x1 = lx * cl + lz * sl;
-    const y1 = ly;
-    const z1 = -lx * sl + lz * cl;
+    const x1 = lx * cl + z0 * sl;
+    const y1 = y0;
+    const z1 = -lx * sl + z0 * cl;
     // Rz(precess): sweep that tip around world Z
     const x2 = x1 * cp - y1 * sp;
     const y2 = x1 * sp + y1 * cp;
@@ -10677,9 +10737,15 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   let bank = flat ? 0 : ((bankOverride != null && Number.isFinite(bankOverride))
     ? bankOverride * 0.5
     : shipBankSmoothed(id, av, dt) * 0.5);
+  // Length-axis hit shake (full amplitude — not scaled by the 0.5 bank visual).
+  const vibKind = (bankOverride != null && Number.isFinite(bankOverride)) ? 'e' : 'p';
+  const vib = hitVibrationRoll(vibKind, id);
   // Precessing cone replaces fixed X tilt on hex dome.
-  if (hexDome) bank = leanY ? 0 : (tiltXDeg * Math.PI / 180);
-  else if (tiltXDeg) bank += tiltXDeg * Math.PI / 180;
+  if (hexDome) bank = (leanY ? 0 : (tiltXDeg * Math.PI / 180)) + vib;
+  else {
+    bank += vib;
+    if (tiltXDeg) bank += tiltXDeg * Math.PI / 180;
+  }
   const spinRate = opts && opts.spinRate;
   if (!flat && !hexDome && spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
     bank += performance.now() * 0.001 * spinRate + (id | 0) * 0.73;
@@ -10691,7 +10757,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     drawAng = angle + performance.now() * 0.001 * dps * Math.PI / 180 + (id | 0) * 0.73;
   }
   function projectPanel(verts) {
-    if (leanY) return projectMesh3DPrecess(verts, x, y, drawAng, leanY, SPRITE_ROOF_LIFT);
+    if (leanY) return projectMesh3DPrecess(verts, x, y, drawAng, leanY, SPRITE_ROOF_LIFT, vib);
     return projectMesh3D(verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
   }
   const sc = SPRITE_SHIP_PX_SCALE * (sizeScale > 0 ? sizeScale : 1);
@@ -10978,7 +11044,7 @@ function drawShip3D(x, y, angle, av, color, id, dt, moving) {
     return;
   }
   const mesh = getShipMeshById(shipIdForOwner(id));
-  const bank = shipBankSmoothed(id, av, dt);
+  const bank = shipBankSmoothed(id, av, dt) + hitVibrationRoll('p', id);
   const { xy, depth } = projectMesh3D(mesh.verts, x, y, angle, bank);
 
   drawShipMeshFacesTex(xy, depth, mesh, color, id);
@@ -14382,6 +14448,9 @@ function pushRemoteSample(id, row, st) {
     remoteHist.set(id, h);
   }
   const av = row[8] != null ? row[8] : 0;
+  const nextHp = row[6] | 0;
+  const prev = remotes.get(id);
+  if (prev && (prev.hp | 0) > nextHp && nextHp > 0) triggerHitVibration('p', id);
   h.push({
     st,
     x: row[1],
@@ -15113,6 +15182,7 @@ function resetMatchState() {
   thrustAlignPrevY = null;
   deathRings.length = 0;
   shipBankSmooth.clear();
+  hitVibByKey.clear();
   turretYawSmooth.clear();
   shotgunSfxAt.clear();
   voidShakes.clear();
@@ -16335,7 +16405,11 @@ function applyEnemySnapList(list, st) {
     e.dir = dir;
     e.tx = +row[7];
     e.ty = +row[8];
-    e.hp = row[9] | 0;
+    {
+      const nextHp = row[9] | 0;
+      if ((e.hp | 0) > nextHp && nextHp > 0) triggerHitVibration('e', id);
+      e.hp = nextHp;
+    }
     e.enteredPlay = !!(row[13] | 0);
     e.spawnX = e.x;
     e.spawnY = e.y;
@@ -16355,12 +16429,16 @@ function applyEnemySnapList(list, st) {
 
 function applyEnemyHp(id, hp) {
   const e = enemies.get(id | 0);
-  if (e) e.hp = hp | 0;
+  if (!e) return;
+  const next = hp | 0;
+  if ((e.hp | 0) > next && next > 0) triggerHitVibration('e', id);
+  e.hp = next;
 }
 
 function removeEnemy(id, x, y, silent) {
   clearEnemyCharge(id);
   clearEnemyBank(id);
+  clearHitVibration('e', id);
   enemyDrawBank.delete(id | 0);
   shipSmokeLeaks.delete(enemySmokeLeakId(id));
   const e = enemies.get(id);
@@ -16679,6 +16757,7 @@ function clearEnemyBank(id) {
 
 function drawEnemyCommon(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
+  const vib = hitVibrationRoll('e', id);
   const opt = getShipOptionById(ENEMY_COMMON_SPRITE_ID);
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
@@ -16686,14 +16765,14 @@ function drawEnemyCommon(x, y, angle, color, id, dt) {
       bank, ENEMY_COMMON_SPRITE_SCALE, COL.enemyOutline
     );
   } else {
-    drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank, id, {
+    drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank + vib, id, {
       noOutline: true,
       noTint: true,
       noEmit: true,
       strongEmit: false
     });
   }
-  return bank;
+  return bank + vib;
 }
 
 /** Worm: craft 184 on 4 planes (roof + mirrored under), spinning along length. */
@@ -19085,6 +19164,7 @@ function enterGameFromWelcome(msg) {
   closeModePanel();
   hideMenu();
   shipBankSmooth.clear();
+  hitVibByKey.clear();
   turretYawSmooth.clear();
   shotgunSfxAt.clear();
   voidShakes.clear();
