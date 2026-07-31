@@ -10838,8 +10838,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
       }
     ];
   } else if (tube) {
-    // Roof + mirrored under: outer long edges share y=±wingY, z=0 so they touch
-    // (no 90° copy — that crossed the diamond and clipped).
+    // Roof + mirrored under: outer long edges share y=±wingY, z=0 so they touch.
     panels = [
       {
         verts: [
@@ -10878,6 +10877,16 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         uvs: uvsR
       }
     ];
+    // Same 4 faces spun 90° around length (+X) — symmetry planes sit at 90° to the first set.
+    // (x, y, z) → (x, -z, y)
+    const n0 = panels.length;
+    for (let i = 0; i < n0; i++) {
+      const src = panels[i];
+      panels.push({
+        verts: src.verts.map((v) => [v[0], -v[2], v[1]]),
+        uvs: src.uvs
+      });
+    }
   } else {
     // Left / right halves share the ridge (y=0,z=0); tips fold down like a roof.
     panels = [
