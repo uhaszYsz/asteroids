@@ -114,6 +114,22 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (msg.t === 'worldSync') {
+      const room = ws.room;
+      if (!room || (ws.state !== 'playing' && ws.state !== 'practice')) return;
+      if (!ws.__local && !allowAction(ws, 'worldSync', 400)) return;
+      send(ws, {
+        t: 'worldSync',
+        tick: room.tick,
+        st: Date.now(),
+        players: packSnap(room).players,
+        asteroids: room.asteroids.map(packAsteroid),
+        bullets: room.bullets.map(packBullet),
+        enemies: (room.enemies || []).filter(enemyIsSpawned).map(packEnemy)
+      });
+      return;
+    }
+
     if (msg.t === 'getAst') {
       if (!ws.isAdmin) {
         ws.getAsteroidsEvery = 0;

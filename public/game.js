@@ -14368,12 +14368,12 @@ function syncSimTicks() {
   const behind = target - clientTickCursor;
   const offline = isOfflineLocalPlay();
 
-  // Tab minimize / unfocus pauses rAF while wall-clock ticks keep advancing.
-  // Online: long gaps ghost+blend. Offline: just snap the cursor — never adopt
-  // server pose (that fought prediction) and never skip producing shoot frames.
+  // Tab minimize / unfocus pauses rAF while the sim may keep stepping.
+  // Always adopt server pose after a long gap — solo included (objects drift otherwise).
   if (behind > TICK_CATCHUP_SKIP) {
     clientTickCursor = target;
-    if (!offline) adoptServerGhostVisual();
+    adoptServerGhostVisual();
+    if (offline) requestWorldSync();
     return;
   }
 
@@ -14403,6 +14403,84 @@ function clearStuckInputKeys() {
   shootPulse = false;
 }
 
+let lastWorldSyncAt = 0;
+function requestWorldSync() {
+  if (!inGame || !ws || ws.readyState !== 1) return;
+  const now = performance.now();
+  if (now - lastWorldSyncAt < 250) return;
+  lastWorldSyncAt = now;
+  // #region agent log
+  __agentLog({hypothesisId:'G',location:'game.js:requestWorldSync',message:'request worldSync',data:{offline:isOfflineLocalPlay()?1:0,cursor:clientTickCursor|0,syncTick:syncTick|0},timestamp:Date.now(),runId:'tab-resync'});
+  // #endregion
+  try { ws.send(JSON.stringify({ t: 'worldSync' })); } catch (_) {}
+}
+
+/** Hard-snap local ship to an authoritative pose row (bypass offline pose-skip). */
+function hardSnapLocalPlayerFromRow(row) {
+  if (!row) return;
+  const ack = row[7] | 0;
+  serverGhost.x = row[1];
+  serverGhost.y = row[2];
+  serverGhost.vx = row[3];
+  serverGhost.vy = row[4];
+  serverGhost.angle = row[5];
+  serverGhost.hp = row[6];
+  serverGhost.av = row[8] != null ? row[8] : 0;
+  serverGhost.valid = true;
+  noteInputAck(ack);
+  player.x = row[1];
+  player.y = row[2];
+  player.vx = row[3];
+  player.vy = row[4];
+  player.angle = row[5];
+  player.hp = row[6];
+  player.av = row[8] != null ? row[8] : 0;
+  player.stunned = !!(row[9] | 0);
+  player.godLeft = row[10] != null ? (row[10] | 0) : (player.godLeft || 0);
+  player.turnDecelStep = 0;
+  player.turnDecelLeft = 0;
+  player.turnDecelRev = 0;
+  softErr.x = 0;
+  softErr.y = 0;
+  softErr.angle = 0;
+  lastAppliedSeq = Math.max(lastAppliedSeq | 0, ack);
+  pendingInputs = pendingInputs.filter(f => f.seq > ack);
+}
+
+function applyWorldSyncMsg(msg) {
+  if (!inGame || !msg) return;
+  if (msg.tick != null && msg.st != null) {
+    syncTick = msg.tick | 0;
+    syncSt = msg.st;
+    if (isOfflineLocalPlay()) syncStPerf = performance.now();
+    resetTickClock();
+    clientTickCursor = Math.floor(estimatedServerTick());
+  }
+  if (msg.players) {
+    for (const row of msg.players) {
+      if ((row[0] | 0) === myId) hardSnapLocalPlayerFromRow(row);
+    }
+    applyRemotePlayers(msg.players, msg.st != null ? msg.st : serverNow());
+  }
+  if (msg.asteroids) replaceAsteroidsFromRows(msg.asteroids);
+  if (msg.bullets) {
+    bullets.clear();
+    stopAllRocketTravelSfx();
+    stopAllVoidTravelSfx();
+    for (const row of msg.bullets) addBullet(unpackBullet(row), false);
+  }
+  if (msg.enemies) {
+    enemies.clear();
+    enemyCharges.clear();
+    for (const row of msg.enemies) addEnemy(unpackEnemy(row));
+  }
+  // #region agent log
+  __agentLog({hypothesisId:'G',location:'game.js:applyWorldSyncMsg',message:'applied worldSync',data:{tick:syncTick|0,asts:(msg.asteroids&&msg.asteroids.length)|0,enys:(msg.enemies&&msg.enemies.length)|0,offline:isOfflineLocalPlay()?1:0},timestamp:Date.now(),runId:'tab-resync'});
+  // #endregion
+  predReady = true;
+  updateHud();
+}
+
 function onVisibilityResume() {
   if (!inGame) return;
   clearStuckInputKeys();
@@ -14410,14 +14488,15 @@ function onVisibilityResume() {
   const target = Math.floor(estimatedServerTick());
   if (clientTickCursor == null) {
     clientTickCursor = target;
-    return;
+  } else {
+    const behind = target - clientTickCursor;
+    // Any pause can desync wall-clock dead-reckon; always snap ship + request world.
+    if (behind > 2) {
+      clientTickCursor = target;
+      adoptServerGhostVisual();
+    }
   }
-  const behind = target - clientTickCursor;
-  if (behind > TICK_CATCHUP_SKIP) {
-    clientTickCursor = target;
-    adoptServerGhostVisual();
-  }
-  // Smaller gaps: leave cursor alone — syncSimTicks catch-up with zeroed keys.
+  requestWorldSync();
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -19075,6 +19154,10 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'resumed' && inGame) {
       applyResumedMsg(msg);
+      return;
+    }
+    if (msg.t === 'worldSync' && inGame) {
+      applyWorldSyncMsg(msg);
       return;
     }
     if (msg.t === 'rejoinOffer') {
