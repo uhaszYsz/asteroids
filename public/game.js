@@ -10937,7 +10937,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     ];
   }
 
-  // Painter's algorithm when spinning / 4-sided.
+  // Painter's algorithm when spinning / multi-sided tube.
   if (panels.length > 2 || (spinRate && spinRate !== 0)) {
     for (let p = 0; p < panels.length; p++) {
       const { depth } = projectMesh3D(panels[p].verts, x, y, angle, bank, SPRITE_ROOF_LIFT);
