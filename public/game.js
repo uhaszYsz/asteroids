@@ -10423,6 +10423,36 @@ function projectMesh3D(verts, cx, cy, yaw, bank, lift) {
   return { xy, depth };
 }
 
+/**
+ * Spin around Z, then tip Z toward +X by leanY — irregular UFO wobble
+ * (spin axis leaned instead of a fixed X roll).
+ */
+function projectMesh3DLeanSpin(verts, cx, cy, spin, leanY, lift) {
+  const cs = Math.cos(spin);
+  const ss = Math.sin(spin);
+  const cl = Math.cos(leanY);
+  const sl = Math.sin(leanY);
+  const L = lift != null ? lift : SHIP3D_LIFT;
+  const n = verts.length;
+  const xy = new Float64Array(n * 2);
+  const depth = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const lx = verts[i][0];
+    const ly = verts[i][1];
+    const lz = verts[i][2];
+    const x1 = lx * cs - ly * ss;
+    const y1 = lx * ss + ly * cs;
+    const z1 = lz;
+    const x2 = x1 * cl + z1 * sl;
+    const y2 = y1;
+    const z2 = -x1 * sl + z1 * cl;
+    xy[i * 2] = cx + x2;
+    xy[i * 2 + 1] = cy + y2 - z2 * L;
+    depth[i] = z2;
+  }
+  return { xy, depth };
+}
+
 function projectShip3D(cx, cy, yaw, bank) {
   return projectMesh3D(getActiveShipMesh().verts, cx, cy, yaw, bank);
 }
@@ -10623,6 +10653,7 @@ const SPRITE_SHIP_PX_SCALE = 1;
  *  opts.flat: single z=0 quad (full sprite) — no roof fold.
  *  opts.hexDome: low-poly hex bulge — 6 tris, rim z=0, center z=domeZ (default 22).
  *  opts.tiltXDeg: fixed roll around +X (degrees).
+ *  opts.spinLeanYDeg: tip Z toward +X (degrees), then spin — wobbly UFO axis.
  *  opts.yawSpinDegPerTick: continuous yaw around Z (degrees per sim tick).
  *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor, opts) {
@@ -10634,10 +10665,14 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const flat = !!(opts && opts.flat);
   const hexDome = !!(opts && opts.hexDome);
   const tiltXDeg = opts && opts.tiltXDeg != null && Number.isFinite(+opts.tiltXDeg) ? +opts.tiltXDeg : 0;
+  const spinLeanYDeg = opts && opts.spinLeanYDeg != null && Number.isFinite(+opts.spinLeanYDeg)
+    ? +opts.spinLeanYDeg : 0;
+  const leanY = spinLeanYDeg * Math.PI / 180;
   let bank = flat ? 0 : ((bankOverride != null && Number.isFinite(bankOverride))
     ? bankOverride * 0.5
     : shipBankSmoothed(id, av, dt) * 0.5);
-  if (hexDome) bank = tiltXDeg * Math.PI / 180;
+  // Leaned spin replaces fixed X tilt on hex dome.
+  if (hexDome) bank = leanY ? 0 : (tiltXDeg * Math.PI / 180);
   else if (tiltXDeg) bank += tiltXDeg * Math.PI / 180;
   const spinRate = opts && opts.spinRate;
   if (!flat && !hexDome && spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
@@ -10648,6 +10683,10 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   if (yawSpinDpt && Number.isFinite(+yawSpinDpt) && +yawSpinDpt !== 0) {
     const dps = (+yawSpinDpt) * TPS;
     drawAng = angle + performance.now() * 0.001 * dps * Math.PI / 180 + (id | 0) * 0.73;
+  }
+  function projectPanel(verts) {
+    if (leanY) return projectMesh3DLeanSpin(verts, x, y, drawAng, leanY, SPRITE_ROOF_LIFT);
+    return projectMesh3D(verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
   }
   const sc = SPRITE_SHIP_PX_SCALE * (sizeScale > 0 ? sizeScale : 1);
   // Nose–tail from frame height; wing span from frame width — true pixel proportions.
@@ -10801,9 +10840,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   }
 
   // Painter's algorithm when spinning / multi-sided tube.
-  if (panels.length > 2 || (spinRate && spinRate !== 0) || (yawSpinDpt && yawSpinDpt !== 0)) {
+  if (panels.length > 2 || (spinRate && spinRate !== 0) || (yawSpinDpt && yawSpinDpt !== 0) || leanY) {
     for (let p = 0; p < panels.length; p++) {
-      const { depth } = projectMesh3D(panels[p].verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
+      const { depth } = projectPanel(panels[p].verts);
       let z = 0;
       for (let i = 0; i < depth.length; i++) z += depth[i];
       panels[p]._z = z / Math.max(1, depth.length);
@@ -10822,7 +10861,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   if (showPlanes) {
     for (let p = 0; p < panels.length; p++) {
       const verts = panels[p].verts;
-      const { xy } = projectMesh3D(verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
+      const { xy } = projectPanel(verts);
       const n = verts.length;
       const poly = [];
       for (let i = 0; i < n; i++) {
@@ -10868,7 +10907,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const windBackT = [0, 2, 1];
   /** @returns {number} GL triangle vertex count (double-sided). */
   function fillPanelMesh(panel) {
-    const { xy } = projectMesh3D(panel.verts, x, y, drawAng, bank, SPRITE_ROOF_LIFT);
+    const { xy } = projectPanel(panel.verts);
     const uvs = panel.uvs;
     const tri = panel.verts.length === 3;
     const fwd = tri ? windFwdT : windFwdQ;
@@ -16638,7 +16677,7 @@ function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
   return bank;
 }
 
-/** Spinner: round sprite on hex dome; 20° X tilt; spins 4°/tick around Z. */
+/** Spinner: round sprite on hex dome; Z axis leaned 20° toward X, spins 4°/tick. */
 function drawEnemySpinner(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_SPINNER_SPRITE_ID);
@@ -16646,7 +16685,7 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
-      { hexDome: true, domeZ: 22, tiltXDeg: 20, yawSpinDegPerTick: 4 }
+      { hexDome: true, domeZ: 22, spinLeanYDeg: 20, yawSpinDegPerTick: 4 }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
