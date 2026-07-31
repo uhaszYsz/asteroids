@@ -15305,6 +15305,7 @@ function drawEnemyCommonShot(x, y, ang, scale) {
   const glowR = ENEMY_SHOT_GLOW_BASE * s;
   const coreR = ENEMY_SHOT_CORE_BASE * s;
   drawSoftOval(x, y, 0, glowR, glowR, red, 0.7, true);
+  drawSoftOval(x, y, 0, glowR, glowR, red, 0.7, true); // 2× additive glow strength
   drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false);
 }
 
