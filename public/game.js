@@ -889,8 +889,8 @@ const SOFT_ERR_MAX_ANG = 0.6;
 /** If visual/sim drift exceeds this after reconcile, hard teleport (no soft blend). */
 const LOCAL_DRIFT_SNAP_PX = 30;
 /** Ignore tiny reconcile deltas — kills micro softErr shutter from float/collision noise. */
-const LOCAL_RECON_DEADZONE_PX = 99999;
-const LOCAL_RECON_DEADZONE_ANG = 99999;
+const LOCAL_RECON_DEADZONE_PX = 12;
+const LOCAL_RECON_DEADZONE_ANG = 0.025;
 /** After an RTT spike, skip pose reconcile briefly so the local ship keeps predicting smoothly. */
 const RTT_SPIKE_HOLD_MS = 180;
 /**
@@ -14082,7 +14082,7 @@ function applyNtp(ct, st, serverTick) {
 /** Adaptive send-now / act-later delay from one-way latency + jitter. */
 function adaptiveInputDelay() {
   // Local host has no network delay — holding inputs only creates reconcile shutter.
-  if (usingLocalSolo || (ws && ws.__local)) return 0;
+  if (isOfflineLocalPlay()) return 0;
   const oneWay = pingMs * 0.5;
   let d = Math.max(0, cv('cl_cmddelay') | 0);
   const dMax = Math.max(d, cv('cl_cmddelay_max') | 0);
@@ -14095,12 +14095,18 @@ function adaptiveInputDelay() {
   return Math.min(dMax, d);
 }
 
+/** Offline / in-browser local host (solo + matchmaking wait-waves). */
+function isOfflineLocalPlay() {
+  return !!(usingLocalSolo || (ws && ws.__local));
+}
+
 /**
  * How many unacked input seqs we may have in flight / on the server queue.
  * Must cover RTT (+ jitter) so we don't starve, but stay tight enough that a
  * hitch/catchup/clock drift cannot build a sticky multi-second shoot delay.
  */
 function maxUnackedInputs() {
+  if (isOfflineLocalPlay()) return 64;
   const rttTicks = Math.ceil(Math.max(0, pingMs) / TICK_MS);
   const jitterTicks = Math.ceil(Math.max(0, pingJitter) / TICK_MS);
   const dly = adaptiveInputDelay();
@@ -14114,6 +14120,8 @@ function unackedInputCount() {
 
 /** False when producing another frame would deepen a sticky server input queue. */
 function canProduceInputFrame() {
+  // Local host applies 1:1 in-process — never stall shoots waiting on net ack depth.
+  if (isOfflineLocalPlay()) return true;
   return unackedInputCount() < maxUnackedInputs();
 }
 
@@ -14305,16 +14313,18 @@ function syncSimTicks() {
   }
 
   const behind = target - clientTickCursor;
+  const offline = isOfflineLocalPlay();
+
   // Tab minimize / unfocus pauses rAF while wall-clock ticks keep advancing.
-  // Short gaps: gradual catch-up (keys already cleared). Long gaps: ghost + blend.
+  // Online: long gaps ghost+blend. Offline: just snap the cursor — never adopt
+  // server pose (that fought prediction) and never skip producing shoot frames.
   if (behind > TICK_CATCHUP_SKIP) {
     clientTickCursor = target;
-    adoptServerGhostVisual();
+    if (!offline) adoptServerGhostVisual();
     return;
   }
 
-  // Never flood the server input queue. Catchup after a hitch used to enqueue
-  // many frames at once; server only eats one/tick so shoot lag stuck forever.
+  // Never flood the dedicated-server input queue. Local host is exempt.
   if (!canProduceInputFrame()) {
     // Clock estimate ran ahead (or queue already deep): skip ticking until acks
     // drain unacked depth. Snap cursor so we don't bank a huge catchup burst.
