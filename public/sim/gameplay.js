@@ -464,8 +464,12 @@ function randomEnemyWanderSpeed() {
 
 function enemySpeed(e) {
   const s = e && +e.speed;
-  if (Number.isFinite(s) && s > 0) return s;
-  return ENEMY_WANDER_SPEED;
+  let base = (Number.isFinite(s) && s > 0) ? s : ENEMY_WANDER_SPEED;
+  // Spinner crawls at half speed while its magazine is live (not reloading).
+  if (e && e.kind === 'spinner' && (e.reloadLeft | 0) <= 0 && (e.shootAmmo | 0) > 0) {
+    base *= 0.5;
+  }
+  return base;
 }
 
 function enemyMoveType(e) {
@@ -1363,28 +1367,29 @@ function fireEnemyRocket(room, e, ang, spd, dmg) {
 }
 
 function updateSpinnerWeapon(room, e) {
+  const wasFiring = (e.reloadLeft | 0) <= 0 && (e.shootAmmo | 0) > 0;
   if ((e.shootCd | 0) > 0) e.shootCd--;
   if ((e.reloadLeft | 0) > 0) {
     e.reloadLeft--;
     if (e.reloadLeft === 0) e.shootAmmo = ENEMY_SPINNER.ammo;
-    return;
-  }
-  if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) {
+  } else if ((e.shootCd | 0) <= 0 && (e.shootAmmo | 0) > 0) {
+    const base = Number.isFinite(e.spinAng) ? e.spinAng : 0;
+    const step = Math.PI; // 2 streams, 180° apart
+    for (let i = 0; i < 2; i++) {
+      fireEnemyLineBullet(
+        room, e, base + i * step,
+        ENEMY_SPINNER.speed, ENEMY_SPINNER.dmg, 'enemySpinner'
+      );
+    }
+    e.spinAng = base + (ENEMY_SPINNER.spin * Math.PI) / 180;
+    e.shootAmmo--;
+    e.shootCd = ENEMY_SPINNER.cooldown;
     if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_SPINNER.reload;
-    return;
+  } else if ((e.shootAmmo | 0) <= 0) {
+    e.reloadLeft = ENEMY_SPINNER.reload;
   }
-  const base = Number.isFinite(e.spinAng) ? e.spinAng : 0;
-  const step = Math.PI; // 2 streams, 180° apart
-  for (let i = 0; i < 2; i++) {
-    fireEnemyLineBullet(
-      room, e, base + i * step,
-      ENEMY_SPINNER.speed, ENEMY_SPINNER.dmg, 'enemySpinner'
-    );
-  }
-  e.spinAng = base + (ENEMY_SPINNER.spin * Math.PI) / 180;
-  e.shootAmmo--;
-  e.shootCd = ENEMY_SPINNER.cooldown;
-  if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_SPINNER.reload;
+  const nowFiring = (e.reloadLeft | 0) <= 0 && (e.shootAmmo | 0) > 0;
+  if (nowFiring !== wasFiring) emitEnemyUpdate(room, e);
 }
 
 function enemyTryFire(room, e) {

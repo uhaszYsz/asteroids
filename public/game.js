@@ -16647,7 +16647,7 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
-      { hexDome: true, domeZ: 14, tiltXDeg: 7, yawSpinDegPerTick: 4, circleOutlineW: 2 }
+      { hexDome: true, domeZ: 14, tiltXDeg: 20, yawSpinDegPerTick: 4, circleOutlineW: 2 }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
