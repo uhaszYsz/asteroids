@@ -16808,6 +16808,11 @@ const ENEMY_WORM_SPIN_CHARGE_MULT = 3;
 const wormSpinState = new Map(); // id -> { ang, last }
 
 function wormLengthSpinRate(id) {
+  // Prefer active charge telegraph (ech) — wormPhase can lag on the client.
+  const ch = enemyCharges.get(id | 0);
+  if (ch && ch.kind === 'worm' && performance.now() < ch.until) {
+    return ENEMY_WORM_SPIN_RATE * ENEMY_WORM_SPIN_CHARGE_MULT;
+  }
   const e = enemies.get(id | 0);
   // Phase 1 = laser aim / charge telegraph.
   if (e && e.kind === 'worm' && (e.wormPhase | 0) === 1) {
@@ -17208,6 +17213,11 @@ function beginEnemyCharge(id, ms, side, kind) {
     side: side | 0,
     kind: k
   });
+  // Keep laser-aim spin in sync even if eu/snap wormPhase is late.
+  if (k === 'worm') {
+    const e = enemies.get(id | 0);
+    if (e && e.kind === 'worm' && (e.wormPhase | 0) < 1) e.wormPhase = 1;
+  }
 }
 
 function clearEnemyCharge(id) {
