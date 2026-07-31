@@ -1,0 +1,17 @@
+---
+description: Always deploy playable game changes to the VPS without waiting to be asked
+alwaysApply: true
+---
+
+# Always deploy to VPS
+
+When finishing a change that affects the live game (client `public/game.js` / `public/index.html`, `server.js`, assets, SW/manifest, etc.):
+
+1. Commit only the relevant files (never `accounts.json`).
+2. Push to `origin/main`.
+3. Deploy via plink: host `45.155.102.148`, key `C:\Users\tengo\Desktop\sksks.ppk`, path `/root/asteroids`.
+4. On VPS: `git checkout -- public/asset-manifest.json` if dirty, `git pull --ff-only`, `npm run manifest`, `pm2 restart asteroids`.
+5. Bump `game.js?v=` in `public/index.html` when shipping client JS.
+   Client static files live under `public/` (server serves that as the web root).
+
+Do this by default — do not wait for the user to say “push to vps”.

@@ -7855,6 +7855,9 @@ const MIME = {
   '.json': 'application/json'
 };
 
+/** Client static root (browser URLs stay /sprites/... etc.). */
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
 const server = http.createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -7868,13 +7871,13 @@ const server = http.createServer((req, res) => {
   }
   let file = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   try { file = decodeURIComponent(file); } catch (_) {}
-  // Never expose Steam bridge, secrets, or tooling over the public HTTP server.
-  const blocked = /^(?:\/?(?:desktop(?:\/|$)|node_modules(?:\/|$)|\.git(?:\/|$)|accounts\.json|admin-password\.txt|steam-auth\.js|server\.js|accounts-db\.js))/i;
-  if (blocked.test(file.replace(/\\/g, '/'))) {
+  file = String(file || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  // Never expose tooling / path traversal over the public HTTP server.
+  if (!file || file.includes('..') || /^(?:desktop|node_modules|\.git)(?:\/|$)/i.test(file)) {
     res.writeHead(404); res.end(); return;
   }
-  const fp = path.join(__dirname, file);
-  if (!fp.startsWith(__dirname) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
+  const fp = path.join(PUBLIC_DIR, file);
+  if (!fp.startsWith(PUBLIC_DIR) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
     res.writeHead(404); res.end(); return;
   }
   const ext = path.extname(fp);

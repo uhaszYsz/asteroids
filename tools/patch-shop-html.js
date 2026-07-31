@@ -1,5 +1,5 @@
 const fs = require('fs');
-const p = require('path').join(__dirname, '..', 'index.html');
+const p = require('path').join(__dirname, '..', 'public', 'index.html');
 let s = fs.readFileSync(p, 'utf8');
 
 const start = s.indexOf('    #solo-shop {');

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Build asset-manifest.json: path → sha256 for static client assets.
+ * Build public/asset-manifest.json: path → sha256 for static client assets.
+ * Paths are relative to public/ (same as browser URLs). CDN fetch uses public/ prefix.
  * Used by sw.js for forever-cache + GitHub-first loading.
  */
 const fs = require('fs');
@@ -9,7 +10,8 @@ const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const OUT = path.join(ROOT, 'asset-manifest.json');
+const PUBLIC = path.join(ROOT, 'public');
+const OUT = path.join(PUBLIC, 'asset-manifest.json');
 
 const INCLUDE_DIRS = [
   'sprites',
@@ -21,8 +23,7 @@ const INCLUDE_DIRS = [
 const INCLUDE_ROOT_FILES = [
   'game.js',
   'music.js',
-  'config.js',
-  'demo-recorder.js'
+  'config.js'
 ];
 const INCLUDE_EXTS = new Set([
   '.js', '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
@@ -41,7 +42,7 @@ function walk(dir, out) {
   if (!fs.existsSync(dir)) return;
   for (const name of fs.readdirSync(dir)) {
     const fp = path.join(dir, name);
-    const rel = path.relative(ROOT, fp).split(path.sep).join('/');
+    const rel = path.relative(PUBLIC, fp).split(path.sep).join('/');
     if (SKIP_DIR.test(rel)) continue;
     const st = fs.statSync(fp);
     if (st.isDirectory()) walk(fp, out);
@@ -68,15 +69,15 @@ function gitRemoteRepo() {
 }
 
 const files = [];
-for (const d of INCLUDE_DIRS) walk(path.join(ROOT, d), files);
+for (const d of INCLUDE_DIRS) walk(path.join(PUBLIC, d), files);
 for (const f of INCLUDE_ROOT_FILES) {
-  if (fs.existsSync(path.join(ROOT, f))) files.push(f);
+  if (fs.existsSync(path.join(PUBLIC, f))) files.push(f);
 }
 
 files.sort();
 const map = {};
 for (const rel of files) {
-  map[rel] = sha256file(path.join(ROOT, rel));
+  map[rel] = sha256file(path.join(PUBLIC, rel));
 }
 
 const manifest = {
