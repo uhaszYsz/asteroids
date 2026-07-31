@@ -8565,7 +8565,7 @@ function asteroidClientLifeLeftMs(a) {
  * Silhouette blink for dying rocks.
  *  life left (0, 5s]: 1 blink / 0.8s
  *  life left ≤ 0 (expired, waiting to leave play): 3 blinks / s
- * Returns 1 = full outline, ~0.2 = dark/dim half of the blink.
+ * Returns outline alpha multiplier: 1 ↔ 0.75.
  */
 function asteroidOutlineBlinkMul(a) {
   const left = asteroidClientLifeLeftMs(a);
@@ -8575,7 +8575,7 @@ function asteroidOutlineBlinkMul(a) {
   else if (left <= 5000) periodMs = 800;
   else return 1;
   const t = performance.now() / periodMs;
-  return (t - Math.floor(t)) < 0.5 ? 1 : 0.22;
+  return (t - Math.floor(t)) < 0.5 ? 1 : 0.75;
 }
 
 /**
@@ -9835,9 +9835,7 @@ function drawAsteroid3D(cx, cy, angle, id, radius, color, size, detailMaps, spec
   let faceTintPow = Math.max(0, Math.min(1, Number(cv('cl_ast_face_tint'))));
   let outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
   const blinkMul = outlineBlink != null && Number.isFinite(outlineBlink) ? outlineBlink : 1;
-  // Dim silhouette on blink-off: darker color + lower alpha.
-  const blinkColorMul = 0.35 + 0.65 * blinkMul;
-  outlineA *= 0.25 + 0.75 * blinkMul;
+  outlineA *= blinkMul;
   const outlineTexOn = (cv('cl_ast_outline_tex') | 0) !== 0 && asteroidFaceTexReady;
   const wireA = Math.max(0, Math.min(1, Number(cv('cl_ast_wire_alpha'))));
   const wireW = Math.max(0.5, Number(cv('cl_ast_wire_width')) || 2);
