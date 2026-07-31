@@ -16605,7 +16605,7 @@ const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_WORM_SPRITE_ID = 'enemy_184';
-const ENEMY_WORM_SPRITE_SCALE = 1;
+const ENEMY_WORM_SPRITE_SCALE = 1.6;
 /** Continuous roll around nose / length axis (rad/s). Fixed — no attack multiplier. */
 const ENEMY_WORM_SPIN_RATE = 1.5;
 const ENEMY_SPINNER_SPRITE_ID = 'enemy_27';
