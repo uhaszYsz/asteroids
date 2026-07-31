@@ -15280,7 +15280,7 @@ function bulletAt(b) {
  * Visual only — collision sizes stay on BULLET_TYPES / per-bullet L×W.
  */
 function drawEnemyCommonShot(x, y, ang, scale) {
-  const s = (scale > 0 ? scale : 1) * 1.3;
+  const s = (scale > 0 ? scale : 1) * 2;
   const red = COL.enemyBullet || [1.0, 0.18, 0.12];
   const glowR = 4.2 * RES_SCALE * s;
   const coreR = 2.4 * RES_SCALE * s;
