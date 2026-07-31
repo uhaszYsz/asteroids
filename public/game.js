@@ -16797,7 +16797,7 @@ const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_WORM_SPRITE_ID = 'enemy_367';
 const ENEMY_WORM_SPRITE_SCALE = 1.6;
 /** Continuous roll around nose / length axis (rad/s). Fixed — no attack multiplier. */
-const ENEMY_WORM_SPIN_RATE = 0.75;
+const ENEMY_WORM_SPIN_RATE = 2.25;
 const ENEMY_SPINNER_SPRITE_ID = 'enemy_27';
 const ENEMY_SPINNER_SPRITE_SCALE = 1;
 const ENEMY_COMMON_MESH = (() => {
@@ -17073,6 +17073,11 @@ const ENEMY_COMMON_GUNS = [
   [7 * RES_SCALE, 2.4 * RES_SCALE, 0],
   [7 * RES_SCALE, -2.4 * RES_SCALE, 0]
 ];
+/** Worm laser charge orbs — dual commons-style spheres at the nose. */
+const ENEMY_WORM_GUNS = [
+  [ENEMY_WORM_HIT_LEN * 0.42, 3.2 * RES_SCALE, 0],
+  [ENEMY_WORM_HIT_LEN * 0.42, -3.2 * RES_SCALE, 0]
+];
 const COL_CHARGE_RED = [1.0, 0.12, 0.1];
 const enemyCharges = new Map(); // id -> { start, until, ms, side, kind }
 /** Last bank used while drawing commons / UFOs — charge orbs match hull roll. */
@@ -17081,12 +17086,15 @@ const enemyDrawBank = new Map();
 function beginEnemyCharge(id, ms, side, kind) {
   const dur = Math.max(200, ms | 0 || 1000);
   const now = performance.now();
+  let k = 'common';
+  if (kind === 'ufo') k = 'ufo';
+  else if (kind === 'worm') k = 'worm';
   enemyCharges.set(id | 0, {
     start: now,
     until: now + dur,
     ms: dur,
     side: side | 0,
-    kind: kind === 'ufo' ? 'ufo' : 'common'
+    kind: k
   });
 }
 
@@ -17233,7 +17241,7 @@ function drawEnemyCommonCharges() {
       continue;
     }
     const kind = ch.kind || e.kind;
-    if (kind !== 'common' && kind !== 'ufo') {
+    if (kind !== 'common' && kind !== 'ufo' && kind !== 'worm') {
       enemyCharges.delete(id);
       continue;
     }
@@ -17242,6 +17250,15 @@ function drawEnemyCommonCharges() {
       continue;
     }
     if (kind === 'common' && e.kind !== 'common') {
+      enemyCharges.delete(id);
+      continue;
+    }
+    if (kind === 'worm' && e.kind !== 'worm') {
+      enemyCharges.delete(id);
+      continue;
+    }
+    // Worm laser aim charge: timed to ENEMY_WORM_AIM_TICKS (clear early once beam starts).
+    if (kind === 'worm' && (e.wormPhase | 0) >= 2) {
       enemyCharges.delete(id);
       continue;
     }
@@ -17294,8 +17311,9 @@ function drawEnemyCommonCharges() {
       continue;
     }
 
-    for (let g = 0; g < ENEMY_COMMON_GUNS.length; g++) {
-      const gun = ENEMY_COMMON_GUNS[g];
+    const guns = kind === 'worm' ? ENEMY_WORM_GUNS : ENEMY_COMMON_GUNS;
+    for (let g = 0; g < guns.length; g++) {
+      const gun = guns[g];
       let w = localToWorldBanked(gun[0], gun[1], gun[2], p.x, p.y, p.angle, bank);
       if (shake > 0) {
         const ph = now * 0.055 + id * 2.1 + g * 1.3;
@@ -17309,8 +17327,8 @@ function drawEnemyCommonCharges() {
     // Late-phase core flash between the guns.
     if (t > 0.75) {
       const flash = (t - 0.75) / 0.25;
-      const g0 = ENEMY_COMMON_GUNS[0];
-      const g1 = ENEMY_COMMON_GUNS[1];
+      const g0 = guns[0];
+      const g1 = guns[1];
       const mid = localToWorldBanked(
         (g0[0] + g1[0]) * 0.5,
         (g0[1] + g1[1]) * 0.5,

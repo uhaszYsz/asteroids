@@ -576,12 +576,14 @@ function emitEnemySnap(room) {
   roomBroadcast(room, { t: 'es', st: Date.now(), e: list });
 }
 
-/** Common / UFO about to fire — charge telegraph for clients. */
+/** Common / UFO / worm about to fire — charge telegraph for clients. */
 function emitEnemyCharge(room, e, opts) {
-  if (!e || (e.kind !== 'common' && e.kind !== 'ufo')) return;
+  if (!e || (e.kind !== 'common' && e.kind !== 'ufo' && e.kind !== 'worm')) return;
   const ms = e.kind === 'ufo'
     ? Math.round((ENEMY_UFO_CHARGE * 1000) / TPS)
-    : Math.round((ENEMY_COMMON_CHARGE * 1000) / TPS);
+    : e.kind === 'worm'
+      ? Math.round((ENEMY_WORM_AIM_TICKS * 1000) / TPS)
+      : Math.round((ENEMY_COMMON_CHARGE * 1000) / TPS);
   roomBroadcast(room, {
     t: 'ech',
     id: e.id | 0,
@@ -930,6 +932,8 @@ function beginWormLaserAttack(room, e) {
   e.vx = 0;
   e.vy = 0;
   emitEnemyUpdate(room, e);
+  // Same red charge-sphere telegraph as commons, for the full aim window.
+  emitEnemyCharge(room, e);
 }
 
 function beginWormRocketAttack(room, e) {
