@@ -1412,7 +1412,12 @@ function stepEnemyMovement(e) {
   const dx = e.tx - e.x;
   const dy = e.ty - e.y;
   const dist = Math.hypot(dx, dy);
-  if (dist <= ENEMY_ARRIVE_R) return true;
+  if (dist <= ENEMY_ARRIVE_R) {
+    if (e.kind === 'ufo') {
+      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_UFO_SPIN * Math.PI) / 180;
+    }
+    return true;
+  }
 
   const desired = Math.atan2(dy, dx);
   const carrierLocked = e.kind === 'carrier' && (e.bursting || (e.railChargeLeft | 0) > 0);
@@ -1424,9 +1429,17 @@ function stepEnemyMovement(e) {
     e.vy = Math.sin(e.dir) * enemySpeed(e);
     e.x += e.vx;
     e.y += e.vy;
-    if (!carrierLocked) e.angle = e.dir;
+    if (e.kind === 'ufo') {
+      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_UFO_SPIN * Math.PI) / 180;
+    } else if (!carrierLocked) {
+      e.angle = e.dir;
+    }
   } else {
-    if (!carrierLocked) {
+    if (e.kind === 'ufo') {
+      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_UFO_SPIN * Math.PI) / 180;
+      // Keep travel along desired; dir tracks path for wander retargets.
+      e.dir = desired;
+    } else if (!carrierLocked) {
       e.angle = desired;
       e.dir = desired;
     }
@@ -1444,6 +1457,7 @@ function updateEnemies(room) {
   const target = soloHumanTarget(room);
   pushSoloAimHist(room, target);
   let wormHolding = false;
+  let ufoSpinning = false;
 
   for (let i = room.enemies.length - 1; i >= 0; i--) {
     const e = room.enemies[i];
@@ -1457,6 +1471,7 @@ function updateEnemies(room) {
       }
       continue;
     }
+    if (e.kind === 'ufo') ufoSpinning = true;
     if ((e.fireCd | 0) > 0) e.fireCd--;
     // Pre-shot charge telegraph (commons 1s, UFO turrets 0.5s).
     if (e.kind === 'common' && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
@@ -1492,9 +1507,9 @@ function updateEnemies(room) {
   }
 
   // Periodic full pose snap (~2 Hz) so clients stay locked.
-  // Worm aim turns every tick — snap every frame while any worm is holding.
+  // Worm aim / UFO spin turn every tick — snap every frame while either is active.
   room.enemySnapLeft = (room.enemySnapLeft | 0) - 1;
-  if (wormHolding || (room.enemySnapLeft | 0) <= 0) {
+  if (wormHolding || ufoSpinning || (room.enemySnapLeft | 0) <= 0) {
     room.enemySnapLeft = ENEMY_SNAP_INTERVAL;
     emitEnemySnap(room);
   }
