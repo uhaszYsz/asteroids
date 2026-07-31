@@ -17073,17 +17073,26 @@ const ENEMY_COMMON_GUNS = [
   [7 * RES_SCALE, 2.4 * RES_SCALE, 0],
   [7 * RES_SCALE, -2.4 * RES_SCALE, 0]
 ];
-/** Worm laser charge — one commons-style sphere at sprite tip (local y=0, z=0). */
-const ENEMY_WORM_CHARGE_TIP = [
-  // Nose–tail half-length of craft 367 (fh) × worm sprite scale.
-  49 * 0.5 * ENEMY_WORM_SPRITE_SCALE,
-  0,
-  0
-];
 const COL_CHARGE_RED = [1.0, 0.12, 0.1];
 const enemyCharges = new Map(); // id -> { start, until, ms, side, kind }
 /** Last bank used while drawing commons / UFOs — charge orbs match hull roll. */
 const enemyDrawBank = new Map();
+
+/** Live craft-367 nose half-length (same formula as drawSpriteShipPlane). */
+function wormSpriteHalfLength() {
+  const opt = getShipOptionById(ENEMY_WORM_SPRITE_ID);
+  const spec = opt && opt.sprite;
+  const fh = spec ? Math.max(1, spec.fh) : 49;
+  return fh * 0.5 * SPRITE_SHIP_PX_SCALE * ENEMY_WORM_SPRITE_SCALE;
+}
+
+/** Bank actually applied to worm tube planes (0.5× turn bank + vib + length spin). */
+function wormSpriteVisualBank(id, baseBank) {
+  return (baseBank || 0) * 0.5
+    + hitVibrationRoll('e', id)
+    + performance.now() * 0.001 * ENEMY_WORM_SPIN_RATE
+    + (id | 0) * 0.73;
+}
 
 function beginEnemyCharge(id, ms, side, kind) {
   const dur = Math.max(200, ms | 0 || 1000);
@@ -17178,11 +17187,15 @@ function localToWorldBanked(lx, ly, lz, cx, cy, yaw, bank) {
   };
 }
 
-function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha) {
+function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const mesh = ENEMY_CHARGE_SPHERE;
   const s = Math.max(0.4, radius);
-  const verts = mesh.verts.map((v) => [v[0] * s, v[1] * s, v[2] * s]);
-  const { xy, depth } = projectMesh3D(verts, cx, cy, yaw, spin);
+  const ox = opts && opts.localX != null ? +opts.localX : 0;
+  const oy = opts && opts.localY != null ? +opts.localY : 0;
+  const oz = opts && opts.localZ != null ? +opts.localZ : 0;
+  const lift = opts && opts.lift != null ? opts.lift : SHIP3D_LIFT;
+  const verts = mesh.verts.map((v) => [v[0] * s + ox, v[1] * s + oy, v[2] * s + oz]);
+  const { xy, depth } = projectMesh3D(verts, cx, cy, yaw, spin, lift);
   const faces = mesh.faces;
   const order = faces.map((f, i) => {
     const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
@@ -17314,22 +17327,31 @@ function drawEnemyCommonCharges() {
     }
 
     if (kind === 'worm') {
-      // Single tip sphere, 2× commons size — local [halfL, 0, 0].
-      const tip = ENEMY_WORM_CHARGE_TIP;
-      let w = localToWorldBanked(tip[0], tip[1], tip[2], p.x, p.y, p.angle, bank);
+      // Embed sphere at tube tip [halfL, 0, 0] — same bank + SPRITE_ROOF_LIFT as planes.
+      const halfL = wormSpriteHalfLength();
+      const visBank = wormSpriteVisualBank(id, bank);
+      const vs = voidShakeOffset('e', id);
+      let sx = p.x + vs.x;
+      let sy = p.y + vs.y;
       if (shake > 0) {
         const ph = now * 0.055 + id * 2.1;
-        w = {
-          x: w.x + Math.cos(ph) * shake,
-          y: w.y + Math.sin(ph * 1.37) * shake
-        };
+        sx += Math.cos(ph) * shake;
+        sy += Math.sin(ph * 1.37) * shake;
       }
       const wr = r * 2;
-      drawEnemyChargeSphere(w.x, w.y, wr, p.angle, spin, COL_CHARGE_RED, alpha);
+      drawEnemyChargeSphere(sx, sy, wr, p.angle, visBank, COL_CHARGE_RED, alpha, {
+        lift: SPRITE_ROOF_LIFT,
+        localX: halfL,
+        localY: 0,
+        localZ: 0
+      });
       if (t > 0.75) {
         const flash = (t - 0.75) / 0.25;
+        const tip = projectMesh3D(
+          [[halfL, 0, 0]], sx, sy, p.angle, visBank, SPRITE_ROOF_LIFT
+        );
         drawFilledPoly(
-          circleVerts(w.x, w.y, (1.2 + flash * 2.2) * RES_SCALE * 2, 16),
+          circleVerts(tip.xy[0], tip.xy[1], (1.2 + flash * 2.2) * RES_SCALE * 2, 16),
           COL_CHARGE_RED,
           0.2 + flash * 0.55,
           true
