@@ -131,7 +131,8 @@ function enemyShotTypeScale(type, length, width) {
     const Ww = width != null && Number.isFinite(+width) ? +width : 15;
     return Math.max(L, Ww) / 15;
   }
-  return 1;
+  // Common enemy shots: half base scale.
+  return 0.5;
 }
 
 /** Collision / cl_hitbox radius = visible solid white core. */
@@ -504,10 +505,10 @@ const ENEMY_WORM_SHOTGUN = {
   spread: 360,
   cooldown: 40,
   reload: Math.round(1 * TPS),
-  spdMin: 3.5,
-  spdMax: 6.5,
-  sizeMin: 7,
-  sizeMax: 30,
+  spdMin: 1.75,
+  spdMax: 3.25,
+  sizeMin: 3.5,
+  sizeMax: 15,
   dmg: 18
 };
 /** Player rocket: launch at 0, then accel up to WEAPONS.rocket.speed. */

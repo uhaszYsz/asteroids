@@ -15428,7 +15428,8 @@ function enemyShotTypeScale(type, length, width) {
     const Ww = width != null && Number.isFinite(+width) ? +width : 15;
     return Math.max(L, Ww) / 15;
   }
-  return 1;
+  // Common enemy shots: half base scale.
+  return 0.5;
 }
 
 function enemyShotCoreRadius(type, length, width) {
@@ -15519,7 +15520,7 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
     return null;
   }
   if (type === 'enemy' || type === 'enemySpinner' || type === 'enemyWorm') {
-    let scale = 1;
+    let scale = 0.5; // Common enemy shots: half base scale.
     if (type === 'enemySpinner') scale = 20 / 15;
     else if (type === 'enemyWorm') {
       const L = sizeOpts && sizeOpts.length != null ? +sizeOpts.length : 15;
