@@ -2439,7 +2439,7 @@ function applyInput(p) {
     p.vx += Math.cos(p.angle) * THRUST;
     p.vy += Math.sin(p.angle) * THRUST;
   }
-  clampSpeed(p);
+  limitPlayerSpeed(p);
 }
 
 /** True while still inside the spawn face-off circle. */
@@ -2831,7 +2831,7 @@ function applyShipCrash(room, p, nx, ny, overlap, dmg, bounceScale) {
     p.vy += ny * (1.2 * RES_SCALE * e);
   }
   p.stunned = true;
-  clampSpeed(p);
+  limitPlayerSpeed(p);
   if (overlap > 0) {
     p.x += nx * (overlap + 3);
     p.y += ny * (overlap + 3);

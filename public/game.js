@@ -857,6 +857,8 @@ const TURN_DECEL_FRAMES = 5;                     // release → 0 in this many t
 const TURN_DECEL_REVERSE_FRAMES = Math.max(1, (TURN_DECEL_FRAMES / 2) | 0);
 const THRUST = 0.09 * RES_SCALE * 1.15 * 1.2 * 1.2 * 0.85;  // prior buffs, then −15%
 const MAX_SPEED = 8 * RES_SCALE * 0.8 * 0.75 * 0.75;   // −25%, then −25% again
+/** Above MAX_SPEED: shed this much speed per second (no hard clip). */
+const OVERSPEED_DECEL = 2;
 const STUN_MAX_SPEED = 9;
 const ASTEROID_COLLIDE_DMG_MIN = 10;
 /** Collision shape is this fraction of visual radius / polygon (visual unchanged). */
@@ -14941,7 +14943,7 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
   const spawnSt = row[6];
   const count = Math.max(1, row[8] | 0);
   const w = WEAPONS.shotgun;
-  const [spdMin, spdMax] = w.shotgunSpeeds || [7.5 * RES_SCALE, 10.5 * RES_SCALE];
+  const [spdMin, spdMax] = w.shotgunSpeeds || [7.5 * RES_SCALE * 0.85, 10.5 * RES_SCALE * 0.85];
   const spreadRad = ((w.spread != null ? w.spread : 30) || 0) * Math.PI / 180;
   const rnd = makeShotgunRng(x, y);
   if (withMuzzle) {
@@ -17347,6 +17349,24 @@ function clampSpeed(o) {
   }
 }
 
+/** Soft speed limit for ships: decelerate toward MAX_SPEED instead of hard clipping. */
+function limitPlayerSpeed(o) {
+  const s = Math.hypot(o.vx, o.vy);
+  if (s < 1e-8) return;
+  if (o.stunned) {
+    if (s > STUN_MAX_SPEED) {
+      o.vx = o.vx / s * STUN_MAX_SPEED;
+      o.vy = o.vy / s * STUN_MAX_SPEED;
+    }
+    return;
+  }
+  if (s <= MAX_SPEED) return;
+  const next = Math.max(MAX_SPEED, s - OVERSPEED_DECEL / TPS);
+  const scale = next / s;
+  o.vx *= scale;
+  o.vy *= scale;
+}
+
 function applyTurn(o, l, r, sh) {
   const dir = (l && !r) ? -1 : ((r && !l) ? 1 : 0);
   const precise = !!sh;
@@ -17537,7 +17557,7 @@ function hitPlayerAsteroidLocal(p, a, hit, src) {
     p.vy += ny * (1.2 * RES_SCALE * e);
   }
   p.stunned = true;
-  clampSpeed(p);
+  limitPlayerSpeed(p);
   if (hit.overlap > 0) {
     p.x += nx * (hit.overlap + 3);
     p.y += ny * (hit.overlap + 3);
@@ -17607,7 +17627,7 @@ function hitPlayerShipLocal(p, other, hit) {
     p.vy += ny * (1.2 * RES_SCALE);
   }
   p.stunned = true;
-  clampSpeed(p);
+  limitPlayerSpeed(p);
   if (hit.overlap > 0) {
     p.x += nx * (hit.overlap + 2);
     p.y += ny * (hit.overlap + 2);
@@ -17727,7 +17747,7 @@ function applyInputTo(o, inp, opts) {
     o.vx += Math.cos(o.angle) * THRUST;
     o.vy += Math.sin(o.angle) * THRUST;
   }
-  clampSpeed(o);
+  limitPlayerSpeed(o);
   o.x += o.vx;
   o.y += o.vy;
   wrapEntity(o);

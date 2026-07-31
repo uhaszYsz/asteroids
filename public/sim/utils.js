@@ -13,6 +13,24 @@ function clampSpeed(o) {
   }
 }
 
+/** Soft speed limit for ships: decelerate toward MAX_SPEED instead of hard clipping. */
+function limitPlayerSpeed(o) {
+  const s = Math.hypot(o.vx, o.vy);
+  if (s < 1e-8) return;
+  if (o.stunned) {
+    if (s > STUN_MAX_SPEED) {
+      o.vx = o.vx / s * STUN_MAX_SPEED;
+      o.vy = o.vy / s * STUN_MAX_SPEED;
+    }
+    return;
+  }
+  if (s <= MAX_SPEED) return;
+  const next = Math.max(MAX_SPEED, s - OVERSPEED_DECEL / TPS);
+  const scale = next / s;
+  o.vx *= scale;
+  o.vy *= scale;
+}
+
 /** Shortest signed delta from a → b in (-π, π]. */
 function angleDeltaToward(from, to) {
   let d = to - from;

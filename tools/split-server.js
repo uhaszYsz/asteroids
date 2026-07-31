@@ -34,6 +34,7 @@ function findFnEnd(startLine) {
 const UTIL_NAMES = [
   'wrap',
   'clampSpeed',
+  'limitPlayerSpeed',
   'torusDistSq',
   'wrapDelta',
   'hitCircleCircle',
