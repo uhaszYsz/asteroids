@@ -15138,6 +15138,10 @@ function bulletAgeTicks(b) {
   return Math.max(0, (now - b.spawnSt) / 1000 * TPS);
 }
 
+/** Mirror of server player-rocket accel boost (visual dead-reckon). */
+const ROCKET_ACCEL_BOOST_SPEED = 3;
+const ROCKET_ACCEL_BOOST_MULT = 3;
+
 /** Server spawn + NTP age. */
 function bulletTrueAt(b) {
   const age = bulletAgeTicks(b);
@@ -15176,7 +15180,11 @@ function bulletTrueAt(b) {
       const s = Math.sin(ang);
       let spd = vx * c + vy * s;
       if (accel > 0) {
-        spd += accel;
+        let step = accel;
+        if ((b.owner | 0) > 0 && Math.abs(spd) >= ROCKET_ACCEL_BOOST_SPEED) {
+          step = accel * ROCKET_ACCEL_BOOST_MULT;
+        }
+        spd += step;
         if (maxSpd > 0) spd = Math.min(maxSpd, spd);
       }
       vx = c * spd;

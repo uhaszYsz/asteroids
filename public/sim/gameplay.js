@@ -5401,7 +5401,8 @@ function rocketHomingTarget(room, b) {
 }
 
 /** Accel + per-rocket homing (degrees/tick). Mutates vx/vy.
- *  Speed is signed along flightAng (or velocity heading) so launch can be reverse. */
+ *  Speed is signed along flightAng (or velocity heading) so launch can be reverse.
+ *  Player rockets: base accel below boost speed, ×boost mult at/above it. */
 function applyRocketFlight(room, b) {
   if (!b || b.type !== 'rocket') return;
   const accel = +b.accel || 0;
@@ -5422,7 +5423,11 @@ function applyRocketFlight(room, b) {
   const s = Math.sin(ang);
   let spd = b.vx * c + b.vy * s;
   if (accel > 0) {
-    spd += accel;
+    let step = accel;
+    if ((b.owner | 0) > 0 && Math.abs(spd) >= ROCKET_ACCEL_BOOST_SPEED) {
+      step = accel * ROCKET_ACCEL_BOOST_MULT;
+    }
+    spd += step;
     if (maxSpd > 0) spd = Math.min(maxSpd, spd);
   }
   b.vx = c * spd;
