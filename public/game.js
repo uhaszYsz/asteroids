@@ -17926,6 +17926,24 @@ function reconcileFromServer(row) {
     return;
   }
 
+  // Offline local host: same-process sim — pose snaps fight client predict and feel like lag.
+  // Trust prediction; only pull HP / stun / god (and input ack above).
+  if (usingLocalSolo || (ws && ws.__local)) {
+    player.hp = row[6];
+    player.stunned = srvStunned;
+    player.godLeft = srvGod;
+    softErr.x = 0;
+    softErr.y = 0;
+    softErr.angle = 0;
+    if (prevHp > 0 && (player.hp | 0) < prevHp && (player.hp | 0) > 0 && !deathSpectating) {
+      emitDamageTakenFx(player.x, player.y);
+    }
+    lastAppliedSeq = Math.max(lastAppliedSeq | 0, ack);
+    predReady = true;
+    if (clientTickCursor == null) clientTickCursor = Math.floor(estimatedServerTick());
+    return;
+  }
+
   const prevX = player.x + softErr.x;
   const prevY = player.y + softErr.y;
   const prevA = player.angle + softErr.angle;
@@ -17957,8 +17975,7 @@ function reconcileFromServer(row) {
   // Soft visual correction: keep old on-screen pose, bleed error out over time.
   // Use toroidal deltas so edge-wraps don't create a full-map rubber-band.
   // Large drift → hard teleport, unless tab-resume blend window is active.
-  // Local solo: same-process host — softErr only adds visible lag/jitter.
-  if (cv('cl_recon') <= 0 || usingLocalSolo || (ws && ws.__local)) {
+  if (cv('cl_recon') <= 0) {
     softErr.x = 0;
     softErr.y = 0;
     softErr.angle = 0;
