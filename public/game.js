@@ -14046,6 +14046,8 @@ let lastRttMs = 0;
 let rttSpikeUntil = 0;
 let syncTick = 0;
 let syncSt = 0;
+/** performance.now() when syncTick was last set — solo tick estimate (matches local hrtime). */
+let syncStPerf = 0;
 /** Visual soft-correction residual after hard sim reconcile. */
 const softErr = { x: 0, y: 0, angle: 0 };
 /** Remote pose history for interpolation: id -> [{st,x,y,vx,vy,angle,hp}] */
@@ -14058,9 +14060,25 @@ function resetClockSync() {
   pingJitter = 0;
   lastRttMs = 0;
   rttSpikeUntil = 0;
+  syncStPerf = 0;
 }
 
 function applyNtp(ct, st, serverTick) {
+  // In-browser local host shares the JS thread with the sim. Date.now()/NTP
+  // extrapolation races the setTimeout tick loop and floods input → solo lag.
+  if (isOfflineLocalPlay()) {
+    pingMs = 0;
+    pingJitter = 0;
+    lastRttMs = 0;
+    clockOffset = 0;
+    clockOffsetReady = true;
+    if (!inGame || !syncSt) {
+      if (serverTick) syncTick = serverTick | 0;
+      syncSt = st;
+      syncStPerf = performance.now();
+    }
+    return;
+  }
   const t3 = Date.now();
   const rtt = Math.max(0, t3 - ct);
   lastRttMs = rtt;
@@ -14274,6 +14292,16 @@ function gameTimeSec() {
 /** Continuous server tick estimate from NTP (same timeline the host steps on). */
 function estimatedServerTick() {
   if (!syncSt) return 0;
+  if (isOfflineLocalPlay()) {
+    // Local sim steps on performance.now() (see local-server hrtime). Wall-clock
+    // Date.now()+NTP drifts ahead of setTimeout → input flood → laggy/ghost lasers.
+    let t = syncTick;
+    if (syncStPerf > 0) t = syncTick + (performance.now() - syncStPerf) / TICK_MS;
+    // Never more than one tick ahead of the last authoritative snap.
+    if (t > syncTick + 1) t = syncTick + 1;
+    if (t < syncTick) t = syncTick;
+    return t;
+  }
   return syncTick + (serverNow() - syncSt) / TICK_MS;
 }
 
@@ -18091,6 +18119,7 @@ function applyBinarySnap(buf) {
     if (syncSt && tick + 30 < syncTick) resetTickClock();
     syncTick = tick;
     syncSt = st;
+    if (isOfflineLocalPlay()) syncStPerf = performance.now();
   }
   const seen = new Set();
   let o = 14;
@@ -18573,6 +18602,7 @@ function enterGameFromWelcome(msg) {
   // Re-assert room clock after NTP (inGame is already true so applyNtp won't overwrite).
   syncTick = msg.tick | 0;
   syncSt = msg.st != null ? msg.st : syncSt;
+  if (isOfflineLocalPlay()) syncStPerf = performance.now();
   if (msg.you) reconcileFromServer(msg.you);
   applyRemotePlayers(msg.players, syncSt);
   if (msg.powerupsByPlayer) {
@@ -19784,7 +19814,7 @@ async function ensureLocalSoloSocket() {
   usingLocalSolo = true;
   connected = true;
   // #region agent log
-  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:726,local:1,maxUnack:2},runId:'post-fix'});
+  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:727,local:1,maxUnack:2,ntpOff:1},runId:'post-fix'});
   // #endregion
   resetClockSync();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
