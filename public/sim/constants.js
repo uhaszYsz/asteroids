@@ -397,15 +397,12 @@ const ENEMY_HP = {
   worm: 1000,
   spinner: 320
 };
-/** Spinner: 2-way radial burst (180°); spin step starts at spinStart° and grows spinGrow° each volley.
- *  Hull also spins constantly at hullSpin °/tick. */
+/** Spinner: 2-way radial burst (180°); shoot angle advances `spin` degrees after each volley. */
 const ENEMY_SPINNER = {
   ammo: 25,
   cooldown: 7,
   reload: Math.round(5 * TPS),
-  spinStart: 5,
-  spinGrow: 2,
-  hullSpin: 13,
+  spin: 13,
   speed: ENEMY_COMMON_BULLET_SPEED,
   dmg: 12
 };

@@ -679,7 +679,6 @@ function makeEnemy(kind, wave, weapon) {
   if (k === 'spinner') {
     e.shootAmmo = ENEMY_SPINNER.ammo;
     e.spinAng = Math.random() * Math.PI * 2;
-    e.spinStepDeg = ENEMY_SPINNER.spinStart;
   }
   return e;
 }
@@ -1296,10 +1295,7 @@ function updateSpinnerWeapon(room, e) {
   if ((e.shootCd | 0) > 0) e.shootCd--;
   if ((e.reloadLeft | 0) > 0) {
     e.reloadLeft--;
-    if (e.reloadLeft === 0) {
-      e.shootAmmo = ENEMY_SPINNER.ammo;
-      e.spinStepDeg = ENEMY_SPINNER.spinStart;
-    }
+    if (e.reloadLeft === 0) e.shootAmmo = ENEMY_SPINNER.ammo;
     return;
   }
   if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) {
@@ -1314,9 +1310,7 @@ function updateSpinnerWeapon(room, e) {
       ENEMY_SPINNER.speed, ENEMY_SPINNER.dmg, 'enemySpinner'
     );
   }
-  let spinDeg = Number.isFinite(e.spinStepDeg) ? e.spinStepDeg : ENEMY_SPINNER.spinStart;
-  e.spinAng = base + (spinDeg * Math.PI) / 180;
-  e.spinStepDeg = spinDeg + ENEMY_SPINNER.spinGrow;
+  e.spinAng = base + (ENEMY_SPINNER.spin * Math.PI) / 180;
   e.shootAmmo--;
   e.shootCd = ENEMY_SPINNER.cooldown;
   if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_SPINNER.reload;
@@ -1412,12 +1406,7 @@ function stepEnemyMovement(e) {
   const dx = e.tx - e.x;
   const dy = e.ty - e.y;
   const dist = Math.hypot(dx, dy);
-  if (dist <= ENEMY_ARRIVE_R) {
-    if (e.kind === 'spinner') {
-      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_SPINNER.hullSpin * Math.PI) / 180;
-    }
-    return true;
-  }
+  if (dist <= ENEMY_ARRIVE_R) return true;
 
   const desired = Math.atan2(dy, dx);
   const carrierLocked = e.kind === 'carrier' && (e.bursting || (e.railChargeLeft | 0) > 0);
@@ -1429,16 +1418,9 @@ function stepEnemyMovement(e) {
     e.vy = Math.sin(e.dir) * enemySpeed(e);
     e.x += e.vx;
     e.y += e.vy;
-    if (e.kind === 'spinner') {
-      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_SPINNER.hullSpin * Math.PI) / 180;
-    } else if (!carrierLocked) {
-      e.angle = e.dir;
-    }
+    if (!carrierLocked) e.angle = e.dir;
   } else {
-    if (e.kind === 'spinner') {
-      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_SPINNER.hullSpin * Math.PI) / 180;
-      e.dir = desired;
-    } else if (!carrierLocked) {
+    if (!carrierLocked) {
       e.angle = desired;
       e.dir = desired;
     }
@@ -1456,7 +1438,6 @@ function updateEnemies(room) {
   const target = soloHumanTarget(room);
   pushSoloAimHist(room, target);
   let wormHolding = false;
-  let spinnerSpinning = false;
 
   for (let i = room.enemies.length - 1; i >= 0; i--) {
     const e = room.enemies[i];
@@ -1470,7 +1451,6 @@ function updateEnemies(room) {
       }
       continue;
     }
-    if (e.kind === 'spinner') spinnerSpinning = true;
     if ((e.fireCd | 0) > 0) e.fireCd--;
     // Pre-shot charge telegraph (commons 1s, UFO turrets 0.5s).
     if (e.kind === 'common' && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
@@ -1506,9 +1486,9 @@ function updateEnemies(room) {
   }
 
   // Periodic full pose snap (~2 Hz) so clients stay locked.
-  // Worm aim / spinner hull spin turn every tick — snap every frame while either is active.
+  // Worm aim turns every tick — snap every frame while any worm is holding.
   room.enemySnapLeft = (room.enemySnapLeft | 0) - 1;
-  if (wormHolding || spinnerSpinning || (room.enemySnapLeft | 0) <= 0) {
+  if (wormHolding || (room.enemySnapLeft | 0) <= 0) {
     room.enemySnapLeft = ENEMY_SNAP_INTERVAL;
     emitEnemySnap(room);
   }
