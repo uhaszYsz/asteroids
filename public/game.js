@@ -10699,8 +10699,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const halfL = Math.max(1, spec.fh) * 0.5 * sc;
   const halfW = Math.max(1, spec.fw) * 0.5 * sc;
   const tube = !flat && !hexDome && !!(opts && opts.tube);
-  // Worm bend was half-pitch; 2× that = full SPRITE_ROOF_PITCH.
-  // wingY/drop keep outer edges on z=0 (90° copies → edges on y=0).
+  // Tube: wing tips on z=0 so roof + mirror share those side edges.
   const pitch = SPRITE_ROOF_PITCH;
   const cp = Math.cos(pitch);
   const sp = Math.sin(pitch);
@@ -10773,7 +10772,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
       }
     ];
   } else if (tube) {
-    // Diamond tube: outer edges sit on z=0; ridge bend is ±drop (not on the midplane).
+    // Roof + mirrored under: outer long edges share y=±wingY, z=0 so they touch
+    // (no 90° copy — that crossed the diamond and clipped).
     panels = [
       {
         verts: [
@@ -10812,15 +10812,6 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         uvs: uvsR
       }
     ];
-    // Second diamond: same 4 faces spun 90° around length (+X) → 8 faces total.
-    const n0 = panels.length;
-    for (let i = 0; i < n0; i++) {
-      const src = panels[i];
-      panels.push({
-        verts: src.verts.map((v) => [v[0], -v[2], v[1]]),
-        uvs: src.uvs
-      });
-    }
   } else {
     // Left / right halves share the ridge (y=0,z=0); tips fold down like a roof.
     panels = [
@@ -16507,8 +16498,8 @@ const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_WORM_SPRITE_ID = 'enemy_184';
 const ENEMY_WORM_SPRITE_SCALE = 1;
-/** Continuous roll around nose / length axis (rad/s). Doubled while laser-attack holding. */
-const ENEMY_WORM_SPIN_RATE = 3.2;
+/** Continuous roll around nose / length axis (rad/s). Fixed — no attack multiplier. */
+const ENEMY_WORM_SPIN_RATE = 1.5;
 const ENEMY_SPINNER_SPRITE_ID = 'enemy_27';
 const ENEMY_SPINNER_SPRITE_SCALE = 1;
 const ENEMY_COMMON_MESH = (() => {
@@ -16685,15 +16676,14 @@ function drawEnemyCommon(x, y, angle, color, id, dt) {
 }
 
 /** Worm: craft 184 on 4 planes (roof + mirrored under), spinning along length. */
-function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
+function drawEnemyWorm(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_WORM_SPRITE_ID);
-  const spin = ENEMY_WORM_SPIN_RATE * (wormAtk ? 2 : 1);
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       bank, ENEMY_WORM_SPRITE_SCALE, COL.enemyOutline,
-      { tube: true, spinRate: spin }
+      { tube: true, spinRate: ENEMY_WORM_SPIN_RATE }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
@@ -17130,7 +17120,7 @@ function drawEnemies(dt) {
     if (p.kind === 'ufo') drawEnemyUfo(x, y, p.angle, COL.enemyUfo, id, dt);
     else if (p.kind === 'carrier') drawEnemyCarrier(x, y, p.angle, e.weapon);
     else if (p.kind === 'worm') {
-      const bank = drawEnemyWorm(x, y, p.angle, COL.enemy, id, dt, !!e.wormAtk);
+      const bank = drawEnemyWorm(x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
     } else if (p.kind === 'spinner') {
       const bank = drawEnemySpinner(x, y, p.angle, COL.enemy, id, dt);
