@@ -10862,8 +10862,11 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     bank += vib;
     if (tiltXDeg) bank += tiltXDeg * Math.PI / 180;
   }
+  const spinAng = opts && opts.spinAngle;
   const spinRate = opts && opts.spinRate;
-  if (!flat && !hexDome && spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
+  if (!flat && !hexDome && spinAng != null && Number.isFinite(+spinAng)) {
+    bank += +spinAng;
+  } else if (!flat && !hexDome && spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
     bank += performance.now() * 0.001 * spinRate + (id | 0) * 0.73;
   }
   let drawAng = angle;
@@ -11028,7 +11031,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   }
 
   // Painter's algorithm when spinning / multi-sided (skip tube — uses Z-buffer).
-  if (!tube && (panels.length > 2 || (spinRate && spinRate !== 0) || (yawSpinDpt && yawSpinDpt !== 0) || leanY)) {
+  if (!tube && (panels.length > 2 || (spinRate && spinRate !== 0) || (spinAng != null && Number.isFinite(+spinAng)) || (yawSpinDpt && yawSpinDpt !== 0) || leanY)) {
     for (let p = 0; p < panels.length; p++) {
       panels[p]._i = p;
       const { depth } = projectPanel(panels[p].verts);
@@ -16639,6 +16642,7 @@ function removeEnemy(id, x, y, silent) {
   clearEnemyBank(id);
   clearHitVibration('e', id);
   enemyDrawBank.delete(id | 0);
+  wormSpinState.delete(id | 0);
   shipSmokeLeaks.delete(enemySmokeLeakId(id));
   const e = enemies.get(id);
   enemies.delete(id);
@@ -16796,8 +16800,38 @@ const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_WORM_SPRITE_ID = 'enemy_367';
 const ENEMY_WORM_SPRITE_SCALE = 1.6;
-/** Continuous roll around nose / length axis (rad/s). Fixed — no attack multiplier. */
+/** Continuous roll around nose / length axis (rad/s) while wandering. */
 const ENEMY_WORM_SPIN_RATE = 2.25;
+/** Laser-aim charge spin multiplier vs wander. */
+const ENEMY_WORM_SPIN_CHARGE_MULT = 3;
+/** Integrated length-axis spin (avoids jumps when rate changes). */
+const wormSpinState = new Map(); // id -> { ang, last }
+
+function wormLengthSpinRate(id) {
+  const e = enemies.get(id | 0);
+  // Phase 1 = laser aim / charge telegraph.
+  if (e && e.kind === 'worm' && (e.wormPhase | 0) === 1) {
+    return ENEMY_WORM_SPIN_RATE * ENEMY_WORM_SPIN_CHARGE_MULT;
+  }
+  return ENEMY_WORM_SPIN_RATE;
+}
+
+function wormLengthSpinAngle(id) {
+  const now = performance.now();
+  const rate = wormLengthSpinRate(id);
+  let s = wormSpinState.get(id | 0);
+  if (!s) {
+    s = { ang: (id | 0) * 0.73, last: now };
+    wormSpinState.set(id | 0, s);
+    return s.ang;
+  }
+  const dt = Math.min(0.05, Math.max(0, (now - s.last) * 0.001));
+  if (dt > 0) {
+    s.last = now;
+    s.ang += rate * dt;
+  }
+  return s.ang;
+}
 const ENEMY_SPINNER_SPRITE_ID = 'enemy_27';
 const ENEMY_SPINNER_SPRITE_SCALE = 1;
 const ENEMY_COMMON_MESH = (() => {
@@ -16982,7 +17016,7 @@ function drawEnemyWorm(x, y, angle, color, id, dt) {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       bank, ENEMY_WORM_SPRITE_SCALE, COL.enemyOutline,
-      { tube: true, spinRate: ENEMY_WORM_SPIN_RATE }
+      { tube: true, spinAngle: wormLengthSpinAngle(id) }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
@@ -17092,8 +17126,7 @@ function wormSpriteHalfLength() {
 function wormSpriteVisualBank(id, baseBank) {
   return (baseBank || 0) * 0.5
     + hitVibrationRoll('e', id)
-    + performance.now() * 0.001 * ENEMY_WORM_SPIN_RATE
-    + (id | 0) * 0.73;
+    + wormLengthSpinAngle(id);
 }
 
 function clearWormChargeSuck(id) {
