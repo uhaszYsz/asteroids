@@ -4121,14 +4121,25 @@ function raycastCircleToroidal(ox, oy, dx, dy, cx, cy, cr, maxDist) {
 
 function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist) {
   let best = null;
+  // Player weapons: toroidal (wrap fights). Enemy beams (ownerId<=0): Euclidean only —
+  // worm/carrier lasers draw a straight segment; wrap hits felt like damage far from the beam.
+  const wrapPlayers = (ownerId | 0) > 0;
   for (const p of room.players.values()) {
     if (p.id === ownerId || p.hp <= 0 || p.godLeft > 0) continue;
     if (blocksFriendlyFire(room, ownerId)) continue;
     const target = lagCompPose(room, ownerId, p);
     const [front, back] = playerHitCircles(target);
-    const hitF = raycastCircleToroidal(ox, oy, dx, dy, front.x, front.y, PLAYER_HIT_R_FRONT, maxDist);
+    let hitF, hitB;
+    if (wrapPlayers) {
+      hitF = raycastCircleToroidal(ox, oy, dx, dy, front.x, front.y, PLAYER_HIT_R_FRONT, maxDist);
+      hitB = raycastCircleToroidal(ox, oy, dx, dy, back.x, back.y, PLAYER_HIT_R_BACK, maxDist);
+    } else {
+      const tF = raycastCircle(ox, oy, dx, dy, front.x, front.y, PLAYER_HIT_R_FRONT);
+      hitF = (tF != null && tF <= maxDist) ? { t: tF, x: ox + dx * tF, y: oy + dy * tF } : null;
+      const tB = raycastCircle(ox, oy, dx, dy, back.x, back.y, PLAYER_HIT_R_BACK);
+      hitB = (tB != null && tB <= maxDist) ? { t: tB, x: ox + dx * tB, y: oy + dy * tB } : null;
+    }
     if (hitF && (!best || hitF.t < best.t)) best = { ...hitF, kind: 'player', target: p };
-    const hitB = raycastCircleToroidal(ox, oy, dx, dy, back.x, back.y, PLAYER_HIT_R_BACK, maxDist);
     if (hitB && (!best || hitB.t < best.t)) best = { ...hitB, kind: 'player', target: p };
   }
   for (const a of room.asteroids) {
