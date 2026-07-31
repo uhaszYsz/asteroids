@@ -16309,28 +16309,32 @@ function laserPulse01() {
   return 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * 10 * Math.PI * 2);
 }
 
+/** Dim cyan → hot white-cyan (sphere-style emission pulse). */
 function laserPulseColor(base) {
   const b = base || COL.laser;
   const p = laserPulse01();
+  const dim = 0.22 + 0.78 * p;
   return [
-    Math.min(1, b[0] * (0.45 + 0.55 * p) + 0.2 * p),
-    Math.min(1, b[1] * (0.55 + 0.5 * p) + 0.15 * p),
-    Math.min(1, b[2] * (0.65 + 0.4 * p) + 0.1 * p)
+    Math.min(1, b[0] * dim + 0.75 * p * p),
+    Math.min(1, b[1] * dim + 0.45 * p),
+    Math.min(1, b[2] * dim + 0.35 * p)
   ];
 }
 
-/** Cyan laser segment with 10 Hz light pulse (brightness only, fixed width). */
+/** Cyan laser: fixed width, light/emission pulse only. */
 function drawLaserBeamSeg(x0, y0, x1, y1, width, color) {
   const p = laserPulse01();
   const col = laserPulseColor(color || COL.laser);
-  const w = Math.max(1, width);
-  drawThickSegment(x0, y0, x1, y1, w, col, 0.5 + 0.5 * p, false);
-  drawThickSegment(x0, y0, x1, y1, w * 1.55, col, 0.12 + 0.4 * p, true);
+  const w = Math.max(1, width | 0);
+  // Solid core — brightness swings hard with pulse.
+  drawThickSegment(x0, y0, x1, y1, w, col, 0.3 + 0.7 * p, false);
+  // Additive emission flash (same width — no size pulse).
+  drawThickSegment(x0, y0, x1, y1, w, COL_WHITE, 0.05 + 0.75 * p, true);
 }
 
 function drawLaserBeams() {
-  // Stable width within a frame.
-  const width = (2 + ((performance.now() / 40 | 0) % 5)) * RES_SCALE;
+  // Fixed beam width (old time%5 flicker looked like size pulsing).
+  const width = 4 * RES_SCALE;
   // Local laser: from local ship; range from shoot-type at burst start.
   const localOn = performance.now() < localLaserUntil && localLaserClip;
   if (localOn) {
