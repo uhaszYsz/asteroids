@@ -3,8 +3,10 @@
 function __agentLog(payload) {
   try {
     const b = JSON.stringify(Object.assign({ sessionId: 'f03469', timestamp: Date.now() }, payload));
+    let dbgUrl = '/__agent_debug';
+    try { dbgUrl = new URL('__agent_debug', location.href).href; } catch (_) {}
     if (typeof fetch === 'function') {
-      fetch('/__agent_debug', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: b }).catch(function () {});
+      fetch(dbgUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: b }).catch(function () {});
       fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f03469' },

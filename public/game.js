@@ -3,7 +3,9 @@ const RES_SCALE = 2;
 function __agentLog(payload) {
   try {
     const b = JSON.stringify(Object.assign({ sessionId: 'f03469', timestamp: Date.now() }, payload));
-    fetch('/__agent_debug', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: b }).catch(function () {});
+    let dbgUrl = '/__agent_debug';
+    try { dbgUrl = new URL('__agent_debug', location.href).href; } catch (_) {}
+    fetch(dbgUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: b }).catch(function () {});
     fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f03469' },
@@ -19782,7 +19784,7 @@ async function ensureLocalSoloSocket() {
   usingLocalSolo = true;
   connected = true;
   // #region agent log
-  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:724,local:1},runId:'same-origin'});
+  __agentLog({hypothesisId:'Z',location:'game.js:ensureLocalSoloSocket',message:'solo local socket ready',data:{v:725,local:1},runId:'asteroids-path'});
   // #endregion
   resetClockSync();
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
