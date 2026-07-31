@@ -14363,6 +14363,20 @@ function syncSimTicks() {
   if (!canProduceInputFrame()) {
     // Clock estimate ran ahead (or queue already deep): skip ticking until acks
     // drain unacked depth. Snap cursor so we don't bank a huge catchup burst.
+    // Offline: host may keep thrusting on held keys while we pause — stick to ghost.
+    if (offline && serverGhost.valid) {
+      player.x = serverGhost.x;
+      player.y = serverGhost.y;
+      player.vx = serverGhost.vx;
+      player.vy = serverGhost.vy;
+      player.angle = serverGhost.angle;
+      player.av = serverGhost.av || 0;
+      player.hp = serverGhost.hp;
+      softErr.x = 0;
+      softErr.y = 0;
+      softErr.angle = 0;
+      lastAppliedSeq = Math.max(lastAppliedSeq | 0, ackedSeq | 0);
+    }
     if (behind > maxUnackedInputs()) clientTickCursor = target;
     return;
   }
@@ -14424,6 +14438,34 @@ function hardSnapLocalPlayerFromRow(row) {
   softErr.angle = 0;
   lastAppliedSeq = Math.max(lastAppliedSeq | 0, ack);
   pendingInputs = pendingInputs.filter(f => f.seq > ack);
+}
+
+/**
+ * Offline solo: every host snap owns the ship. Copy pose, then replay only
+ * unacked released inputs (0–1 ticks). No softErr — worm hitches can't drift you.
+ */
+function syncOfflineLocalPlayerFromRow(row) {
+  if (!row) return;
+  const prevHp = player.hp | 0;
+  const ack = row[7] | 0;
+  hardSnapLocalPlayerFromRow(row);
+  const releaseAt = releasedSeq();
+  let applied = ack;
+  for (const f of pendingInputs) {
+    if (f.seq > ack && f.seq <= releaseAt) {
+      applyInputTo(player, f);
+      applied = f.seq;
+    }
+  }
+  lastAppliedSeq = applied;
+  softErr.x = 0;
+  softErr.y = 0;
+  softErr.angle = 0;
+  if (prevHp > 0 && (player.hp | 0) < prevHp && (player.hp | 0) > 0 && !deathSpectating) {
+    emitDamageTakenFx(player.x, player.y);
+  }
+  predReady = true;
+  if (clientTickCursor == null) clientTickCursor = Math.floor(estimatedServerTick());
 }
 
 function applyWorldSyncMsg(msg) {
@@ -18127,6 +18169,12 @@ function predictTick(forceShoot) {
 }
 
 function reconcileFromServer(row) {
+  // Offline: every snap is law — dedicated path, no softErr / spike hold.
+  if (isOfflineLocalPlay()) {
+    syncOfflineLocalPlayerFromRow(row);
+    return;
+  }
+
   serverGhost.x = row[1];
   serverGhost.y = row[2];
   serverGhost.vx = row[3];
@@ -18144,9 +18192,7 @@ function reconcileFromServer(row) {
   const srvGod = row[10] != null ? (row[10] | 0) : (player.godLeft || 0);
   const prevHp = player.hp | 0;
   const blending = performance.now() < resumeBlendUntil;
-  const offline = isOfflineLocalPlay();
-  // Offline has no real RTT — never hold pose on a stale spike flag.
-  const spike = !offline && !blending && performance.now() < rttSpikeUntil;
+  const spike = !blending && performance.now() < rttSpikeUntil;
 
   // Ping spike: keep local predicted pose (no softErr yank). Still take HP / stun / god.
   if (spike) {
@@ -18192,9 +18238,7 @@ function reconcileFromServer(row) {
   // Soft visual correction: keep old on-screen pose, bleed error out over time.
   // Use toroidal deltas so edge-wraps don't create a full-map rubber-band.
   // Large drift → hard teleport, unless tab-resume blend window is active.
-  // Offline local host: hard-match the in-process sim every snap (no softErr).
-  // Trusting prediction here drifted the ship hundreds of px from where bullets spawn.
-  if (offline || cv('cl_recon') <= 0) {
+  if (cv('cl_recon') <= 0) {
     softErr.x = 0;
     softErr.y = 0;
     softErr.angle = 0;
@@ -18294,7 +18338,9 @@ function applyBinarySnap(buf) {
     const row = [id, x, y, vx, vy, angle, hp, lastSeq, av, stunned, godLeft];
     seen.add(id);
     if (id === myId) {
-      if (!slightReorder) reconcileFromServer(row);
+      // Offline: always take pose (same-thread host — never skip for "reorder").
+      if (isOfflineLocalPlay()) syncOfflineLocalPlayerFromRow(row);
+      else if (!slightReorder) reconcileFromServer(row);
     } else {
       pushRemoteSample(id, row, st);
     }
