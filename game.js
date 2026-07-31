@@ -885,7 +885,7 @@ const SOFT_ERR_MAX_ANG = 0.6;
 /** If visual/sim drift exceeds this after reconcile, hard teleport (no soft blend). */
 const LOCAL_DRIFT_SNAP_PX = 30;
 /** Ignore tiny reconcile deltas — kills micro softErr shutter from float/collision noise. */
-const LOCAL_RECON_DEADZONE_PX = 3.5;
+const LOCAL_RECON_DEADZONE_PX = 12;
 const LOCAL_RECON_DEADZONE_ANG = 0.025;
 /** After an RTT spike, skip pose reconcile briefly so the local ship keeps predicting smoothly. */
 const RTT_SPIKE_HOLD_MS = 180;
