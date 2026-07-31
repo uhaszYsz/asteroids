@@ -11005,10 +11005,20 @@ function tryStartLocalBurst() {
   // Space while invuln: drop godmode and fire (matches server).
   if ((player.godLeft | 0) > 0) player.godLeft = 0;
   if (localShoot.bursting || localShoot.reloadLeft > 0 || localShoot.shootAmmo <= 0 || (localShoot.shootCd | 0) > 0) {
+    // #region agent log
+    if (isOfflineLocalPlay() && currentWeaponName() === 'laser') {
+      fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f03469'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'E',location:'game.js:tryStartLocalBurst',message:'client burst rejected',data:{bursting:!!localShoot.bursting,reload:localShoot.reloadLeft|0,ammo:localShoot.shootAmmo|0,cd:localShoot.shootCd|0,god:player.godLeft|0},timestamp:Date.now()})}).catch(()=>{});
+    }
+    // #endregion
     return false;
   }
   if (currentWeaponName() === 'railgun' && (localShoot.railChargeLeft | 0) > 0) return false;
   localShoot.bursting = true;
+  // #region agent log
+  if (isOfflineLocalPlay()) {
+    fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f03469'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'D',location:'game.js:tryStartLocalBurst',message:'client burst started',data:{wpn:currentWeaponName(),ammo:localShoot.shootAmmo|0,seq:inputSeq|0,acked:ackedSeq|0,unacked:unackedInputCount(),local:1},timestamp:Date.now()})}).catch(()=>{});
+  }
+  // #endregion
   if (selectedWeapon === 3) {
     const w = effectiveLocalWeapon(currentWeaponName());
     const tickMs = 1000 / TPS;
@@ -17822,6 +17832,12 @@ function sendPendingInputs() {
   const frames = unacked.length > INPUT_SEND_MAX_FRAMES
     ? unacked.slice(0, INPUT_SEND_MAX_FRAMES)
     : unacked;
+  // #region agent log
+  if (isOfflineLocalPlay() && frames.some(f => f.sp)) {
+    const spFrames = frames.filter(f => f.sp).map(f => f.seq);
+    fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f03469'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'D',location:'game.js:sendPendingInputs',message:'sending sp frames',data:{spFrames,n:frames.length,unacked:unacked.length,acked:ackedSeq|0,inputSeq:inputSeq|0,lastSent:lastSentSeq|0},timestamp:Date.now()})}).catch(()=>{});
+  }
+  // #endregion
   ws.send(JSON.stringify({
     t: 'in',
     frames: frames.map(f => ({
@@ -17938,7 +17954,7 @@ function reconcileFromServer(row) {
 
   // Offline local host: same-process sim — pose snaps fight client predict and feel like lag.
   // Trust prediction; only pull HP / stun / god (and input ack above).
-  if (usingLocalSolo || (ws && ws.__local)) {
+  if (isOfflineLocalPlay()) {
     player.hp = row[6];
     player.stunned = srvStunned;
     player.godLeft = srvGod;

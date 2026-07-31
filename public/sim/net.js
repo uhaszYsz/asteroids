@@ -127,6 +127,11 @@ function trimInputQueue(pl, maxLen) {
         }
       }
     }
+    // #region agent log
+    if ((q[dropAt].sp | 0) === 1) {
+      try { fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f03469'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'B',location:'net.js:trimInputQueue',message:'dropping sp frame',data:{seq:q[dropAt].seq|0,dropAt,qLen:q.length,cap},timestamp:Date.now()})}).catch(function(){}); } catch (_) {}
+    }
+    // #endregion
     q.splice(dropAt, 1);
   }
 }
@@ -138,7 +143,14 @@ function enqueuePlayerInputs(ws, pl, frames) {
     ? frames.slice(0, MAX_FRAMES_PER_MSG)
     : frames;
   const budget = allowInputFrames(ws, slice.length);
-  if (budget <= 0) return;
+  if (budget <= 0) {
+    // #region agent log
+    if (slice.some(function (f) { return f && (f.sp | 0); })) {
+      try { fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f03469'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'A',location:'net.js:enqueuePlayerInputs',message:'budget 0 dropped sp batch',data:{n:slice.length,spSeqs:slice.filter(function(f){return f&&(f.sp|0);}).map(function(f){return f.seq|0;}),lastSeq:pl.lastSeq|0,qLen:pl.inputQueue.length},timestamp:Date.now()})}).catch(function(){}); } catch (_) {}
+    }
+    // #endregion
+    return;
+  }
 
   let maxQueuedSeq = pl.lastSeq | 0;
   for (let i = 0; i < pl.inputQueue.length; i++) {
@@ -147,6 +159,8 @@ function enqueuePlayerInputs(ws, pl, frames) {
   }
 
   let accepted = 0;
+  let staleSp = 0;
+  let acceptedSp = 0;
   for (let i = 0; i < slice.length && accepted < budget; i++) {
     if (pl.inputQueue.length >= MAX_INPUT_QUEUE) trimInputQueue(pl, MAX_INPUT_QUEUE - 1);
     const cleaned = sanitizeInputFrame(slice[i], pl.lastSeq | 0, maxQueuedSeq);
@@ -154,7 +168,12 @@ function enqueuePlayerInputs(ws, pl, frames) {
       rlStrike(ws);
       continue;
     }
-    if (cleaned.stale) continue;
+    if (cleaned.stale) {
+      // #region agent log
+      if ((slice[i].sp | 0) === 1) staleSp++;
+      // #endregion
+      continue;
+    }
     if (pl.inputQueue.some(q => q.seq === cleaned.seq)) continue;
     pl.inputQueue.push({
       seq: cleaned.seq,
@@ -164,9 +183,15 @@ function enqueuePlayerInputs(ws, pl, frames) {
       sp: cleaned.sp,
       sh: cleaned.sh
     });
+    if (cleaned.sp) acceptedSp++;
     if (cleaned.seq > maxQueuedSeq) maxQueuedSeq = cleaned.seq;
     accepted++;
   }
+  // #region agent log
+  if (staleSp || acceptedSp) {
+    try { fetch('http://127.0.0.1:7740/ingest/f6c3566f-e00f-4836-81ce-438d0306d900',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'f03469'},body:JSON.stringify({sessionId:'f03469',hypothesisId:'C',location:'net.js:enqueuePlayerInputs',message:'sp enqueue result',data:{acceptedSp,staleSp,accepted,budget,lastSeq:pl.lastSeq|0,qLen:pl.inputQueue.length},timestamp:Date.now()})}).catch(function(){}); } catch (_) {}
+  }
+  // #endregion
   if (accepted) {
     pl.inputQueue.sort((a, b) => a.seq - b.seq);
     // Soft trim first so mild overproduce never sits for hundreds of ms.
