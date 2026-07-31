@@ -953,7 +953,7 @@ const CVARS = {
   cl_hitbox: {
     value: 0,
     def: 0,
-    help: 'Draw collision hitboxes (0/1). Asteroids = filled poly, players = dual circles, enemies = radius circle.'
+    help: 'Draw collision hitboxes (0/1). Asteroids = filled poly, players = dual circles, enemies = radius circle, bullets = solid red circles.'
   },
   cl_hitscan: {
     value: 0,
@@ -18788,6 +18788,51 @@ function renderMenuBackdrop() {
   // Title screen: grid + etched logo only (no floating asteroids).
 }
 
+/** Match server BULLET_TYPES collision extents for cl_hitbox debug. */
+const BULLET_HIT_DEBUG = {
+  default: { col: 'circle', size: 2 * RES_SCALE },
+  rocket: { col: 'circle', size: 7 * RES_SCALE },
+  shotgun: { col: 'circle', size: 2 * RES_SCALE },
+  plasma: { col: 'circle', size: 5 * RES_SCALE },
+  voidcannon: { col: 'circle', size: 27 * RES_SCALE },
+  turret: { col: 'circle', size: 2 * RES_SCALE },
+  enemy: { col: 'line', length: 15, width: 3 },
+  enemySpinner: { col: 'line', length: 20, width: 20 },
+  enemyWorm: { col: 'line', length: 15, width: 15 },
+  enemyRocket: { col: 'circle', size: 1 }
+};
+
+/** Radius of the debug circle covering this bullet's collision shape. */
+function bulletHitDebugRadius(b) {
+  const cfg = BULLET_HIT_DEBUG[b && b.type] || BULLET_HIT_DEBUG.default;
+  if (cfg.col === 'line') {
+    const L = b && b.length != null && Number.isFinite(+b.length) ? +b.length : cfg.length;
+    const Ww = b && b.width != null && Number.isFinite(+b.width) ? +b.width : cfg.width;
+    // Circumradius of the oriented L×W hit box (server hitLineCircle).
+    return 0.5 * Math.hypot(L || 0, Ww || 0);
+  }
+  if (cfg.col === 'ellipse') {
+    const sx = cfg.size || 0;
+    return Math.max(sx, sx * (cfg.scaleY || 1));
+  }
+  return cfg.size || 2 * RES_SCALE;
+}
+
+/** cl_hitbox: solid filled red circles for live bullet collision volumes. */
+function drawBulletHitboxes() {
+  if (cv('cl_hitbox') <= 0) return;
+  const red = [1, 0, 0];
+  for (const b of bullets.values()) {
+    const t = b.type || 'default';
+    if (t === 'laser' || t === 'railgun' || t === 'thrust') continue;
+    const p = bulletAt(b);
+    if (p.x < -40 || p.x > W + 40 || p.y < -40 || p.y > H + 40) continue;
+    const r = bulletHitDebugRadius(b);
+    if (!(r > 0.05)) continue;
+    drawFilledPoly(circleVerts(p.x, p.y, r, 18), red, 1);
+  }
+}
+
 function renderBullets() {
   pruneBullets();
   const normal = [];
@@ -18818,6 +18863,7 @@ function renderBullets() {
   if (turretPts.length) drawPoints(turretPts, COL.powerTurret);
   if (plasmaPts.length) drawPoints(plasmaPts, COL.plasma);
   if (rainbowPts.length) drawPoints(rainbowPts, damageRainbowColor());
+  drawBulletHitboxes();
 }
 
 function render() {
