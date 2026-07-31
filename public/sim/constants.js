@@ -411,8 +411,8 @@ const ENEMY_RAIL_DMG = 80;
 const ENEMY_PLASMA_RANGE = 240 * RES_SCALE;
 /** Worm laser aim telegraph before the beam opens. */
 const ENEMY_WORM_AIM_TICKS = Math.round(3 * TPS);
-/** Max turn toward player while worm is stopped for its laser attack. */
-const ENEMY_WORM_AIM_TURN = (4 * Math.PI) / 180;
+/** Max turn toward player while worm is stopped for its laser attack (40% of original 4°/tick). */
+const ENEMY_WORM_AIM_TURN = (1.6 * Math.PI) / 180;
 /**
  * Worm super-laser. Width is 3× typical player laser draw width
  * (~4×RES_SCALE mid of the 2..6 flicker band).

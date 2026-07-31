@@ -926,6 +926,27 @@ function finishWormAttack(room, e) {
   emitEnemyUpdate(room, e);
 }
 
+/** Cancel worm attacks and restart the post-spawn fire delay (e.g. on player death). */
+function interruptAllWormAttacks(room) {
+  if (!room || !room.enemies) return;
+  for (const e of room.enemies) {
+    if (!e || e.kind !== 'worm') continue;
+    const wasHolding = wormIsHolding(e) || (e.wormPhase | 0) > 0;
+    e.wormPhase = 0;
+    e.wormAimLeft = 0;
+    e.shootAmmo = 0;
+    e.shootCd = 0;
+    e.reloadLeft = 0;
+    e.fireCd = Math.round(
+      (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
+    );
+    if (wasHolding) {
+      pickEnemyWanderTarget(e);
+      emitEnemyUpdate(room, e);
+    }
+  }
+}
+
 /** One 360° volley of gun-rockets from the worm. */
 function fireWormRocketVolley(room, e) {
   const count = Math.max(1, ENEMY_WORM_ROCKET.shotgun | 0);
@@ -972,11 +993,15 @@ function beginWormAttack(room, e) {
 
 function updateWormAttack(room, e, target) {
   if (!target) {
-    if ((e.wormPhase | 0) > 0) {
+    if ((e.wormPhase | 0) > 0 || (e.fireCd | 0) <= 0) {
       e.wormPhase = 0;
       e.wormAimLeft = 0;
       e.shootAmmo = 0;
+      e.shootCd = 0;
       e.reloadLeft = 0;
+      e.fireCd = Math.round(
+        (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
+      );
       pickEnemyWanderTarget(e);
       emitEnemyUpdate(room, e);
     }
@@ -3203,6 +3228,9 @@ function handlePlayerDeath(room, victim) {
     ? room.players.get(killerId)
     : null;
   const creditedKillerId = (killer && !killer.bot) ? (killer.id | 0) : 0;
+
+  // Stop worm mid-attack so a respawn isn't instantly lasered / rocketed.
+  interruptAllWormAttacks(room);
 
   // Perf-test rooms: instant respawn with a new random gun (no freeze / no match end).
   if (room.perfTest) {
