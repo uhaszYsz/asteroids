@@ -10736,6 +10736,135 @@ function drawDepthSolidTris(mesh, floatCount, color, alpha, additive) {
   gl.disableVertexAttribArray(dsADepth);
 }
 
+/** Depth + UV charge shell (32×32 noise, Godot-style emission). stride: x,y,u,v,clipZ. */
+const chargeTexVS = `
+  attribute vec2 aPos;
+  attribute vec2 aUV;
+  attribute float aDepth;
+  uniform vec2 uRes;
+  varying vec2 vUV;
+  varying vec2 vWorld;
+  void main() {
+    vec2 p = floor(aPos + 0.5) / uRes * 2.0 - 1.0;
+    gl_Position = vec4(p.x, -p.y, aDepth, 1.0);
+    vUV = aUV;
+    vWorld = aPos;
+  }
+`;
+const chargeTexFS = `
+  precision mediump float;
+  uniform sampler2D uTex;
+  uniform vec3 uTint;
+  uniform float uEmit;
+  uniform float uAlpha;
+  uniform float uPulse;
+  varying vec2 vUV;
+  varying vec2 vWorld;
+` + SCENE_LIGHT_GLSL + `
+  void main() {
+    float n = texture2D(uTex, vUV).r;
+    float shell = mix(0.18, 1.0, n);
+    float crack = smoothstep(0.32, 0.88, n);
+    float pulse = clamp(uPulse, 0.0, 1.0);
+    vec3 albedo = uTint * shell;
+    vec3 emitCol = uTint * (0.4 + 0.6 * crack) * max(0.0, uEmit) * (0.35 + 0.65 * pulse);
+    vec3 rgb = albedo * (0.5 + 0.5 * pulse) + emitCol;
+    gl_FragColor = applyNightLit(rgb, uAlpha, vWorld);
+  }
+`;
+const chargeTexProg = gl.createProgram();
+gl.bindAttribLocation(chargeTexProg, 0, 'aPos');
+gl.bindAttribLocation(chargeTexProg, 1, 'aUV');
+gl.bindAttribLocation(chargeTexProg, 2, 'aDepth');
+gl.attachShader(chargeTexProg, shader(gl.VERTEX_SHADER, chargeTexVS));
+gl.attachShader(chargeTexProg, shader(gl.FRAGMENT_SHADER, chargeTexFS));
+linkProgram(chargeTexProg);
+const ctURes = gl.getUniformLocation(chargeTexProg, 'uRes');
+const ctUTex = gl.getUniformLocation(chargeTexProg, 'uTex');
+const ctUTint = gl.getUniformLocation(chargeTexProg, 'uTint');
+const ctUEmit = gl.getUniformLocation(chargeTexProg, 'uEmit');
+const ctUAlpha = gl.getUniformLocation(chargeTexProg, 'uAlpha');
+const ctUPulse = gl.getUniformLocation(chargeTexProg, 'uPulse');
+const ctAPos = gl.getAttribLocation(chargeTexProg, 'aPos');
+const ctAUV = gl.getAttribLocation(chargeTexProg, 'aUV');
+const ctADepth = gl.getAttribLocation(chargeTexProg, 'aDepth');
+const chargeTexBuf = gl.createBuffer();
+const chargeTexMesh = new Float32Array(4096);
+const chargeTexLightU = {
+  night: gl.getUniformLocation(chargeTexProg, 'uFlashNight'),
+  ships: gl.getUniformLocation(chargeTexProg, 'uShipLight[0]'),
+  wrap: gl.getUniformLocation(chargeTexProg, 'uLightWrap')
+};
+const CHARGE_NOISE_N = 32;
+const chargeNoiseTex = gl.createTexture();
+let chargeNoiseReady = false;
+
+/** Fresh 32×32 grayscale energy noise (once per game / on clear). */
+function regenerateChargeNoiseTex() {
+  const N = CHARGE_NOISE_N;
+  const data = new Uint8Array(N * N * 4);
+  for (let i = 0; i < N * N; i++) {
+    let n = Math.random();
+    if (Math.random() < 0.16) n = 0.72 + Math.random() * 0.28;
+    if (Math.random() < 0.14) n *= 0.22;
+    const v = Math.max(0, Math.min(255, (n * 255) | 0));
+    const o = i * 4;
+    data[o] = v;
+    data[o + 1] = v;
+    data[o + 2] = v;
+    data[o + 3] = 255;
+  }
+  gl.bindTexture(gl.TEXTURE_2D, chargeNoiseTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, N, N, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  chargeNoiseReady = true;
+}
+regenerateChargeNoiseTex();
+
+/** stride: x,y,u,v,clipZ per vert. */
+function drawChargeTexTris(mesh, floatCount, tint, alpha, emit, pulse, additive) {
+  const nFloat = floatCount | 0;
+  const nVert = (nFloat / 5) | 0;
+  if (nVert < 3 || !chargeNoiseReady) return;
+  gl.useProgram(chargeTexProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, chargeTexBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh.subarray(0, nFloat), gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(ctAPos);
+  gl.enableVertexAttribArray(ctAUV);
+  gl.enableVertexAttribArray(ctADepth);
+  gl.vertexAttribPointer(ctAPos, 2, gl.FLOAT, false, 20, 0);
+  gl.vertexAttribPointer(ctAUV, 2, gl.FLOAT, false, 20, 8);
+  gl.vertexAttribPointer(ctADepth, 1, gl.FLOAT, false, 20, 16);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, chargeNoiseTex);
+  gl.uniform1i(ctUTex, 0);
+  gl.uniform2f(ctURes, W, H);
+  const col = tint || COL_CHARGE_HOT;
+  gl.uniform3f(ctUTint, col[0], col[1], col[2]);
+  gl.uniform1f(ctUEmit, emit == null ? 1.2 : emit);
+  gl.uniform1f(ctUAlpha, alpha == null ? 1 : alpha);
+  gl.uniform1f(ctUPulse, pulse == null ? 1 : pulse);
+  bindSceneLightUniforms(chargeTexLightU);
+  const a = alpha == null ? 1 : alpha;
+  const add = !!additive;
+  const nightBlend = _lightFlashNight > 0.5;
+  if (nightBlend || a < 1 || add) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, add ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+  } else {
+    gl.disable(gl.BLEND);
+  }
+  gl.drawArrays(gl.TRIANGLES, 0, nVert);
+  if (!nightBlend && (a < 1 || add)) gl.disable(gl.BLEND);
+  gl.disableVertexAttribArray(ctAPos);
+  gl.disableVertexAttribArray(ctAUV);
+  gl.disableVertexAttribArray(ctADepth);
+}
+
 const spriteShipVS = `
   attribute vec2 aPos;
   attribute vec2 aUV;
@@ -17187,13 +17316,16 @@ function buildChargeSphereMesh(lonSeg, latSeg) {
   const lonN = Math.max(4, lonSeg | 0);
   const latN = Math.max(3, latSeg | 0);
   const verts = [[0, 0, 1], [0, 0, -1]];
+  const uvs = [[0.5, 0], [0.5, 1]];
   for (let la = 1; la < latN; la++) {
     const v = (la / latN) * Math.PI;
     const z = Math.cos(v);
     const r = Math.sin(v);
+    const tv = la / latN;
     for (let lo = 0; lo < lonN; lo++) {
       const u = (lo / lonN) * Math.PI * 2;
       verts.push([Math.cos(u) * r, Math.sin(u) * r, z]);
+      uvs.push([lo / lonN, tv]);
     }
   }
   const faces = [];
@@ -17240,7 +17372,7 @@ function buildChargeSphereMesh(lonSeg, latSeg) {
     addEdge(1, a);
     addEdge(a, b);
   }
-  return { verts, faces, edges };
+  return { verts, faces, edges, uvs };
 }
 
 /** ~32 tris — 8 lon × 3 lat. Compact PSX shell with readable lighting. */
@@ -17413,6 +17545,7 @@ function clearEnemyCharge(id) {
 function clearAllEnemyCharges() {
   enemyCharges.clear();
   chargeEnergyField.clear();
+  regenerateChargeNoiseTex();
 }
 
 function shipLocalToWorldLift(lx, ly, lz, cx, cy, yaw, bank, lift) {
@@ -17500,6 +17633,7 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const hwDepth = !!(opts && opts.hwDepth);
   const chargeT = opts && opts.chargeT != null ? +opts.chargeT : 0.5;
   const src = mesh.verts;
+  const meshUvs = mesh.uvs;
   const n = src.length;
   const bx = new Float64Array(n);
   const by = new Float64Array(n);
@@ -17531,15 +17665,9 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const tip = projectMesh3D([[ox, oy, oz]], cx, cy, yaw, spin, L);
   const tipX = tip.xy[0];
   const tipY = tip.xy[1];
-  const tipZ = tip.depth[0];
 
   const faces = mesh.faces;
   const faceItems = [];
-  // Key light in banked space for Lambert shading.
-  const lxDir = 0.4, lyDir = -0.55, lzDir = 0.73;
-  const lLen = Math.hypot(lxDir, lyDir, lzDir);
-  const lxi = lxDir / lLen, lyi = lyDir / lLen, lzi = lzDir / lLen;
-
   for (let i = 0; i < faces.length; i++) {
     const f = faces[i];
     const i0 = f[0], i1 = f[1], i2 = f[2];
@@ -17553,41 +17681,57 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
     const ny = az * px - ax * pz;
     const nz = ax * py - ay * px;
     if (nz <= 0) continue;
-    const nn = Math.hypot(nx, ny, nz) || 1;
-    const ndl = Math.max(0.18, (nx * lxi + ny * lyi + nz * lzi) / nn);
     const z = (depth[i0] + depth[i1] + depth[i2]) / 3;
-    faceItems.push({ z, i0, i1, i2, ndl });
+    faceItems.push({ z, i0, i1, i2 });
   }
   faceItems.sort((a, b) => a.z - b.z);
 
   const base = color || COL_CHARGE_HOT;
-  const fillA = 0.9;
-  const pulse = 0.92 + 0.08 * Math.sin(performance.now() * 0.012 + chargeT * 6);
+  const fillA = 0.92;
+  // Charge pulse: 5 Hz → 30 Hz as charge fills.
+  const pulseHz = 5 + 25 * Math.min(1, Math.max(0, chargeT));
+  const pulse01 = 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * pulseHz * Math.PI * 2);
+  const pulseSoft = 0.88 + 0.22 * pulse01;
+  const emitPow = (1.1 + 1.6 * chargeT) * (0.45 + 0.55 * pulse01);
+
+  function chargeFaceUV(i0, i1, i2) {
+    let u0 = meshUvs[i0][0], v0 = meshUvs[i0][1];
+    let u1 = meshUvs[i1][0], v1 = meshUvs[i1][1];
+    let u2 = meshUvs[i2][0], v2 = meshUvs[i2][1];
+    const umin = Math.min(u0, u1, u2);
+    const umax = Math.max(u0, u1, u2);
+    if (umax - umin > 0.5) {
+      if (u0 < 0.5) u0 += 1;
+      if (u1 < 0.5) u1 += 1;
+      if (u2 < 0.5) u2 += 1;
+    }
+    return [u0, v0, u1, v1, u2, v2];
+  }
 
   // —— Layer 1: soft outer aura (behind mesh) ——
   if (!hwDepth) {
-    drawSoftOval(tipX, tipY, 0, s * 1.85 * pulse, s * 1.85 * pulse, base, 0.22 + 0.2 * chargeT, true, 0.35);
-    drawSoftOval(tipX, tipY, 0, s * 1.15, s * 1.15, COL_CHARGE_HOT, 0.18 + 0.15 * chargeT, true, 0.55);
+    drawSoftOval(tipX, tipY, 0, s * 1.95 * pulseSoft, s * 1.95 * pulseSoft, base, (0.18 + 0.22 * chargeT) * (0.55 + 0.45 * pulse01), true, 0.35);
+    drawSoftOval(tipX, tipY, 0, s * 1.2 * pulseSoft, s * 1.2 * pulseSoft, COL_CHARGE_HOT, (0.16 + 0.2 * chargeT) * (0.5 + 0.5 * pulse01), true, 0.55);
   } else {
-    // With depth: aura after solids would cover ship — draw dim aura with depth test off briefly.
     gl.depthMask(false);
     gl.disable(gl.DEPTH_TEST);
-    drawSoftOval(tipX, tipY, 0, s * 1.7 * pulse, s * 1.7 * pulse, base, 0.16 + 0.14 * chargeT, true, 0.4);
+    drawSoftOval(tipX, tipY, 0, s * 1.8 * pulseSoft, s * 1.8 * pulseSoft, base, (0.14 + 0.16 * chargeT) * (0.5 + 0.5 * pulse01), true, 0.4);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
     gl.depthMask(true);
   }
 
-  function packFaceTris(out, items, scaleMul) {
+  function packChargeTexFaces(out, items, scaleMul) {
     let o = 0;
     const sc = scaleMul != null ? scaleMul : 1;
-    // Rebuild if scaled core — use mesh center ox,oy,oz
-    if (sc !== 1) {
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        const ids = [it.i0, it.i1, it.i2];
-        for (let v = 0; v < 3; v++) {
-          const vi = ids[v];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const ids = [it.i0, it.i1, it.i2];
+      const uv6 = chargeFaceUV(it.i0, it.i1, it.i2);
+      for (let v = 0; v < 3; v++) {
+        const vi = ids[v];
+        if (o + 5 > out.length) return o;
+        if (sc !== 1) {
           const lx = src[vi][0] * s * sc + ox;
           const ly = src[vi][1] * s * sc + oy;
           const lz = src[vi][2] * s * sc + oz;
@@ -17595,109 +17739,63 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
           const z1 = ly * sb + lz * cb;
           const wx = lx * ca - y1 * sa;
           const wy = lx * sa + y1 * ca;
-          if (o + 3 > out.length) return o;
           out[o++] = cx + wx;
           out[o++] = cy + wy - z1 * L;
+          out[o++] = uv6[v * 2];
+          out[o++] = uv6[v * 2 + 1];
           out[o++] = spriteWorldZToClip(z1);
+        } else {
+          out[o++] = xy[vi * 2];
+          out[o++] = xy[vi * 2 + 1];
+          out[o++] = uv6[v * 2];
+          out[o++] = uv6[v * 2 + 1];
+          out[o++] = spriteWorldZToClip(depth[vi]);
         }
-      }
-      return o;
-    }
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      const ids = [it.i0, it.i1, it.i2];
-      for (let v = 0; v < 3; v++) {
-        const vi = ids[v];
-        if (o + 3 > out.length) return o;
-        out[o++] = xy[vi * 2];
-        out[o++] = xy[vi * 2 + 1];
-        out[o++] = spriteWorldZToClip(depth[vi]);
       }
     }
     return o;
   }
 
-  function drawShellFaces(hw) {
-    if (hw) {
-      // Per-face lit batches grouped by shade bucket for cheap variety.
-      for (let i = 0; i < faceItems.length; i++) {
-        const it = faceItems[i];
-        const ndl = it.ndl;
-        const col = [
-          Math.min(1, base[0] * (0.28 + 0.85 * ndl) + 0.08),
-          Math.min(1, base[1] * (0.22 + 0.7 * ndl)),
-          Math.min(1, base[2] * (0.2 + 0.55 * ndl))
-        ];
-        let o = 0;
-        const ids = [it.i0, it.i1, it.i2];
-        for (let v = 0; v < 3; v++) {
-          const vi = ids[v];
-          depthSolidMesh[o++] = xy[vi * 2];
-          depthSolidMesh[o++] = xy[vi * 2 + 1];
-          depthSolidMesh[o++] = spriteWorldZToClip(depth[vi]);
-        }
-        drawDepthSolidTris(depthSolidMesh, o, col, fillA, false);
-      }
-      // Rim emit on brighter faces
-      gl.depthMask(false);
-      gl.depthFunc(gl.LEQUAL);
-      let eo = 0;
-      for (let i = 0; i < faceItems.length; i++) {
-        if (faceItems[i].ndl < 0.55) continue;
-        const it = faceItems[i];
-        const ids = [it.i0, it.i1, it.i2];
-        for (let v = 0; v < 3; v++) {
-          const vi = ids[v];
-          if (eo + 3 > depthSolidMesh.length) break;
-          depthSolidMesh[eo++] = xy[vi * 2];
-          depthSolidMesh[eo++] = xy[vi * 2 + 1];
-          depthSolidMesh[eo++] = spriteWorldZToClip(depth[vi]);
-        }
-      }
-      if (eo > 0) drawDepthSolidTris(depthSolidMesh, eo, COL_CHARGE_HOT, 0.28 + 0.2 * chargeT, true);
-      gl.depthMask(true);
-      gl.depthFunc(gl.LESS);
-      return;
-    }
-    for (let i = 0; i < faceItems.length; i++) {
-      const it = faceItems[i];
-      const ndl = it.ndl;
-      const col = [
-        Math.min(1, base[0] * (0.28 + 0.85 * ndl) + 0.08),
-        Math.min(1, base[1] * (0.22 + 0.7 * ndl)),
-        Math.min(1, base[2] * (0.2 + 0.55 * ndl))
-      ];
-      const poly = [
-        xy[it.i0 * 2], xy[it.i0 * 2 + 1],
-        xy[it.i1 * 2], xy[it.i1 * 2 + 1],
-        xy[it.i2 * 2], xy[it.i2 * 2 + 1]
-      ];
-      drawFilledPoly(poly, col, fillA, false);
-      if (ndl > 0.55) drawFilledPoly(poly, COL_CHARGE_HOT, 0.22 + 0.18 * chargeT, true);
-    }
-  }
-
-  // —— Layer 2: lit shell ——
+  // —— Layer 2: noise-textured emissive shell ——
   if (hwDepth) {
     gl.depthMask(true);
     gl.depthFunc(gl.LESS);
   }
-  drawShellFaces(hwDepth);
+  {
+    const o = packChargeTexFaces(chargeTexMesh, faceItems, 1);
+    drawChargeTexTris(chargeTexMesh, o, base, fillA, emitPow, pulse01, false);
+    // Additive plasma flash on peaks of the pulse
+    if (pulse01 > 0.55) {
+      if (hwDepth) {
+        gl.depthMask(false);
+        gl.depthFunc(gl.LEQUAL);
+      }
+      drawChargeTexTris(
+        chargeTexMesh, o, COL_CHARGE_CORE,
+        (0.12 + 0.22 * chargeT) * (pulse01 - 0.55) * 2.2,
+        emitPow * 1.4, pulse01, true
+      );
+      if (hwDepth) {
+        gl.depthMask(true);
+        gl.depthFunc(gl.LESS);
+      }
+    }
+  }
 
   // —— Layer 3: hot inner core ——
   const coreS = 0.38 + 0.08 * chargeT;
   if (hwDepth) {
-    const co = packFaceTris(depthSolidMesh, faceItems, coreS);
+    const co = packChargeTexFaces(chargeTexMesh, faceItems, coreS);
     gl.depthMask(true);
-    drawDepthSolidTris(depthSolidMesh, co, COL_CHARGE_HOT, 0.95, false);
+    drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_HOT, 0.95, emitPow * 1.2, pulse01, false);
     gl.depthMask(false);
     gl.depthFunc(gl.LEQUAL);
-    drawDepthSolidTris(depthSolidMesh, co, COL_CHARGE_CORE, 0.35 + 0.25 * chargeT, true);
+    drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_CORE, 0.3 + 0.3 * chargeT * pulse01, emitPow * 1.6, pulse01, true);
     gl.depthMask(true);
     gl.depthFunc(gl.LESS);
   } else {
-    drawSoftOval(tipX, tipY, 0, s * coreS * 1.05, s * coreS * 1.05, COL_CHARGE_HOT, 0.85, false, 0.7);
-    drawSoftOval(tipX, tipY, 0, s * coreS * 0.55, s * coreS * 0.55, COL_CHARGE_CORE, 0.9, true, 0.85);
+    drawSoftOval(tipX, tipY, 0, s * coreS * 1.05 * pulseSoft, s * coreS * 1.05 * pulseSoft, COL_CHARGE_HOT, 0.75 + 0.2 * pulse01, false, 0.7);
+    drawSoftOval(tipX, tipY, 0, s * coreS * 0.55 * pulseSoft, s * coreS * 0.55 * pulseSoft, COL_CHARGE_CORE, 0.75 + 0.2 * pulse01, true, 0.85);
   }
 
   // —— Layer 4: spiraling 3D embers + streaks ——
