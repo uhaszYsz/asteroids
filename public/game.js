@@ -17155,7 +17155,7 @@ function drawWormChargeInTubeDepth(id, x, y, angle, baseBank) {
   const suckParts = updateChargeEnergyField(
     id, sx, sy, angle, visBank, halfL, tipLy, tipLz, wr, now, SPRITE_ROOF_LIFT
   );
-  drawEnemyChargeSphere(sx, sy, wr, angle, visBank, COL_CHARGE_RED, alpha, {
+  drawEnemyChargeSphere(sx, sy, wr, angle, visBank, COL_CHARGE_HOT, alpha, {
     lift: SPRITE_ROOF_LIFT,
     localX: halfL,
     localY: tipLy,
@@ -17320,7 +17320,7 @@ function updateChargeEnergyField(id, sx, sy, angle, bank, ox, oy, oz, sphereR, n
   const dt = Math.min(0.05, Math.max(0.001, (now - state.last) * 0.001));
   state.last = now;
   const parts = state.parts;
-  const want = 16;
+  const want = 32;
   while (parts.length < want) parts.push(spawnChargeEnergyMote(sphereR));
 
   const pull = 3.8 + sphereR * 0.08;
@@ -17560,7 +17560,7 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   }
   faceItems.sort((a, b) => a.z - b.z);
 
-  const base = color || COL_CHARGE_RED;
+  const base = color || COL_CHARGE_HOT;
   const fillA = 0.9;
   const pulse = 0.92 + 0.08 * Math.sin(performance.now() * 0.012 + chargeT * 6);
 
@@ -17850,7 +17850,7 @@ function drawEnemyCommonCharges() {
       const parts = updateChargeEnergyField(
         id, w.x, w.y, aim, spin, 0, 0, 0, r, now, SHIP3D_LIFT
       );
-      drawEnemyChargeSphere(w.x, w.y, r, aim, spin, COL_CHARGE_RED, alpha, {
+      drawEnemyChargeSphere(w.x, w.y, r, aim, spin, COL_CHARGE_HOT, alpha, {
         depthParts: parts,
         chargeT: t
       });
@@ -17876,7 +17876,7 @@ function drawEnemyCommonCharges() {
       const parts = updateChargeEnergyField(
         fieldId, w.x, w.y, p.angle, spin + g * 0.9, 0, 0, 0, r, now, SHIP3D_LIFT
       );
-      drawEnemyChargeSphere(w.x, w.y, r, p.angle, spin + g * 0.9, COL_CHARGE_RED, alpha, {
+      drawEnemyChargeSphere(w.x, w.y, r, p.angle, spin + g * 0.9, COL_CHARGE_HOT, alpha, {
         depthParts: parts,
         chargeT: t
       });
