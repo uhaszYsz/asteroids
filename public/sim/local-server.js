@@ -263,7 +263,8 @@
       _deliver(data) {
         if (typeof this.onmessage !== 'function') return;
         const payload = toClientData(data);
-        this.onmessage({ data: payload });
+        // Must set target so game.js can tell local vs remoteWs apart.
+        this.onmessage({ data: payload, target: this });
       },
       send(data) {
         if (this.readyState !== 1 || !this._server) return;
@@ -339,7 +340,7 @@
 
       const texts = [];
       for (let i = 0; i < SIM_PARTS.length; i++) {
-        const url = simBase + SIM_PARTS[i] + '?v=15';
+        const url = simBase + SIM_PARTS[i] + '?v=16';
         const res = await fetch(url, { cache: 'no-cache' });
         if (!res.ok) throw new Error('Failed to load ' + SIM_PARTS[i] + ' (' + res.status + ')');
         texts.push(await res.text());

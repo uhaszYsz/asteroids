@@ -18737,12 +18737,10 @@ function handleWsMessage(e) {
         CVARS.sv_dynamic_prediction.value = Number.isFinite(s) ? Math.max(0, s) : 0;
       }
       if (soloOverOpen) return;
-      // Local host always emits lobby on connect. That handshake must NOT wipe
-      // matchmaking / kick back to the menu before wait-waves welcome arrives.
-      if (e && e.target && e.target.__local) {
-        if (!inGame) return;
-        if (waitingOnlineQueue) return;
-      }
+      // Local host always emits lobby on connect — never treat that as leave.
+      if (e && e.target && e.target.__local) return;
+      // Matchmaking wait-waves boot: ignore any stray lobby until welcome.
+      if (waitingOnlineQueue && !inGame) return;
       returnToLobby();
       return;
     }
