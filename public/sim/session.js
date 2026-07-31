@@ -226,12 +226,9 @@ function handleRegister(ws, pin, pinConfirm, rawName) {
   ws.matchesWon = 0;
   ws.bestWaves = 0;
   ws.bestWavesDuo = 0;
-  // Keep guest PvP rating progress if they already played; else Chess.com start.
-  const keepMmr = (ws.mmrGames | 0) > 0;
-  const keepRating = keepMmr ? (ws.mmr | 0) : accountsDb.DEFAULT_MMR;
-  const keepGames = keepMmr ? (ws.mmrGames | 0) : 0;
-  ws.mmr = keepRating;
-  ws.mmrGames = keepGames;
+  // Fresh ranked stats — do not carry guest MMR/games (easy to farm offline).
+  ws.mmr = accountsDb.DEFAULT_MMR;
+  ws.mmrGames = 0;
   // Keep current session colors / ship on the new account.
   ws.playerColor = accountsDb.normalizeColor(ws.playerColor) || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = accountsDb.normalizeColor(ws.shootColor) || accountsDb.DEFAULT_SHOOT_COLOR;
@@ -239,12 +236,6 @@ function handleRegister(ws, pin, pinConfirm, rawName) {
   ws.shipId = accountsDb.normalizeShipId(ws.shipId) || accountsDb.DEFAULT_SHIP_ID;
   accountsDb.setColors(name, ws.playerColor, ws.shootColor, ws.thrustColor);
   accountsDb.setShip(name, ws.shipId);
-  const u = accountsDb.getUser(name);
-  if (u) {
-    u.mmr = ws.mmr | 0;
-    u.mmrGames = ws.mmrGames | 0;
-    accountsDb.setColors(name, ws.playerColor, ws.shootColor, ws.thrustColor);
-  }
   applyDisplayNameToRoom(ws, name);
   applyColorsToRoom(ws);
   return { ok: 1 };
