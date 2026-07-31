@@ -10841,8 +10841,11 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   // Nose–tail from frame height; wing span from frame width — true pixel proportions.
   const halfL = Math.max(1, spec.fh) * 0.5 * sc;
   const halfW = Math.max(1, spec.fw) * 0.5 * sc;
-  const cp = Math.cos(SPRITE_ROOF_PITCH);
-  const sp = Math.sin(SPRITE_ROOF_PITCH);
+  const tube = !!(opts && opts.tube);
+  // Worm/tube: half the roof pitch so the diamond cross-section is flatter.
+  const pitch = tube ? SPRITE_ROOF_PITCH * 0.5 : SPRITE_ROOF_PITCH;
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
   const wingY = halfW * cp;
   const drop = halfW * sp;
 
@@ -10862,35 +10865,55 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     [uMid, uv.v1]
   ];
 
-  // Left / right halves share the ridge (y=0,z=0); tips fold down like a roof.
-  const panels = [
-    {
-      verts: [
-        [halfL, 0, 0],
-        [halfL, -wingY, -drop],
-        [-halfL, -wingY, -drop],
-        [-halfL, 0, 0]
-      ],
-      uvs: uvsL
-    },
-    {
-      verts: [
-        [halfL, 0, 0],
-        [halfL, wingY, -drop],
-        [-halfL, wingY, -drop],
-        [-halfL, 0, 0]
-      ],
-      uvs: uvsR
-    }
-  ];
-  // Worm / tube: mirror the two roof planes under the ridge.
-  if (opts && opts.tube) {
-    panels.push(
+  let panels;
+  if (tube) {
+    // Diamond tube: outer edges sit on z=0; ridge bend is ±drop (not on the midplane).
+    panels = [
+      {
+        verts: [
+          [halfL, 0, drop],
+          [halfL, -wingY, 0],
+          [-halfL, -wingY, 0],
+          [-halfL, 0, drop]
+        ],
+        uvs: uvsL
+      },
+      {
+        verts: [
+          [halfL, 0, drop],
+          [halfL, wingY, 0],
+          [-halfL, wingY, 0],
+          [-halfL, 0, drop]
+        ],
+        uvs: uvsR
+      },
+      {
+        verts: [
+          [halfL, 0, -drop],
+          [halfL, -wingY, 0],
+          [-halfL, -wingY, 0],
+          [-halfL, 0, -drop]
+        ],
+        uvs: uvsL
+      },
+      {
+        verts: [
+          [halfL, 0, -drop],
+          [halfL, wingY, 0],
+          [-halfL, wingY, 0],
+          [-halfL, 0, -drop]
+        ],
+        uvs: uvsR
+      }
+    ];
+  } else {
+    // Left / right halves share the ridge (y=0,z=0); tips fold down like a roof.
+    panels = [
       {
         verts: [
           [halfL, 0, 0],
-          [halfL, -wingY, drop],
-          [-halfL, -wingY, drop],
+          [halfL, -wingY, -drop],
+          [-halfL, -wingY, -drop],
           [-halfL, 0, 0]
         ],
         uvs: uvsL
@@ -10898,13 +10921,13 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
       {
         verts: [
           [halfL, 0, 0],
-          [halfL, wingY, drop],
-          [-halfL, wingY, drop],
+          [halfL, wingY, -drop],
+          [-halfL, wingY, -drop],
           [-halfL, 0, 0]
         ],
         uvs: uvsR
       }
-    );
+    ];
   }
 
   // Painter's algorithm when spinning / 4-sided.
@@ -13424,8 +13447,13 @@ function renderAccountShipPreviewGL() {
 
   const cx = ACCOUNT_PREV_LOGIC_W * 0.5;
   const cy = ACCOUNT_PREV_LOGIC_H * 0.52;
-  const angle = 0;
-  const av = Math.sin(now * 0.0018) * 1.1;
+  // Same as holding turn in-game: av at TURN_AV_MAX, angle integrates each tick.
+  // Preview runs in real time — scale tick-rate av by dt * TPS.
+  const av = TURN_AV_MAX;
+  accountPreviewAngle += av * (dt * TPS);
+  if (accountPreviewAngle > Math.PI) accountPreviewAngle -= Math.PI * 2;
+  else if (accountPreviewAngle < -Math.PI) accountPreviewAngle += Math.PI * 2;
+  const angle = accountPreviewAngle;
 
   playerColors.set(ACCOUNT_PREVIEW_OWNER, {
     player: outlineRgb.slice(),
