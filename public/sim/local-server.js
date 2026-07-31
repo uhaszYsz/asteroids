@@ -59,6 +59,7 @@
       DB_PATH: 'local',
       DEFAULT_PLAYER_COLOR,
       DEFAULT_SHOOT_COLOR,
+      DEFAULT_THRUST_COLOR: '#FF9A3C',
       normalizeColor,
       normalizePin,
       getUser(name) { return name ? users[name] || null : null; },

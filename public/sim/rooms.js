@@ -1032,6 +1032,7 @@ function startMatch(members) {
     const p = spawnPlayer(id, ws.displayName, {
       playerColor: ws.playerColor,
       shootColor: ws.shootColor,
+      thrustColor: ws.thrustColor,
       shipId: ws.shipId
     }, room);
     p.accountKey = ws.accountKey || null;
@@ -1082,6 +1083,7 @@ function startPractice(ws, queueKind, opts) {
   const p = spawnPlayer(id, ws.displayName, {
     playerColor: ws.playerColor,
     shootColor: ws.shootColor,
+    thrustColor: ws.thrustColor,
     shipId: ws.shipId
   }, room);
   p.lives = SOLO_LIVES;
@@ -1162,6 +1164,7 @@ function startCoop(members) {
     const p = spawnPlayer(id, ws.displayName, {
       playerColor: ws.playerColor,
       shootColor: ws.shootColor,
+      thrustColor: ws.thrustColor,
       shipId: ws.shipId
     }, room);
     p.lives = SOLO_LIVES;

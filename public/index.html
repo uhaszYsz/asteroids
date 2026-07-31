@@ -331,31 +331,61 @@
       margin: 0 0 14px; color: #8ab4cc; font-size: 12px;
     }
     #account-panel .ac-meta b { color: #e8fff0; font-weight: 700; }
-    #account-panel .ac-colors {
-      margin: 0 0 12px; padding-top: 4px;
-      border-top: 1px solid rgba(100, 160, 120, 0.2);
-    }
-    #account-panel .ac-color-row {
-      align-items: center; margin-bottom: 10px;
-    }
-    #account-panel .ac-color-row input[type="color"] {
-      width: 48px; height: 32px; padding: 0; border: 1px solid rgba(100, 160, 200, 0.45);
-      background: #121820; cursor: pointer; flex: 0 0 auto;
-    }
-    #account-panel .ac-hex {
-      color: #9ec8e8; font-size: 12px; letter-spacing: 0.06em;
-    }
     #account-panel .ac-ship {
       margin: 0 0 14px; padding-top: 8px;
       border-top: 1px solid rgba(100, 160, 120, 0.2);
       display: flex; flex-direction: column; align-items: stretch; gap: 8px;
     }
     #account-panel #account-ship-preview {
-      width: 100%; height: 140px;
+      width: 100%; height: 148px;
       display: block;
       border: 1px solid rgba(100, 160, 200, 0.35);
       background: #061018;
       image-rendering: pixelated;
+    }
+    #account-panel .ac-color-boxes {
+      display: flex; gap: 6px; width: 100%;
+    }
+    #account-panel .ac-color-box {
+      position: relative;
+      flex: 1 1 0;
+      height: 34px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+      cursor: pointer;
+      padding: 0;
+      background: #59d9ff;
+    }
+    #account-panel .ac-color-box span {
+      position: relative;
+      z-index: 1;
+      pointer-events: none;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: lowercase;
+      text-shadow:
+        -1px -1px 0 #000,
+         1px -1px 0 #000,
+        -1px  1px 0 #000,
+         1px  1px 0 #000,
+         0   -1px 0 #000,
+         0    1px 0 #000,
+        -1px  0   0 #000,
+         1px  0   0 #000;
+    }
+    #account-panel .ac-color-box input[type="color"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      margin: 0;
+      border: 0;
+      opacity: 0;
+      cursor: pointer;
     }
     #account-panel #account-ship-change-btn {
       align-self: flex-start;
@@ -2030,21 +2060,23 @@
       <span>Status <b id="account-status">Guest</b></span>
       <span>Rating <b id="account-mmr">1200</b></span>
     </div>
-    <div class="ac-colors">
-      <label class="sp-label" for="account-player-color">Player color</label>
-      <div class="ac-row ac-color-row">
-        <input id="account-player-color" type="color" value="#59D9FF" />
-        <span id="account-player-color-hex" class="ac-hex">#59D9FF</span>
-      </div>
-      <label class="sp-label" for="account-shoot-color">Shoot color</label>
-      <div class="ac-row ac-color-row">
-        <input id="account-shoot-color" type="color" value="#59F2FF" />
-        <span id="account-shoot-color-hex" class="ac-hex">#59F2FF</span>
-      </div>
-    </div>
     <div class="ac-ship">
       <label class="sp-label">Ship</label>
-      <canvas id="account-ship-preview" width="160" height="120" aria-label="Ship preview"></canvas>
+      <canvas id="account-ship-preview" width="200" height="140" aria-label="Ship preview"></canvas>
+      <div class="ac-color-boxes" aria-label="Appearance colors">
+        <label class="ac-color-box" id="account-shoot-swatch" title="Shoot color">
+          <span>shoot</span>
+          <input id="account-shoot-color" type="color" value="#59F2FF" />
+        </label>
+        <label class="ac-color-box" id="account-thrust-swatch" title="Thrust color">
+          <span>thrust</span>
+          <input id="account-thrust-color" type="color" value="#FF9A3C" />
+        </label>
+        <label class="ac-color-box" id="account-player-swatch" title="Outline color">
+          <span>outline</span>
+          <input id="account-player-color" type="color" value="#59D9FF" />
+        </label>
+      </div>
       <button type="button" id="account-ship-change-btn">Change</button>
     </div>
     <div class="ac-msg" id="account-msg"></div>
@@ -2191,7 +2223,7 @@
 <script src="lib/bassoonplayer.js"></script>
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
-<script src="sim/local-server.js?v=5"></script>
-<script src="game.js?v=696"></script>
+<script src="sim/local-server.js?v=6"></script>
+<script src="game.js?v=697"></script>
 </body>
 </html>

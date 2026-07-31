@@ -16,6 +16,7 @@ const JSON_LEGACY = path.join(__dirname, 'accounts.json');
 
 const DEFAULT_PLAYER_COLOR = '#59D9FF';
 const DEFAULT_SHOOT_COLOR = '#59F2FF';
+const DEFAULT_THRUST_COLOR = '#FF9A3C';
 const DEFAULT_SHIP_ID = 'tiny_1';
 /** Chess.com Intermediate / classic starting Elo. */
 const DEFAULT_MMR = 1200;
@@ -74,6 +75,7 @@ function migrateUser(u) {
   if (!Array.isArray(u.friends)) u.friends = [];
   u.playerColor = normalizeColor(u.playerColor) || DEFAULT_PLAYER_COLOR;
   u.shootColor = normalizeColor(u.shootColor) || DEFAULT_SHOOT_COLOR;
+  u.thrustColor = normalizeColor(u.thrustColor) || DEFAULT_THRUST_COLOR;
   u.shipId = normalizeShipId(u.shipId) || DEFAULT_SHIP_ID;
   if (u.steamId != null) u.steamId = String(u.steamId);
   if (u.displayName != null) u.displayName = String(u.displayName);
@@ -117,6 +119,7 @@ function rowToUser(row) {
     friends,
     playerColor: row.player_color,
     shootColor: row.shoot_color,
+    thrustColor: row.thrust_color,
     shipId: row.ship_id,
     mmr: row.mmr,
     mmrGames: row.mmr_games,
@@ -139,6 +142,7 @@ function userToParams(username, u) {
     JSON.stringify(u.friends || []),
     u.playerColor || DEFAULT_PLAYER_COLOR,
     u.shootColor || DEFAULT_SHOOT_COLOR,
+    u.thrustColor || DEFAULT_THRUST_COLOR,
     u.shipId || DEFAULT_SHIP_ID,
     u.mmr | 0,
     u.mmrGames | 0,
@@ -151,9 +155,9 @@ const UPSERT_SQL = `
 INSERT INTO users (
   username, pin_hash, salt, steam_id, display_name,
   matches_won, best_waves, best_waves_duo, friends,
-  player_color, shoot_color, ship_id, mmr, mmr_games,
+  player_color, shoot_color, thrust_color, ship_id, mmr, mmr_games,
   created_at, last_steam_login_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(username) DO UPDATE SET
   pin_hash = excluded.pin_hash,
   salt = excluded.salt,
@@ -165,6 +169,7 @@ ON CONFLICT(username) DO UPDATE SET
   friends = excluded.friends,
   player_color = excluded.player_color,
   shoot_color = excluded.shoot_color,
+  thrust_color = excluded.thrust_color,
   ship_id = excluded.ship_id,
   mmr = excluded.mmr,
   mmr_games = excluded.mmr_games,
@@ -285,6 +290,7 @@ async function init() {
       friends TEXT NOT NULL DEFAULT '[]',
       player_color TEXT NOT NULL DEFAULT '#59D9FF',
       shoot_color TEXT NOT NULL DEFAULT '#59F2FF',
+      thrust_color TEXT NOT NULL DEFAULT '#FF9A3C',
       ship_id TEXT NOT NULL DEFAULT 'tiny_1',
       mmr INTEGER NOT NULL DEFAULT 1200,
       mmr_games INTEGER NOT NULL DEFAULT 0,
@@ -295,6 +301,9 @@ async function init() {
 
   try {
     await runAsync(`ALTER TABLE users ADD COLUMN ship_id TEXT NOT NULL DEFAULT 'tiny_1'`);
+  } catch (_) { /* column already exists */ }
+  try {
+    await runAsync(`ALTER TABLE users ADD COLUMN thrust_color TEXT NOT NULL DEFAULT '#FF9A3C'`);
   } catch (_) { /* column already exists */ }
   try {
     await runAsync(`ALTER TABLE users ADD COLUMN mmr INTEGER NOT NULL DEFAULT 1200`);
@@ -353,6 +362,7 @@ function upsertSteamUser(steamId, personaName) {
     friends: [],
     playerColor: DEFAULT_PLAYER_COLOR,
     shootColor: DEFAULT_SHOOT_COLOR,
+    thrustColor: DEFAULT_THRUST_COLOR,
     shipId: DEFAULT_SHIP_ID,
     mmr: DEFAULT_MMR,
     mmrGames: 0,
@@ -385,6 +395,7 @@ function createUser(username, pin) {
     friends: [],
     playerColor: DEFAULT_PLAYER_COLOR,
     shootColor: DEFAULT_SHOOT_COLOR,
+    thrustColor: DEFAULT_THRUST_COLOR,
     shipId: DEFAULT_SHIP_ID,
     mmr: DEFAULT_MMR,
     mmrGames: 0,
@@ -507,7 +518,7 @@ function setBestWavesDuo(username, wave) {
   return u.bestWavesDuo | 0;
 }
 
-function setColors(username, playerColor, shootColor) {
+function setColors(username, playerColor, shootColor, thrustColor) {
   ensureReady();
   const u = data.users[username];
   if (!u) return { ok: 0, err: 'missing' };
@@ -517,8 +528,19 @@ function setColors(username, playerColor, shootColor) {
   if (!pc || !sc) return { ok: 0, err: 'color' };
   u.playerColor = pc;
   u.shootColor = sc;
+  if (thrustColor != null && String(thrustColor).length) {
+    const tc = normalizeColor(thrustColor);
+    if (!tc) return { ok: 0, err: 'color' };
+    u.thrustColor = tc;
+  }
   persistUser(username, u);
-  return { ok: 1, playerColor: pc, shootColor: sc, shipId: u.shipId || DEFAULT_SHIP_ID };
+  return {
+    ok: 1,
+    playerColor: pc,
+    shootColor: sc,
+    thrustColor: u.thrustColor || DEFAULT_THRUST_COLOR,
+    shipId: u.shipId || DEFAULT_SHIP_ID
+  };
 }
 
 function setShip(username, shipId) {
@@ -632,6 +654,7 @@ module.exports = {
   normalizeShipId,
   DEFAULT_PLAYER_COLOR,
   DEFAULT_SHOOT_COLOR,
+  DEFAULT_THRUST_COLOR,
   DEFAULT_SHIP_ID,
   DEFAULT_MMR,
   getUser,

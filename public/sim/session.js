@@ -43,6 +43,7 @@ function sessionFields(ws) {
     hasSnapshot: !!ws.soloSnapshot,
     playerColor: ws.playerColor || accountsDb.DEFAULT_PLAYER_COLOR,
     shootColor: ws.shootColor || accountsDb.DEFAULT_SHOOT_COLOR,
+    thrustColor: ws.thrustColor || accountsDb.DEFAULT_THRUST_COLOR,
     shipId: ws.shipId || accountsDb.DEFAULT_SHIP_ID,
     friends
   };
@@ -69,6 +70,7 @@ function initGuestSession(ws) {
   ws.queueMode = null;
   ws.playerColor = accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = accountsDb.DEFAULT_SHOOT_COLOR;
+  ws.thrustColor = accountsDb.DEFAULT_THRUST_COLOR;
   ws.shipId = accountsDb.DEFAULT_SHIP_ID;
   ws.displayName = randomGuestName();
   ws.teamMate = null;
@@ -82,6 +84,7 @@ function applyColorsToRoom(ws) {
   if (!p || p.bot) return;
   p.playerColor = ws.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
   p.shootColor = ws.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
+  p.thrustColor = ws.thrustColor || accountsDb.DEFAULT_THRUST_COLOR;
   p.shipId = ws.shipId || accountsDb.DEFAULT_SHIP_ID;
   broadcastPlayerColors(room);
 }
@@ -94,6 +97,7 @@ function packPlayerColors(room) {
       p.id,
       p.playerColor || accountsDb.DEFAULT_PLAYER_COLOR,
       p.shootColor || accountsDb.DEFAULT_SHOOT_COLOR,
+      p.thrustColor || accountsDb.DEFAULT_THRUST_COLOR,
       p.shipId || accountsDb.DEFAULT_SHIP_ID
     ]);
   }
@@ -105,12 +109,18 @@ function broadcastPlayerColors(room) {
   roomBroadcast(room, { t: 'colors', colors: packPlayerColors(room) });
 }
 
-function handleSetColors(ws, playerColor, shootColor, shipId) {
+function handleSetColors(ws, playerColor, shootColor, shipId, thrustColor) {
   const pc = accountsDb.normalizeColor(playerColor);
   const sc = accountsDb.normalizeColor(shootColor);
   if (!pc || !sc) return { ok: 0, err: 'color' };
   ws.playerColor = pc;
   ws.shootColor = sc;
+  let tc = null;
+  if (thrustColor != null && String(thrustColor).length) {
+    tc = accountsDb.normalizeColor(thrustColor);
+    if (!tc) return { ok: 0, err: 'color' };
+    ws.thrustColor = tc;
+  }
   let sid = null;
   if (shipId != null && String(shipId).length) {
     sid = accountsDb.normalizeShipId(shipId);
@@ -118,7 +128,7 @@ function handleSetColors(ws, playerColor, shootColor, shipId) {
     ws.shipId = sid;
   }
   if (ws.registered && ws.accountKey) {
-    const saved = accountsDb.setColors(ws.accountKey, pc, sc);
+    const saved = accountsDb.setColors(ws.accountKey, pc, sc, ws.thrustColor);
     if (!saved.ok) return { ok: 0, err: saved.err || 'fail' };
     if (sid) {
       const shipSaved = accountsDb.setShip(ws.accountKey, sid);
@@ -130,6 +140,7 @@ function handleSetColors(ws, playerColor, shootColor, shipId) {
     ok: 1,
     playerColor: pc,
     shootColor: sc,
+    thrustColor: ws.thrustColor || accountsDb.DEFAULT_THRUST_COLOR,
     shipId: ws.shipId || accountsDb.DEFAULT_SHIP_ID
   };
 }
@@ -187,6 +198,7 @@ async function handleSteamLogin(ws, ticketHex, ticketIdentity, personaName) {
   ws.mmrGames = u.mmrGames | 0;
   ws.playerColor = u.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = u.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
+  ws.thrustColor = u.thrustColor || accountsDb.DEFAULT_THRUST_COLOR;
   ws.shipId = accountsDb.normalizeShipId(u.shipId) || accountsDb.DEFAULT_SHIP_ID;
   applyDisplayNameToRoom(ws, ws.displayName);
   applyColorsToRoom(ws);
@@ -223,14 +235,15 @@ function handleRegister(ws, pin, pinConfirm, rawName) {
   // Keep current session colors / ship on the new account.
   ws.playerColor = accountsDb.normalizeColor(ws.playerColor) || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = accountsDb.normalizeColor(ws.shootColor) || accountsDb.DEFAULT_SHOOT_COLOR;
+  ws.thrustColor = accountsDb.normalizeColor(ws.thrustColor) || accountsDb.DEFAULT_THRUST_COLOR;
   ws.shipId = accountsDb.normalizeShipId(ws.shipId) || accountsDb.DEFAULT_SHIP_ID;
-  accountsDb.setColors(name, ws.playerColor, ws.shootColor);
+  accountsDb.setColors(name, ws.playerColor, ws.shootColor, ws.thrustColor);
   accountsDb.setShip(name, ws.shipId);
   const u = accountsDb.getUser(name);
   if (u) {
     u.mmr = ws.mmr | 0;
     u.mmrGames = ws.mmrGames | 0;
-    accountsDb.setColors(name, ws.playerColor, ws.shootColor);
+    accountsDb.setColors(name, ws.playerColor, ws.shootColor, ws.thrustColor);
   }
   applyDisplayNameToRoom(ws, name);
   applyColorsToRoom(ws);
@@ -253,6 +266,7 @@ function handleLogin(ws, rawName, pin) {
   ws.mmrGames = verified.user.mmrGames | 0;
   ws.playerColor = verified.user.playerColor || accountsDb.DEFAULT_PLAYER_COLOR;
   ws.shootColor = verified.user.shootColor || accountsDb.DEFAULT_SHOOT_COLOR;
+  ws.thrustColor = verified.user.thrustColor || accountsDb.DEFAULT_THRUST_COLOR;
   ws.shipId = accountsDb.normalizeShipId(verified.user.shipId) || accountsDb.DEFAULT_SHIP_ID;
   applyDisplayNameToRoom(ws, name);
   applyColorsToRoom(ws);

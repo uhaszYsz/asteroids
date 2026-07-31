@@ -1458,13 +1458,16 @@ const COL = {
 const COL_WHITE = [1, 1, 1];
 const DEFAULT_PLAYER_COLOR_HEX = '#59D9FF';
 const DEFAULT_SHOOT_COLOR_HEX = '#59F2FF';
+const DEFAULT_THRUST_COLOR_HEX = '#FF9A3C';
 
-/** @type {Map<number, { player: number[], shoot: number[], playerHex: string, shootHex: string }>} */
+/** @type {Map<number, { player: number[], shoot: number[], thrust: number[], playerHex: string, shootHex: string, thrustHex: string, shipId?: string }>} */
 const playerColors = new Map();
 let myPlayerColorHex = DEFAULT_PLAYER_COLOR_HEX;
 let myShootColorHex = DEFAULT_SHOOT_COLOR_HEX;
+let myThrustColorHex = DEFAULT_THRUST_COLOR_HEX;
 let myPlayerColorRgb = hexToRgb01(DEFAULT_PLAYER_COLOR_HEX) || COL.self.slice();
 let myShootColorRgb = hexToRgb01(DEFAULT_SHOOT_COLOR_HEX) || COL.laser.slice();
+let myThrustColorRgb = hexToRgb01(DEFAULT_THRUST_COLOR_HEX) || COL.cannonHot.slice();
 
 function normalizeColorHex(raw) {
   let s = String(raw == null ? '' : raw).trim();
@@ -1496,19 +1499,24 @@ function rgb01ToHex(rgb) {
   return '#' + c(rgb[0]) + c(rgb[1]) + c(rgb[2]);
 }
 
-function setMyColors(playerHex, shootHex) {
+function setMyColors(playerHex, shootHex, thrustHex) {
   const pc = normalizeColorHex(playerHex) || DEFAULT_PLAYER_COLOR_HEX;
   const sc = normalizeColorHex(shootHex) || DEFAULT_SHOOT_COLOR_HEX;
+  const tc = normalizeColorHex(thrustHex) || DEFAULT_THRUST_COLOR_HEX;
   myPlayerColorHex = pc;
   myShootColorHex = sc;
+  myThrustColorHex = tc;
   myPlayerColorRgb = hexToRgb01(pc) || COL.self.slice();
   myShootColorRgb = hexToRgb01(sc) || COL.laser.slice();
+  myThrustColorRgb = hexToRgb01(tc) || COL.cannonHot.slice();
   if (myId != null) {
     playerColors.set(myId, {
       player: myPlayerColorRgb.slice(),
       shoot: myShootColorRgb.slice(),
+      thrust: myThrustColorRgb.slice(),
       playerHex: pc,
       shootHex: sc,
+      thrustHex: tc,
       shipId: selectedShipMeshId
     });
   }
@@ -1522,15 +1530,29 @@ function applyPlayerColors(rows) {
     const id = row[0] | 0;
     const pc = normalizeColorHex(row[1]) || DEFAULT_PLAYER_COLOR_HEX;
     const sc = normalizeColorHex(row[2]) || DEFAULT_SHOOT_COLOR_HEX;
-    const sid = normalizeClientShipId(row[3]);
+    let tc = DEFAULT_THRUST_COLOR_HEX;
+    let sidRaw = row[3];
+    // New pack: [id, player, shoot, thrust, shipId]. Legacy: [id, player, shoot, shipId].
+    if (row.length >= 5) {
+      tc = normalizeColorHex(row[3]) || DEFAULT_THRUST_COLOR_HEX;
+      sidRaw = row[4];
+    }
+    const sid = normalizeClientShipId(sidRaw);
     const pr = hexToRgb01(pc) || COL.self.slice();
     const sr = hexToRgb01(sc) || COL.laser.slice();
-    playerColors.set(id, { player: pr, shoot: sr, playerHex: pc, shootHex: sc, shipId: sid });
+    const tr = hexToRgb01(tc) || COL.cannonHot.slice();
+    playerColors.set(id, {
+      player: pr, shoot: sr, thrust: tr,
+      playerHex: pc, shootHex: sc, thrustHex: tc,
+      shipId: sid
+    });
     if (id === myId) {
       myPlayerColorHex = pc;
       myShootColorHex = sc;
+      myThrustColorHex = tc;
       myPlayerColorRgb = pr.slice();
       myShootColorRgb = sr.slice();
+      myThrustColorRgb = tr.slice();
       if (sid) setActiveShipMesh(sid);
       syncAccountColorInputs();
     }
@@ -1548,6 +1570,12 @@ function ownerShootColor(ownerId) {
   if (ownerId === myId) return myShootColorRgb || COL.laser;
   const c = playerColors.get(ownerId);
   return (c && c.shoot) || COL.laser;
+}
+
+function ownerThrustColor(ownerId) {
+  if (ownerId === myId) return myThrustColorRgb || COL.cannonHot;
+  const c = playerColors.get(ownerId);
+  return (c && c.thrust) || COL.cannonHot;
 }
 
 function rgbToHsl(r, g, b) {
@@ -10194,6 +10222,9 @@ function normalizeClientShipId(raw) {
   return 'tiny_1';
 }
 function shipIdForOwner(ownerId) {
+  if (ownerId === ACCOUNT_PREVIEW_OWNER) {
+    return normalizeClientShipId(accountDraftShipId || selectedShipMeshId);
+  }
   if (ownerId === myId) return selectedShipMeshId;
   const c = playerColors.get(ownerId);
   return (c && c.shipId) || 'tiny_1';
@@ -12016,8 +12047,10 @@ const accountMmrEl = document.getElementById('account-mmr');
 const accountMsgEl = document.getElementById('account-msg');
 const accountPlayerColorEl = document.getElementById('account-player-color');
 const accountShootColorEl = document.getElementById('account-shoot-color');
-const accountPlayerColorHexEl = document.getElementById('account-player-color-hex');
-const accountShootColorHexEl = document.getElementById('account-shoot-color-hex');
+const accountThrustColorEl = document.getElementById('account-thrust-color');
+const accountPlayerSwatchEl = document.getElementById('account-player-swatch');
+const accountShootSwatchEl = document.getElementById('account-shoot-swatch');
+const accountThrustSwatchEl = document.getElementById('account-thrust-swatch');
 const accountConfirmBtn = document.getElementById('account-confirm-btn');
 const accountShipPreviewEl = document.getElementById('account-ship-preview');
 const accountShipChangeBtn = document.getElementById('account-ship-change-btn');
@@ -12039,6 +12072,7 @@ let accountSession = {
   hasSnapshot: false,
   playerColor: DEFAULT_PLAYER_COLOR_HEX,
   shootColor: DEFAULT_SHOOT_COLOR_HEX,
+  thrustColor: DEFAULT_THRUST_COLOR_HEX,
   shipId: 'tiny_1',
   mmr: 1200,
   mmrGames: 0,
@@ -12047,6 +12081,13 @@ let accountSession = {
 /** Draft ship while account panel is open (committed on Confirm). */
 let accountDraftShipId = 'tiny_1';
 const accountShipPickerSlots = [];
+/** Fake owner id for account GL preview (shipIdForOwner / attack pulse). */
+const ACCOUNT_PREVIEW_OWNER = -9001;
+const ACCOUNT_PREV_LOGIC_W = 200;
+const ACCOUNT_PREV_LOGIC_H = 140;
+let accountPreviewParticlesCleared = false;
+let accountPreviewMuzzleAt = 0;
+let accountPreviewLastMs = 0;
 let pinModalMode = 'register';
 let soloSnapshot = null;
 let selectedPlayMode = null;
@@ -12580,10 +12621,13 @@ function setPinModalMsg(text, ok) {
 function syncAccountColorInputs() {
   const pc = myPlayerColorHex || DEFAULT_PLAYER_COLOR_HEX;
   const sc = myShootColorHex || DEFAULT_SHOOT_COLOR_HEX;
+  const tc = myThrustColorHex || DEFAULT_THRUST_COLOR_HEX;
   if (accountPlayerColorEl) accountPlayerColorEl.value = pc.toLowerCase();
   if (accountShootColorEl) accountShootColorEl.value = sc.toLowerCase();
-  if (accountPlayerColorHexEl) accountPlayerColorHexEl.textContent = pc;
-  if (accountShootColorHexEl) accountShootColorHexEl.textContent = sc;
+  if (accountThrustColorEl) accountThrustColorEl.value = tc.toLowerCase();
+  if (accountPlayerSwatchEl) accountPlayerSwatchEl.style.background = pc;
+  if (accountShootSwatchEl) accountShootSwatchEl.style.background = sc;
+  if (accountThrustSwatchEl) accountThrustSwatchEl.style.background = tc;
 }
 
 function applyAccountSession(msg) {
@@ -12602,11 +12646,12 @@ function applyAccountSession(msg) {
     hasSnapshot: !!(msg.hasSnapshot || soloSnapshot),
     playerColor: normalizeColorHex(msg.playerColor) || accountSession.playerColor || DEFAULT_PLAYER_COLOR_HEX,
     shootColor: normalizeColorHex(msg.shootColor) || accountSession.shootColor || DEFAULT_SHOOT_COLOR_HEX,
+    thrustColor: normalizeColorHex(msg.thrustColor) || accountSession.thrustColor || DEFAULT_THRUST_COLOR_HEX,
     shipId: normalizeClientShipId(msg.shipId != null ? msg.shipId : accountSession.shipId),
     friends
   };
   lbFriendsSet = new Set(friends);
-  setMyColors(accountSession.playerColor, accountSession.shootColor);
+  setMyColors(accountSession.playerColor, accountSession.shootColor, accountSession.thrustColor);
   if (accountSession.shipId) {
     setActiveShipMesh(accountSession.shipId);
     accountDraftShipId = accountSession.shipId;
@@ -12822,6 +12867,9 @@ function openAccountPanel() {
   if (accountNameEl) accountNameEl.value = accountSession.name || '';
   accountDraftShipId = normalizeClientShipId(accountSession.shipId || selectedShipMeshId);
   syncAccountColorInputs();
+  accountPreviewParticlesCleared = false;
+  accountPreviewMuzzleAt = 0;
+  accountPreviewLastMs = 0;
   accountPanelEl.classList.add('open');
   accountPanelEl.setAttribute('aria-hidden', 'false');
   redrawAccountShipPreview(true);
@@ -12832,6 +12880,8 @@ function closeAccountPanel() {
   closeShipPickerPanel();
   accountPanelEl.classList.remove('open');
   accountPanelEl.setAttribute('aria-hidden', 'true');
+  if (!inGame) clearParticles();
+  accountPreviewParticlesCleared = false;
 }
 
 function digitsOnlyPin(el) {
@@ -12883,15 +12933,111 @@ function sendAccountColors() {
   if (!sock) return;
   const playerColor = accountPlayerColorEl ? accountPlayerColorEl.value : myPlayerColorHex;
   const shootColor = accountShootColorEl ? accountShootColorEl.value : myShootColorHex;
+  const thrustColor = accountThrustColorEl ? accountThrustColorEl.value : myThrustColorHex;
   const shipId = normalizeClientShipId(accountDraftShipId || selectedShipMeshId);
   setAccountMsg('');
+  setMyColors(playerColor, shootColor, thrustColor);
   setActiveShipMesh(shipId);
-  sock.send(JSON.stringify({ t: 'setColors', playerColor, shootColor, shipId }));
+  sock.send(JSON.stringify({ t: 'setColors', playerColor, shootColor, thrustColor, shipId }));
+}
+
+function clearAccountPreviewRegion() {
+  const rs = canvas.width / W;
+  const fbW = Math.max(1, Math.round(ACCOUNT_PREV_LOGIC_W * rs));
+  const fbH = Math.max(1, Math.round(ACCOUNT_PREV_LOGIC_H * rs));
+  gl.enable(gl.SCISSOR_TEST);
+  gl.scissor(0, canvas.height - fbH, fbW, fbH);
+  gl.clearColor(0.024, 0.063, 0.094, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  return { fbW, fbH };
+}
+
+function blitAccountShipPreview(fbW, fbH) {
+  if (!accountShipPreviewEl) return;
+  const ctx = accountShipPreviewEl.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, accountShipPreviewEl.width, accountShipPreviewEl.height);
+  try {
+    ctx.drawImage(
+      canvas, 0, 0, fbW, fbH,
+      0, 0, accountShipPreviewEl.width, accountShipPreviewEl.height
+    );
+  } catch (_) {}
+}
+
+function renderAccountShipPreviewGL() {
+  if (!accountShipPreviewEl || !gl) return false;
+  // Keep particle pool free of match FX while previewing on the menu.
+  if (inGame) return false;
+  const now = performance.now();
+  const dt = accountPreviewLastMs
+    ? Math.min(0.05, (now - accountPreviewLastMs) / 1000)
+    : (LOCK_FRAME_MS / 1000);
+  accountPreviewLastMs = now;
+
+  if (!accountPreviewParticlesCleared) {
+    clearParticles();
+    accountPreviewParticlesCleared = true;
+    accountPreviewMuzzleAt = now;
+  }
+
+  const outlineHex = normalizeColorHex(accountPlayerColorEl ? accountPlayerColorEl.value : myPlayerColorHex)
+    || DEFAULT_PLAYER_COLOR_HEX;
+  const shootHex = normalizeColorHex(accountShootColorEl ? accountShootColorEl.value : myShootColorHex)
+    || DEFAULT_SHOOT_COLOR_HEX;
+  const thrustHex = normalizeColorHex(accountThrustColorEl ? accountThrustColorEl.value : myThrustColorHex)
+    || DEFAULT_THRUST_COLOR_HEX;
+  const outlineRgb = hexToRgb01(outlineHex) || COL.self.slice();
+  const shootRgb = hexToRgb01(shootHex) || COL.laser.slice();
+  const thrustRgb = hexToRgb01(thrustHex) || COL.cannonHot.slice();
+  const shipId = normalizeClientShipId(accountDraftShipId || selectedShipMeshId);
+  const opt = getShipOptionById(shipId);
+
+  const cx = ACCOUNT_PREV_LOGIC_W * 0.5;
+  const cy = ACCOUNT_PREV_LOGIC_H * 0.52;
+  const angle = 0;
+  const av = Math.sin(now * 0.0018) * 1.1;
+
+  playerColors.set(ACCOUNT_PREVIEW_OWNER, {
+    player: outlineRgb.slice(),
+    shoot: shootRgb.slice(),
+    thrust: thrustRgb.slice(),
+    playerHex: outlineHex,
+    shootHex,
+    thrustHex,
+    shipId
+  });
+
+  emitThrustFx(cx, cy, angle, 0, 0, ACCOUNT_PREVIEW_OWNER, thrustRgb, false);
+  if (now - accountPreviewMuzzleAt >= 700) {
+    accountPreviewMuzzleAt = now;
+    pulseSpriteShipAttack(ACCOUNT_PREVIEW_OWNER);
+    const m = shipMuzzle(cx, cy, angle);
+    emitMuzzleFx(m.x, m.y, angle, shootRgb, 8, 0, 0);
+  }
+  updateParticles(dt);
+
+  const { fbW, fbH } = clearAccountPreviewRegion();
+  gl.enable(gl.SCISSOR_TEST);
+  gl.scissor(0, canvas.height - fbH, fbW, fbH);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(cx, cy, angle, av, ACCOUNT_PREVIEW_OWNER, dt, opt, true, outlineRgb);
+  } else {
+    drawShip3D(cx, cy, angle, av, outlineRgb, ACCOUNT_PREVIEW_OWNER, dt, true);
+  }
+  drawParticles();
+  gl.disable(gl.SCISSOR_TEST);
+  blitAccountShipPreview(fbW, fbH);
+  return true;
 }
 
 function redrawAccountShipPreview(force) {
   if (!accountShipPreviewEl) return;
   if (!force && !(accountPanelEl && accountPanelEl.classList.contains('open'))) return;
+  if (renderAccountShipPreviewGL()) return;
+
   const ctx = accountShipPreviewEl.getContext('2d');
   if (!ctx) return;
   const w = accountShipPreviewEl.width | 0;
@@ -12899,7 +13045,6 @@ function redrawAccountShipPreview(force) {
   const opt = getShipOptionById(accountDraftShipId || selectedShipMeshId);
   const t = performance.now() * 0.001;
   drawShipMeshPreview(ctx, opt, w, h, t);
-  // Color outline frame so the preview reads like the in-game tinted ship.
   const hex = normalizeColorHex(accountPlayerColorEl ? accountPlayerColorEl.value : myPlayerColorHex)
     || DEFAULT_PLAYER_COLOR_HEX;
   ctx.save();
@@ -13058,14 +13203,22 @@ if (shipPickerPanelEl) {
 if (accountPlayerColorEl) {
   accountPlayerColorEl.addEventListener('input', () => {
     const hex = normalizeColorHex(accountPlayerColorEl.value) || DEFAULT_PLAYER_COLOR_HEX;
-    if (accountPlayerColorHexEl) accountPlayerColorHexEl.textContent = hex;
+    if (accountPlayerSwatchEl) accountPlayerSwatchEl.style.background = hex;
     redrawAccountShipPreview(true);
   });
 }
 if (accountShootColorEl) {
   accountShootColorEl.addEventListener('input', () => {
     const hex = normalizeColorHex(accountShootColorEl.value) || DEFAULT_SHOOT_COLOR_HEX;
-    if (accountShootColorHexEl) accountShootColorHexEl.textContent = hex;
+    if (accountShootSwatchEl) accountShootSwatchEl.style.background = hex;
+    redrawAccountShipPreview(true);
+  });
+}
+if (accountThrustColorEl) {
+  accountThrustColorEl.addEventListener('input', () => {
+    const hex = normalizeColorHex(accountThrustColorEl.value) || DEFAULT_THRUST_COLOR_HEX;
+    if (accountThrustSwatchEl) accountThrustSwatchEl.style.background = hex;
+    redrawAccountShipPreview(true);
   });
 }
 if (accountNameEl) {
@@ -17779,8 +17932,8 @@ function render() {
     const meleeOn = thrusting && thrustMeleeActive(me.angle, me.vx, me.vy, {
       id: myId, x: me.x, y: me.y
     });
-    if (thrusting) emitThrustFx(me.x, me.y, me.angle, me.vx, me.vy, myId, ownerPlayerColor(myId), meleeOn);
-    else emitThrustIdleFx(me.x, me.y, me.angle, me.vx, me.vy, myId, ownerPlayerColor(myId));
+    if (thrusting) emitThrustFx(me.x, me.y, me.angle, me.vx, me.vy, myId, ownerThrustColor(myId), meleeOn);
+    else emitThrustIdleFx(me.x, me.y, me.angle, me.vx, me.vy, myId, ownerThrustColor(myId));
     tickThrustGrid(thrusting, me.x, me.y, me.angle);
     thrustAlignPrevX = me.x;
     thrustAlignPrevY = me.y;
@@ -17798,8 +17951,8 @@ function render() {
     const meleeOn = thrustMeleeActive(v.angle, v.vx, v.vy, { id: r.id });
     const thrusting = !deathSpectating && !matchPaused && (forwardThrust || meleeOn);
     if (!deathSpectating && !matchPaused) {
-      if (thrusting) emitThrustFx(v.x, v.y, v.angle, v.vx, v.vy, r.id, ownerPlayerColor(r.id), meleeOn);
-      else emitThrustIdleFx(v.x, v.y, v.angle, v.vx, v.vy, r.id, ownerPlayerColor(r.id));
+      if (thrusting) emitThrustFx(v.x, v.y, v.angle, v.vx, v.vy, r.id, ownerThrustColor(r.id), meleeOn);
+      else emitThrustIdleFx(v.x, v.y, v.angle, v.vx, v.vy, r.id, ownerThrustColor(r.id));
     }
     if (!deathSpectating && !matchPaused) emitShipDamageSmoke(v.id, v.x, v.y, v.angle, v.vx, v.vy, v.hp);
   }
