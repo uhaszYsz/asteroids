@@ -475,7 +475,7 @@ function enemyMoveType(e) {
 }
 
 function wormIsHolding(e) {
-  // Laser aim/fire/reload holds still. Rocket barrage (4–5) keeps wandering.
+  // Laser aim/fire/reload holds still. Rocket/shotgun barrages (4–7) keep wandering.
   const p = e && (e.wormPhase | 0);
   return !!(e && e.kind === 'worm' && p >= 1 && p <= 3);
 }
@@ -662,8 +662,8 @@ function makeEnemy(kind, wave, weapon) {
     lastLaserAng: null,
     enteredPlay: false,
     speed: randomEnemyWanderSpeed(),
-    // Worm laser attack: 0 idle, 1 aim, 2 fire, 3 reload;
-    // rocket barrage: 4 fire, 5 reload. wormAtk 0=laser next, 1=rockets next.
+    // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
+    // wormAtk cycles 0=laser, 1=rockets, 2=shotgun.
     wormPhase: 0,
     wormAimLeft: 0,
     wormAtk: 0,
@@ -914,12 +914,20 @@ function beginWormRocketAttack(room, e) {
   e.reloadLeft = 0;
 }
 
+function beginWormShotgunAttack(room, e) {
+  e.wormPhase = 6;
+  e.wormAimLeft = 0;
+  e.shootAmmo = ENEMY_WORM_SHOTGUN.ammo;
+  e.shootCd = 0;
+  e.reloadLeft = 0;
+}
+
 function finishWormAttack(room, e) {
   e.wormPhase = 0;
   e.wormAimLeft = 0;
   e.shootAmmo = 0;
   e.reloadLeft = 0;
-  e.wormAtk = (e.wormAtk | 0) ? 0 : 1;
+  e.wormAtk = ((e.wormAtk | 0) + 1) % 3;
   e.fireCd = Math.round(
     (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
   );
@@ -1013,8 +1021,50 @@ function fireWormRocketVolley(room, e) {
   }
 }
 
+/** One 360° volley of random-size line pellets from the worm. */
+function fireWormShotgunVolley(room, e) {
+  const count = Math.max(1, ENEMY_WORM_SHOTGUN.shotgun | 0);
+  const baseAng = (e.dir != null && Number.isFinite(e.dir)) ? e.dir
+    : (Number.isFinite(e.angle) ? e.angle : 0);
+  const x = e.x;
+  const y = e.y;
+  const now = Date.now();
+  const owner = enemyFxOwner(e);
+  const rnd = makeShotgunRng(x + e.id * 0.19, y + (e.shootAmmo | 0) * 0.41);
+  const sMin = ENEMY_WORM_SHOTGUN.sizeMin;
+  const sMax = ENEMY_WORM_SHOTGUN.sizeMax;
+  const sSpan = sMax - sMin;
+  for (let i = 0; i < count; i++) {
+    const m = shotgunPelletMotion(
+      baseAng, ENEMY_WORM_SHOTGUN.spread,
+      ENEMY_WORM_SHOTGUN.spdMin, ENEMY_WORM_SHOTGUN.spdMax, rnd
+    );
+    const length = sMin + rnd() * sSpan;
+    const width = sMin + rnd() * sSpan;
+    const b = {
+      id: room.nextBulletId++,
+      owner,
+      enemyOwner: e.id | 0,
+      type: 'enemyWorm',
+      dmg: ENEMY_WORM_SHOTGUN.dmg,
+      length,
+      width,
+      x, y,
+      spawnX: x,
+      spawnY: y,
+      vx: Math.cos(m.ang) * m.spd,
+      vy: Math.sin(m.ang) * m.spd,
+      spawnSt: now
+    };
+    room.bullets.push(b);
+    roomBroadcast(room, { t: 'bf', b: packBullet(b) });
+  }
+}
+
 function beginWormAttack(room, e) {
-  if ((e.wormAtk | 0) === 1) beginWormRocketAttack(room, e);
+  const atk = e.wormAtk | 0;
+  if (atk === 1) beginWormRocketAttack(room, e);
+  else if (atk === 2) beginWormShotgunAttack(room, e);
   else beginWormLaserAttack(room, e);
 }
 
@@ -1093,6 +1143,27 @@ function updateWormAttack(room, e, target) {
   }
 
   if ((e.wormPhase | 0) === 5) {
+    if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
+    if ((e.reloadLeft | 0) > 0) return;
+    finishWormAttack(room, e);
+    return;
+  }
+
+  // —— Shotgun (phases 6–7): five 360° line volleys while moving ——
+  if ((e.wormPhase | 0) === 6) {
+    if ((e.shootCd | 0) > 0) e.shootCd--;
+    if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) return;
+    fireWormShotgunVolley(room, e);
+    e.shootAmmo--;
+    e.shootCd = ENEMY_WORM_SHOTGUN.cooldown;
+    if ((e.shootAmmo | 0) <= 0) {
+      e.wormPhase = 7;
+      e.reloadLeft = ENEMY_WORM_SHOTGUN.reload;
+    }
+    return;
+  }
+
+  if ((e.wormPhase | 0) === 7) {
     if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
     if ((e.reloadLeft | 0) > 0) return;
     finishWormAttack(room, e);
@@ -1608,7 +1679,7 @@ function hitBulletEnemy(b, e) {
     const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
     let br = cfg.size || 2;
     if (cfg.col === 'ellipse') br = Math.max(cfg.size || 2, (cfg.size || 2) * (cfg.scaleY || 1));
-    if (cfg.col === 'line') br = Math.max(cfg.width || 2, 2);
+    if (cfg.col === 'line') br = Math.max(bulletLineWidth(b, cfg) || 2, 2);
     return circleHitsEnemyRect(b.x, b.y, br, e);
   }
   return hitBulletTarget(b, e.x, e.y, e.r, false);
@@ -2946,10 +3017,18 @@ function rebuildAsteroidSpatialHash(room) {
 }
 
 /** Bullet extent used to query the asteroid hash (must cover hitBulletTarget shape). */
+function bulletLineLength(b, cfg) {
+  if (b && b.length != null && Number.isFinite(+b.length)) return +b.length;
+  return (cfg && cfg.length) || 0;
+}
+function bulletLineWidth(b, cfg) {
+  if (b && b.width != null && Number.isFinite(+b.width)) return +b.width;
+  return (cfg && cfg.width) || 0;
+}
 function bulletBroadR(b) {
   const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
   if (cfg.col === 'line') {
-    return Math.max(cfg.length || 0, cfg.width || 0) * 0.5 + 1;
+    return Math.max(bulletLineLength(b, cfg), bulletLineWidth(b, cfg)) * 0.5 + 1;
   }
   let br = cfg.size || 2 * RES_SCALE;
   if (cfg.col === 'ellipse') br = Math.max(br, br * (cfg.scaleY || 1));
@@ -3098,7 +3177,7 @@ function hitBulletAsteroid(b, a) {
   if (a.size === 'small') return true;
   const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
   let br = cfg.size || 2 * RES_SCALE;
-  if (cfg.col === 'line') br = Math.max(cfg.width || 1, 1.5 * RES_SCALE);
+  if (cfg.col === 'line') br = Math.max(bulletLineWidth(b, cfg) || 1, 1.5 * RES_SCALE);
   if (cfg.col === 'ellipse') br = Math.max(br, br * (cfg.scaleY || 1) * 0.55);
   return !!circleVsAsteroidPoly({ x: b.x, y: b.y, r: br }, a);
 }
@@ -4844,7 +4923,9 @@ function hitBulletTarget(b, tx, ty, tr, torus) {
     return hitEllipseCircle(b.x, b.y, cfg.size, cfg.size * cfg.scaleY, angle, tx, ty, tr, torus);
   }
   if (cfg.col === 'line') {
-    return hitLineCircle(b.x, b.y, cfg.length, cfg.width, angle, tx, ty, tr, torus);
+    return hitLineCircle(
+      b.x, b.y, bulletLineLength(b, cfg), bulletLineWidth(b, cfg), angle, tx, ty, tr, torus
+    );
   }
   return hitCircleCircle(b.x, b.y, cfg.size, tx, ty, tr, torus);
 }
@@ -5259,7 +5340,7 @@ function updateTurrets(room) {
 function steerHomingBullet(room, b) {
   if (!b) return;
   if (!HOMING_BULLET_TYPES.has(b.type || 'default')) return;
-  if (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyRocket') return;
+  if (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyWorm' || b.type === 'enemyRocket') return;
   // Per-rocket homing (degrees/tick) is handled in applyRocketFlight.
   if ((+b.homing || 0) > 0) return;
   const owner = room.players.get(b.owner);
@@ -5453,7 +5534,7 @@ function updateBullets(room) {
       if (p.bot && !room.perfTest) continue;
       if (blocksFriendlyFire(room, b.owner)) continue;
       // Enemy bullets: no lag-comp rewind from fake owner.
-      const target = (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyRocket')
+      const target = (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyWorm' || b.type === 'enemyRocket')
         ? p
         : lagCompPose(room, b.owner, p);
       if (hitBulletPlayer(b, target)) {
@@ -5495,7 +5576,7 @@ function updateBullets(room) {
     }
 
     // Player projectiles can destroy solo enemies.
-    if (room.practice && room.enemies && b.type !== 'enemy' && b.type !== 'enemySpinner' && b.type !== 'enemyRocket' && b.owner > 0) {
+    if (room.practice && room.enemies && b.type !== 'enemy' && b.type !== 'enemySpinner' && b.type !== 'enemyWorm' && b.type !== 'enemyRocket' && b.owner > 0) {
       let hitEnemy = false;
       for (let ei = room.enemies.length - 1; ei >= 0; ei--) {
         const e = room.enemies[ei];

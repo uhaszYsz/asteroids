@@ -104,8 +104,10 @@ const BULLET_TYPES = {
   turret: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   /** Solo enemy line shot — skips asteroids. */
   enemy: { dmg: 18, col: 'line', length: 15, width: 3, skipAsteroids: true },
-  /** Spinner radial burst — 2× common line shot. */
-  enemySpinner: { dmg: 18, col: 'line', length: 30, width: 6, skipAsteroids: true },
+  /** Spinner radial burst — square line shot. */
+  enemySpinner: { dmg: 18, col: 'line', length: 20, width: 20, skipAsteroids: true },
+  /** Worm 360° shotgun pellet — length/width set per bullet (7–30). */
+  enemyWorm: { dmg: 18, col: 'line', length: 15, width: 15, skipAsteroids: true },
   /** UFO micro-rocket — 1px hit radius, skips asteroids. */
   enemyRocket: { dmg: 18, col: 'circle', size: 1, scaleY: 1, length: 0, width: 0, skipAsteroids: true }
 };
@@ -448,6 +450,22 @@ const ENEMY_WORM_ROCKET = {
   lifeMaxS: 14,
   hp: 20,
   dmg: 30
+};
+/**
+ * Worm 3rd attack — 360° line-shotgun. Per pellet: random L/W and speed.
+ * Speeds are literal px/tick (same units as worm rockets).
+ */
+const ENEMY_WORM_SHOTGUN = {
+  ammo: 5,
+  shotgun: 8,
+  spread: 360,
+  cooldown: 40,
+  reload: Math.round(1 * TPS),
+  spdMin: 2,
+  spdMax: 8,
+  sizeMin: 7,
+  sizeMax: 30,
+  dmg: 18
 };
 /** Player (and default) rocket hull HP — depleted by hitscans / bullets before detonate. */
 const ROCKET_HP_DEFAULT = 190;

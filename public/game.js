@@ -15115,7 +15115,7 @@ function bulletAt(b) {
 /**
  * Common shot: 2D twin ovals sized like the UFO rocket mesh (ENEMY_ROCKET3D ≈ ship×0.7/3).
  * Soft falloff shrinks the bright core, so half-sizes are padded to match that footprint.
- * scale: 1 = common, 2 = spinner (2×).
+ * scale: 1 = common (L15). Spinner = 20/15. Worm pellets pass their own scale.
  */
 function drawEnemyCommonShot(x, y, ang, scale) {
   const s = scale > 0 ? scale : 1;
@@ -15129,7 +15129,7 @@ function drawEnemyCommonShot(x, y, ang, scale) {
   drawSoftOval(x, y, ang, coreW, coreL, COL_WHITE, 1, false);
 }
 
-function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, ownerId) {
+function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, ownerId, sizeOpts) {
   if (type === 'rocket' || type === 'enemyRocket') {
     const tiny = type === 'enemyRocket';
     const rCol = tiny ? COL.enemyUfo : ownerPlayerColor(ownerId);
@@ -15198,8 +15198,15 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
     emitVoidVortex(x, y, vx, vy);
     return null;
   }
-  if (type === 'enemy' || type === 'enemySpinner') {
-    drawEnemyCommonShot(x, y, ang, type === 'enemySpinner' ? 2 : 1);
+  if (type === 'enemy' || type === 'enemySpinner' || type === 'enemyWorm') {
+    let scale = 1;
+    if (type === 'enemySpinner') scale = 20 / 15;
+    else if (type === 'enemyWorm') {
+      const L = sizeOpts && sizeOpts.length != null ? +sizeOpts.length : 15;
+      const Ww = sizeOpts && sizeOpts.width != null ? +sizeOpts.width : 15;
+      scale = Math.max(L, Ww) / 15;
+    }
+    drawEnemyCommonShot(x, y, ang, scale);
     return null;
   }
   if ((type === 'default' || !type || type === 'shotgun') && defaultTrail) {
@@ -15247,6 +15254,9 @@ function unpackBullet(row) {
     b.maxSpeed = row[9] != null ? +row[9] : 0;
     b.homing = row[10] != null ? +row[10] : 0;
     b.hp = row[11] != null ? (row[11] | 0) : 190;
+  } else if (b.type === 'enemyWorm') {
+    b.length = row[8] != null ? +row[8] : 15;
+    b.width = row[9] != null ? +row[9] : 15;
   }
   return b;
 }
@@ -15353,8 +15363,9 @@ function addBullet(b, withMuzzle, liveFire) {
     } else if (b.type === 'turret') {
       emitMuzzleFx(origin.x, origin.y, ang, COL.powerTurret, 7, sv.vx, sv.vy);
       if (b.owner !== myId) playSfx(SFX.shoot, { vol: 0.35, pool: 8 });
-    } else if (b.type === 'enemy' || b.type === 'enemySpinner') {
-      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, b.type === 'enemySpinner' ? 12 : 7, sv.vx, sv.vy);
+    } else if (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyWorm') {
+      const mz = b.type === 'enemySpinner' ? 12 : (b.type === 'enemyWorm' ? 9 : 7);
+      emitMuzzleFx(origin.x, origin.y, ang, COL.enemyBullet, mz, sv.vx, sv.vy);
     }
   }
 }
@@ -18684,7 +18695,10 @@ function renderBullets() {
     const vy = p.vy != null ? p.vy : b.vy;
     const ang = Math.atan2(vy, vx);
     if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
-    const pt = drawBulletVisual(b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner);
+    const pt = drawBulletVisual(
+      b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner,
+      (b.length != null || b.width != null) ? { length: b.length, width: b.width } : null
+    );
     if (pt) {
       const rainbow = ownerHasDamagePowerup(b.owner) && DAMAGE_RAINBOW_TYPES.has(b.type || 'default');
       if (rainbow) rainbowPts.push(pt);

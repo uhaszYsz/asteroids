@@ -315,6 +315,11 @@ function packBullet(b) {
       b.homing != null ? +b.homing : ROCKET_HOMING_DEFAULT,
       b.hp != null ? (b.hp | 0) : ROCKET_HP_DEFAULT
     );
+  } else if (b.type === 'enemyWorm') {
+    row.push(
+      b.length != null ? +b.length : 15,
+      b.width != null ? +b.width : 15
+    );
   }
   return row;
 }
