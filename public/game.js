@@ -15312,8 +15312,8 @@ function drawEnemyCommonShot(x, y, ang, scale) {
   const coreR = ENEMY_SHOT_CORE_BASE * s;
   // Solid red under the white core footprint; alpha fades only outside the core.
   const glowInner = Math.min(0.95, coreR / Math.max(glowR, 1e-6));
-  // Additive glow (single pass); solid under core, fade outside.
-  drawSoftOval(x, y, 0, glowR, glowR, red, 0.55, true, glowInner);
+  // Additive glow: full strength (a=1) under/at core edge, fade only outside.
+  drawSoftOval(x, y, 0, glowR, glowR, red, 1, true, glowInner);
   // Near-solid white disc (tiny AA rim) — matches ENEMY_SHOT_HIT_FRAC.
   drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false, ENEMY_SHOT_HIT_FRAC);
 }
