@@ -10845,6 +10845,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     ];
   } else if (tube) {
     // Roof + mirrored under: outer long edges share y=±wingY, z=0 so they touch.
+    // Convex diamond only — do NOT add a 90° copy (those planes intersect and
+    // break painter's depth sort with alpha sprites).
     panels = [
       {
         verts: [
@@ -10883,16 +10885,33 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         uvs: uvsR
       }
     ];
-    // Same 4 faces spun 90° around length (+X) — symmetry planes sit at 90° to the first set.
-    // (x, y, z) → (x, -z, y)
-    const n0 = panels.length;
-    for (let i = 0; i < n0; i++) {
-      const src = panels[i];
-      panels.push({
-        verts: src.verts.map((v) => [v[0], -v[2], v[1]]),
-        uvs: src.uvs
-      });
+    // Slice along length so long faces sort correctly when banked/spinning.
+    const SEGS = 4;
+    const sliced = [];
+    for (let p = 0; p < panels.length; p++) {
+      const src = panels[p];
+      // verts: 0 nose-ridge, 1 nose-tip, 2 tail-tip, 3 tail-ridge
+      for (let s = 0; s < SEGS; s++) {
+        const t0 = s / SEGS;
+        const t1 = (s + 1) / SEGS;
+        const lerp4 = (a, b, t) => [
+          a[0] + (b[0] - a[0]) * t,
+          a[1] + (b[1] - a[1]) * t,
+          a[2] + (b[2] - a[2]) * t
+        ];
+        const lerpUV = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+        const v0 = lerp4(src.verts[0], src.verts[3], t0);
+        const v1 = lerp4(src.verts[1], src.verts[2], t0);
+        const v2 = lerp4(src.verts[1], src.verts[2], t1);
+        const v3 = lerp4(src.verts[0], src.verts[3], t1);
+        const u0 = lerpUV(src.uvs[0], src.uvs[3], t0);
+        const u1 = lerpUV(src.uvs[1], src.uvs[2], t0);
+        const u2 = lerpUV(src.uvs[1], src.uvs[2], t1);
+        const u3 = lerpUV(src.uvs[0], src.uvs[3], t1);
+        sliced.push({ verts: [v0, v1, v2, v3], uvs: [u0, u1, u2, u3] });
+      }
     }
+    panels = sliced;
   } else {
     // Left / right halves share the ridge (y=0,z=0); tips fold down like a roof.
     panels = [
@@ -10920,12 +10939,14 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   // Painter's algorithm when spinning / multi-sided tube.
   if (panels.length > 2 || (spinRate && spinRate !== 0) || (yawSpinDpt && yawSpinDpt !== 0) || leanY) {
     for (let p = 0; p < panels.length; p++) {
+      panels[p]._i = p;
       const { depth } = projectPanel(panels[p].verts);
       let z = 0;
       for (let i = 0; i < depth.length; i++) z += depth[i];
       panels[p]._z = z / Math.max(1, depth.length);
     }
-    panels.sort((a, b) => a._z - b._z);
+    // Far (low Z) → near (high Z). Stable tie-break keeps adjacent slices ordered.
+    panels.sort((a, b) => (a._z - b._z) || (a._i - b._i));
   }
 
   const tint = color || COL.self || [0.35, 0.85, 1];
@@ -10983,15 +11004,16 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const windBackQ = [0, 2, 1, 0, 3, 2];
   const windFwdT = [0, 1, 2];
   const windBackT = [0, 2, 1];
-  /** @returns {number} GL triangle vertex count (double-sided). */
-  function fillPanelMesh(panel) {
+  /** @returns {number} GL triangle vertex count (double-sided unless oneSided). */
+  function fillPanelMesh(panel, oneSided) {
     const { xy } = projectPanel(panel.verts);
     const uvs = panel.uvs;
     const tri = panel.verts.length === 3;
     const fwd = tri ? windFwdT : windFwdQ;
     const back = tri ? windBackT : windBackQ;
     let o = 0;
-    for (let pass = 0; pass < 2; pass++) {
+    const passes = oneSided ? 1 : 2;
+    for (let pass = 0; pass < passes; pass++) {
       const idx = pass === 0 ? fwd : back;
       for (let v = 0; v < idx.length; v++) {
         const i = idx[v];
@@ -11029,7 +11051,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         }]
       : panels;
     for (let p = 0; p < outlinePanels.length; p++) {
-      const nVert = fillPanelMesh(outlinePanels[p]);
+      const nVert = fillPanelMesh(outlinePanels[p], !!tube);
       for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
         const dir = SPRITE_SHIP_OUTLINE_DIRS[d];
         gl.uniform2f(ssUOffset, dir[0] * outlineW, dir[1] * outlineW);
@@ -11044,7 +11066,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.uniform1f(ssUAlpha, 1);
   gl.uniform2f(ssUOffset, 0, 0);
   for (let p = 0; p < panels.length; p++) {
-    const nVert = fillPanelMesh(panels[p]);
+    const nVert = fillPanelMesh(panels[p], !!tube);
     gl.drawArrays(gl.TRIANGLES, 0, nVert);
   }
 
