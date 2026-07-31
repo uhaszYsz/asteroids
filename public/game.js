@@ -7011,7 +7011,7 @@ function emitShipDamageSmoke(id, x, y, angle, vx, vy, hp, maxHpOpt) {
 function enemyMaxHp(kind) {
   if (kind === 'ufo') return 300;
   if (kind === 'carrier') return 90;
-  if (kind === 'worm') return 120;
+  if (kind === 'worm') return 1000;
   return 95;
 }
 
@@ -11113,6 +11113,8 @@ let localLaserUntil = 0;
 let localLaserClip = null;
 /** Other players' beams: owner -> { len, until, wpn }. */
 const remoteLasers = new Map();
+/** Temporary worm laser raycast debug segments (center + side rays). */
+const wormLaserDbg = [];
 /** Server hitscan debug traces (cl_hitscan). */
 const hitLasers = [];
 /** Railgun charge telegraph: owner -> until (performance.now). */
@@ -14825,6 +14827,7 @@ function resetMatchState() {
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
   remoteLasers.clear();
   hitLasers.length = 0;
+  wormLaserDbg.length = 0;
   localLaserUntil = 0;
   localLaserClip = null;
   selectedWeapon = 1;
@@ -15157,13 +15160,14 @@ function removeAsteroid(id, silent) {
   asteroids.delete(id);
 }
 
-function addLaser(row, hitKind, weaponName) {
+function addLaser(row, hitKind, weaponName, rays) {
   const x0 = row[1], y0 = row[2], x1 = row[3], y1 = row[4];
   const owner = row[7] | 0;
   const len = Math.hypot(x1 - x0, y1 - y0);
   const wpn = weaponName || 'laser';
   const kind = hitKind != null ? (hitKind | 0) : 2;
   const beamDir = Math.atan2(y1 - y0, x1 - x0);
+  const beamW = row[5] != null ? +row[5] : 0;
   if (wpn === 'thrust') {
     // No beam visual — melee reads as red thruster particles instead.
     noteThrustMeleeFx(owner);
@@ -15172,15 +15176,34 @@ function addLaser(row, hitKind, weaponName) {
     return;
   }
   // Laser impact SFX + spark FX only for laser weapon hits (not miss).
-  emitLaserImpactFx(x1, y1, kind, wpn === 'laser', beamDir);
+  emitLaserImpactFx(x1, y1, kind, wpn === 'laser' || wpn === 'wormLaser', beamDir);
   pushHitscanDebug(x0, y0, x1, y1, kind, wpn);
-  if (wpn === 'laser') pushGridShock(x0, y0, gridBlastLaserOpts(x0, y0, x1, y1));
+  if (wpn === 'laser' || wpn === 'wormLaser') pushGridShock(x0, y0, gridBlastLaserOpts(x0, y0, x1, y1));
+  // Temp debug: draw the 3 worm damage rays.
+  if (wpn === 'wormLaser' && rays && rays.length) {
+    const until = performance.now() + 90;
+    for (let i = 0; i < rays.length; i++) {
+      const r = rays[i];
+      if (!r || r.length < 4) continue;
+      wormLaserDbg.push({
+        x0: +r[0], y0: +r[1], x1: +r[2], y1: +r[3],
+        hit: r[4] | 0,
+        until
+      });
+    }
+    if (wormLaserDbg.length > 36) wormLaserDbg.splice(0, wormLaserDbg.length - 36);
+  }
   // Own laser beam is 100% local (ship pose + clip timer). Remotes use server len.
   if (owner && owner !== (myId | 0)) {
+    const linger = wpn === 'wormLaser'
+      ? Math.round(1000 / TPS) * 2
+      : LASER_CLIP_MS + LASER_LINGER_MS;
     remoteLasers.set(owner, {
       len,
-      until: performance.now() + LASER_CLIP_MS + LASER_LINGER_MS,
-      wpn
+      until: performance.now() + linger,
+      wpn,
+      width: beamW > 0 ? beamW : 0,
+      x0, y0, x1, y1
     });
   }
 }
@@ -15520,23 +15543,42 @@ function drawLaserBeams() {
     syncLaserSfx(false);
   }
   for (const [owner, rl] of remoteLasers) {
+    const beamW = rl.width > 0 ? rl.width : width;
+    const col = ownerHasDamagePowerup(owner)
+      ? damageRainbowColor()
+      : (owner < 0 ? COL.enemy : ownerShootColor(owner));
+    if (rl.wpn === 'wormLaser' && rl.x0 != null) {
+      drawThickSegment(rl.x0, rl.y0, rl.x1, rl.y1, beamW, col);
+      continue;
+    }
     const pose = resolveFxShooterPose(owner);
     if (!pose) continue;
     const m = shipMuzzle(pose.x, pose.y, pose.angle);
-    const col = ownerHasDamagePowerup(owner)
-      ? damageRainbowColor()
-      : ownerShootColor(owner);
     drawThickSegment(
       m.x, m.y,
       m.x + m.c * rl.len,
       m.y + m.s * rl.len,
-      width,
+      beamW,
       col
     );
   }
+  drawWormLaserDebug();
   drawRailCharges();
   drawRailBeams();
   drawThrustBeams();
+}
+
+/** Temp: always draw worm's 3 damage raycasts. */
+function drawWormLaserDebug() {
+  if (!wormLaserDbg.length) return;
+  const now = performance.now();
+  for (let i = wormLaserDbg.length - 1; i >= 0; i--) {
+    if (now >= wormLaserDbg[i].until) wormLaserDbg.splice(i, 1);
+  }
+  for (const h of wormLaserDbg) {
+    const mark = h.hit === 1 ? COL.remote : h.hit === 2 ? COL.asteroid : COL.debug;
+    drawAlphaSegment(h.x0, h.y0, h.x1, h.y1, mark, 0.85);
+  }
 }
 
 function drawHitscanDebug() {
@@ -15902,7 +15944,8 @@ function unpackEnemy(row) {
     dir,
     hp,
     speed: spd,
-    enteredPlay: true
+    enteredPlay: true,
+    wormAtk: !!(row[17] | 0)
   };
 }
 
@@ -15954,6 +15997,7 @@ function applyEnemySnapList(list, st) {
     const packedSpeed = row[14] != null ? +row[14] : 0;
     if (packedSpeed > 0) e.speed = packedSpeed;
     else if (Math.hypot(e.vx, e.vy) > 0.05) e.speed = Math.hypot(e.vx, e.vy);
+    e.wormAtk = !!(row[15] | 0);
   }
 }
 
@@ -16121,7 +16165,7 @@ const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_WORM_SPRITE_ID = 'enemy_184';
 const ENEMY_WORM_SPRITE_SCALE = 1;
-/** Continuous roll around nose / length axis (rad/s). */
+/** Continuous roll around nose / length axis (rad/s). Doubled while laser-attack holding. */
 const ENEMY_WORM_SPIN_RATE = 3.2;
 const ENEMY_COMMON_MESH = (() => {
   return cloneShipMeshScaled(SHIP_MESHES[0], ENEMY_COMMON_SCALE);
@@ -16297,14 +16341,15 @@ function drawEnemyCommon(x, y, angle, color, id, dt) {
 }
 
 /** Worm: craft 184 on 4 planes (roof + mirrored under), spinning along length. */
-function drawEnemyWorm(x, y, angle, color, id, dt) {
+function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_WORM_SPRITE_ID);
+  const spin = ENEMY_WORM_SPIN_RATE * (wormAtk ? 2 : 1);
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
       bank, ENEMY_WORM_SPRITE_SCALE, COL.enemyOutline,
-      { tube: true, spinRate: ENEMY_WORM_SPIN_RATE }
+      { tube: true, spinRate: spin }
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
@@ -16725,7 +16770,7 @@ function drawEnemies(dt) {
     if (p.kind === 'ufo') drawEnemyUfo(x, y, p.angle, COL.enemyUfo, id, dt);
     else if (p.kind === 'carrier') drawEnemyCarrier(x, y, p.angle, e.weapon);
     else if (p.kind === 'worm') {
-      const bank = drawEnemyWorm(x, y, p.angle, COL.enemy, id, dt);
+      const bank = drawEnemyWorm(x, y, p.angle, COL.enemy, id, dt, !!e.wormAtk);
       enemyDrawBank.set(id, bank);
     } else {
       const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt);
@@ -18540,6 +18585,7 @@ function enterGameFromWelcome(msg) {
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
   remoteLasers.clear();
   hitLasers.length = 0;
+  wormLaserDbg.length = 0;
   localLaserUntil = 0;
   localLaserClip = null;
   selectedWeapon = 1;
@@ -19334,7 +19380,7 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'lf' && inGame) {
-      addLaser(msg.l, msg.hit, msg.w);
+      addLaser(msg.l, msg.hit, msg.w, msg.rays);
       return;
     }
     if (msg.t === 'rc' && inGame) {
@@ -21465,7 +21511,7 @@ function demoReplayEvent(ev) {
     return;
   }
   if (ev.t === 'lf' && ev.l) {
-    addLaser(ev.l, ev.hit, ev.w);
+    addLaser(ev.l, ev.hit, ev.w, ev.rays);
     return;
   }
   if (ev.t === 'rf' && ev.l) {

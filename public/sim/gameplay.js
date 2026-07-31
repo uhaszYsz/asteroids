@@ -474,9 +474,13 @@ function enemyMoveType(e) {
     : ENEMY_MOVE_DESTINATION;
 }
 
+function wormIsHolding(e) {
+  return !!(e && e.kind === 'worm' && (e.wormPhase | 0) > 0);
+}
+
 /**
  * Pack for ef/eu (spawn / retarget).
- * [id, kind, spawnX, spawnY, tx, ty, spawnSt, hp, weapon, angle, move, vx, vy, x, y, dir, speed]
+ * [id, kind, spawnX, spawnY, tx, ty, spawnSt, hp, weapon, angle, move, vx, vy, x, y, dir, speed, wormAtk]
  */
 function packEnemy(e) {
   const move = enemyMoveType(e);
@@ -497,11 +501,12 @@ function packEnemy(e) {
     e.x,
     e.y,
     dir,
-    enemySpeed(e)
+    enemySpeed(e),
+    wormIsHolding(e) ? 1 : 0
   ];
 }
 
-/** Compact pose snap: [id, kind, x, y, vx, vy, angle, tx, ty, hp, weapon, move, dir, entered, speed] */
+/** Compact pose snap: [id, kind, x, y, vx, vy, angle, tx, ty, hp, weapon, move, dir, entered, speed, wormAtk] */
 function packEnemySnap(e) {
   const move = enemyMoveType(e);
   const dir = e.dir != null && Number.isFinite(e.dir) ? e.dir : e.angle;
@@ -517,7 +522,8 @@ function packEnemySnap(e) {
     move,
     dir,
     e.enteredPlay ? 1 : 0,
-    enemySpeed(e)
+    enemySpeed(e),
+    wormIsHolding(e) ? 1 : 0
   ];
 }
 
@@ -652,7 +658,10 @@ function makeEnemy(kind, wave, weapon) {
     railChargeLeft: 0,
     lastLaserAng: null,
     enteredPlay: false,
-    speed: randomEnemyWanderSpeed()
+    speed: randomEnemyWanderSpeed(),
+    // Worm laser attack: 0 idle, 1 aim (3s), 2 firing, 3 reload.
+    wormPhase: 0,
+    wormAimLeft: 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -710,6 +719,18 @@ function spawnSoloWaveEnemies(room, wave) {
   if (!room.nextEnemyId) room.nextEnemyId = 1;
   const c = soloEnemyCounts(wave);
   let commonN = c.common | 0;
+  const n = Math.max(1, wave | 0);
+
+  // Wave 5: worm boss — enters off-screen like other enemies.
+  if (n === 5) {
+    const worm = makeEnemy('worm', wave);
+    worm.id = room.nextEnemyId++;
+    worm.appearLeft = 0;
+    worm.queued = false;
+    room.enemies.push(worm);
+    emitEnemyFire(room, worm);
+  }
+
   if (commonN <= 0) return;
 
   // 25% UFO wave: add one UFO and keep half the commons (random).
@@ -808,6 +829,128 @@ function fireEnemyLaserBeam(room, e, ang) {
   }
   e.angle = ang;
   e.lastLaserAng = ang;
+}
+
+/** Worm super-laser: thick beam + 3 parallel damage rays (center / ±70% of half-width). */
+function fireWormLaserBeam(room, e) {
+  const ang = Number.isFinite(e.angle) ? e.angle : 0;
+  const range = ENEMY_WORM_LASER.range;
+  const dmg = ENEMY_WORM_LASER.dmg;
+  const width = ENEMY_WORM_LASER.width;
+  const ox = e.x + Math.cos(ang) * (e.r + 4);
+  const oy = e.y + Math.sin(ang) * (e.r + 4);
+  const dx = Math.cos(ang);
+  const dy = Math.sin(ang);
+  // Perpendicular: 70% of half-width from center (30% of half-width in from each edge).
+  const sideOff = width * 0.35;
+  const px = -dy;
+  const py = dx;
+  const origins = [
+    { x: ox, y: oy },
+    { x: ox + px * sideOff, y: oy + py * sideOff },
+    { x: ox - px * sideOff, y: oy - py * sideOff }
+  ];
+  const now = Date.now();
+  const owner = enemyFxOwner(e);
+  const rays = [];
+  let midHit = null;
+  for (let i = 0; i < origins.length; i++) {
+    const o = origins[i];
+    const hit = raycastFirst(room, 0, o.x, o.y, dx, dy, range);
+    const x1 = hit ? hit.x : o.x + dx * range;
+    const y1 = hit ? hit.y : o.y + dy * range;
+    const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : 2;
+    rays.push([o.x, o.y, x1, y1, hitKind]);
+    if (i === 0) midHit = hit;
+    if (hit) {
+      if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg);
+      else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, 0);
+      else if (hit.kind === 'rocket') deflectRocketAwayFrom(room, hit.target, o.x, o.y);
+    }
+  }
+  const x1 = midHit ? midHit.x : ox + dx * range;
+  const y1 = midHit ? midHit.y : oy + dy * range;
+  const hitKind = !midHit ? 0 : midHit.kind === 'player' || midHit.kind === 'rocket' ? 1 : 2;
+  roomBroadcast(room, {
+    t: 'lf',
+    l: [room.nextBulletId++, ox, oy, x1, y1, width, now, owner],
+    hit: hitKind,
+    w: 'wormLaser',
+    rays
+  });
+  e.lastLaserAng = ang;
+}
+
+function beginWormLaserAttack(room, e) {
+  e.wormPhase = 1;
+  e.wormAimLeft = ENEMY_WORM_AIM_TICKS;
+  e.shootAmmo = 0;
+  e.shootCd = 0;
+  e.reloadLeft = 0;
+  e.tx = e.x;
+  e.ty = e.y;
+  e.vx = 0;
+  e.vy = 0;
+  emitEnemyUpdate(room, e);
+}
+
+function updateWormAttack(room, e, target) {
+  if (!target) {
+    if (wormIsHolding(e)) {
+      e.wormPhase = 0;
+      e.wormAimLeft = 0;
+      e.shootAmmo = 0;
+      e.reloadLeft = 0;
+      pickEnemyWanderTarget(e);
+      emitEnemyUpdate(room, e);
+    }
+    return;
+  }
+
+  if (!wormIsHolding(e)) {
+    if ((e.fireCd | 0) > 0) return;
+    beginWormLaserAttack(room, e);
+    return;
+  }
+
+  const desired = Math.atan2(target.y - e.y, target.x - e.x);
+  e.angle = turnAngleToward(e.angle || 0, desired, ENEMY_WORM_AIM_TURN);
+  e.dir = e.angle;
+
+  if ((e.wormPhase | 0) === 1) {
+    e.wormAimLeft = (e.wormAimLeft | 0) - 1;
+    if ((e.wormAimLeft | 0) <= 0) {
+      e.wormPhase = 2;
+      e.shootAmmo = ENEMY_WORM_LASER.ammo;
+      e.shootCd = 0;
+    }
+    return;
+  }
+
+  if ((e.wormPhase | 0) === 2) {
+    if ((e.shootCd | 0) > 0) e.shootCd--;
+    if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) return;
+    fireWormLaserBeam(room, e);
+    e.shootAmmo--;
+    e.shootCd = ENEMY_WORM_LASER.cooldown;
+    if ((e.shootAmmo | 0) <= 0) {
+      e.wormPhase = 3;
+      e.reloadLeft = ENEMY_WORM_LASER.reload;
+    }
+    return;
+  }
+
+  if ((e.wormPhase | 0) === 3) {
+    if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
+    if ((e.reloadLeft | 0) > 0) return;
+    e.wormPhase = 0;
+    e.wormAimLeft = 0;
+    e.fireCd = Math.round(
+      (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
+    );
+    pickEnemyWanderTarget(e);
+    emitEnemyUpdate(room, e);
+  }
 }
 
 function fireEnemyRailBeam(room, e, target) {
@@ -1010,8 +1153,10 @@ function enemyTryFire(room, e) {
     return;
   }
 
-  // Worm is visual/test for now — wanders, does not shoot.
-  if (e.kind === 'worm') return;
+  if (e.kind === 'worm') {
+    updateWormAttack(room, e, target);
+    return;
+  }
 
   if ((e.fireCd | 0) > 0) return;
 
@@ -1115,6 +1260,7 @@ function updateEnemies(room) {
   if (!room.practice || !room.enemies) return;
   const target = soloHumanTarget(room);
   pushSoloAimHist(room, target);
+  let wormHolding = false;
 
   for (let i = room.enemies.length - 1; i >= 0; i--) {
     const e = room.enemies[i];
@@ -1138,6 +1284,16 @@ function updateEnemies(room) {
       emitEnemyCharge(room, e);
     }
 
+    if (wormIsHolding(e)) {
+      wormHolding = true;
+      e.vx = 0;
+      e.vy = 0;
+      e.tx = e.x;
+      e.ty = e.y;
+      enemyTryFire(room, e);
+      continue;
+    }
+
     if (e.wanderLeft == null || !Number.isFinite(e.wanderLeft)) rollEnemyWanderTimer(e);
     if ((e.wanderLeft | 0) > 0) e.wanderLeft--;
     const arrived = stepEnemyMovement(e);
@@ -1151,8 +1307,9 @@ function updateEnemies(room) {
   }
 
   // Periodic full pose snap (~2 Hz) so clients stay locked.
+  // Worm aim turns every tick — snap every frame while any worm is holding.
   room.enemySnapLeft = (room.enemySnapLeft | 0) - 1;
-  if ((room.enemySnapLeft | 0) <= 0) {
+  if (wormHolding || (room.enemySnapLeft | 0) <= 0) {
     room.enemySnapLeft = ENEMY_SNAP_INTERVAL;
     emitEnemySnap(room);
   }

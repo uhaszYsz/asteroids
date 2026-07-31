@@ -886,6 +886,7 @@ function captureWaitingSnapshot(ws) {
       fireCd: e.fireCd | 0, shootAmmo: e.shootAmmo | 0,
       shootCd: e.shootCd | 0, reloadLeft: e.reloadLeft | 0,
       bursting: !!e.bursting, railChargeLeft: e.railChargeLeft | 0,
+      wormPhase: e.wormPhase | 0, wormAimLeft: e.wormAimLeft | 0,
       speed: enemySpeed(e)
     })),
     pickups: room.pickups.map((u) => ({
@@ -990,6 +991,8 @@ function applySnapshotToRoom(room, p, snap) {
     e.reloadLeft = row.reloadLeft | 0;
     e.bursting = !!row.bursting;
     e.railChargeLeft = row.railChargeLeft | 0;
+    e.wormPhase = row.wormPhase | 0;
+    e.wormAimLeft = row.wormAimLeft | 0;
     room.enemies.push(e);
   }
 

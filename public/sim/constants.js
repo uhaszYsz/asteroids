@@ -391,13 +391,29 @@ const ENEMY_HP = {
   common: 95,
   ufo: 300,
   carrier: 90,
-  worm: 120
+  worm: 1000
 };
 const ENEMY_CARRIER_WEAPONS = ['laser', 'plasma', 'rail'];
 const ENEMY_LASER_AIM_DELAY = 12; // frames
 const ENEMY_RAIL_CHARGE = Math.round(1.5 * TPS);
 const ENEMY_RAIL_DMG = 80;
 const ENEMY_PLASMA_RANGE = 240 * RES_SCALE;
+/** Worm laser aim telegraph before the beam opens. */
+const ENEMY_WORM_AIM_TICKS = Math.round(3 * TPS);
+/** Max turn toward player while worm is stopped for its laser attack. */
+const ENEMY_WORM_AIM_TURN = (4 * Math.PI) / 180;
+/**
+ * Worm super-laser. Width is 3× typical player laser draw width
+ * (~4×RES_SCALE mid of the 2..6 flicker band).
+ */
+const ENEMY_WORM_LASER = {
+  ammo: 230,
+  cooldown: 1,
+  reload: Math.round(1 * TPS),
+  range: Math.hypot(W, H),
+  dmg: 8,
+  width: 12 * RES_SCALE
+};
 /** Level-1 laser / plasma stats mirrored for carriers. */
 const ENEMY_LASER = {
   ammo: WEAPONS.laser.ammo,
