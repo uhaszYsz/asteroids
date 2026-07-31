@@ -10033,6 +10033,7 @@ function loadSpriteShipTexture(spec) {
       spec.fh = entry.h || spec.fh;
     }
     entry.ready = true;
+    shipPrevUnitCached = 0;
     invalidateShipMeshPreviews();
   };
   img.onerror = () => console.error('Failed to load sprite ship', spec.file);
@@ -19758,9 +19759,62 @@ function shipMeshSectionTitle(src) {
 
 /** Live 2D canvas previews for ship picker buttons. */
 const shipPreviewSlots = [];
-const SHIP_PREV_SIZE = 88;
+/** Largest preview edge (px); all ships share one scale from real sprite pixels. */
+const SHIP_PREV_MAX_EDGE = 132;
+const SHIP_PREV_MESH_SIZE = 72;
+let shipPrevUnitCached = 0;
 /** path -> { img, ready } for F1 textured-mesh thumbnails */
 const shipPreviewImgByPath = new Map();
+
+function shipSpritePixelSize(mesh) {
+  if (mesh && mesh.kind === 'sprite' && mesh.sprite) {
+    const s = mesh.sprite;
+    const ent = spriteShipTexById.get(s.id);
+    if (s.single && ent && ent.ready) {
+      return {
+        fw: Math.max(1, (ent.w || s.fw) | 0),
+        fh: Math.max(1, (ent.h || s.fh) | 0)
+      };
+    }
+    return { fw: Math.max(1, s.fw | 0), fh: Math.max(1, s.fh | 0) };
+  }
+  return { fw: SHIP_PREV_MESH_SIZE, fh: SHIP_PREV_MESH_SIZE };
+}
+
+/** Shared scale so F1 cards stay relative to real sprite pixel size. */
+function shipPreviewUnit() {
+  if (shipPrevUnitCached > 0) return shipPrevUnitCached;
+  let maxEdge = 32;
+  for (let i = 0; i < SHIP_OPTIONS.length; i++) {
+    const { fw, fh } = shipSpritePixelSize(SHIP_OPTIONS[i]);
+    maxEdge = Math.max(maxEdge, fw, fh);
+  }
+  shipPrevUnitCached = Math.min(1, SHIP_PREV_MAX_EDGE / maxEdge);
+  return shipPrevUnitCached;
+}
+
+function shipPreviewCanvasSize(mesh) {
+  if (!(mesh && mesh.kind === 'sprite')) {
+    return { w: SHIP_PREV_MESH_SIZE, h: SHIP_PREV_MESH_SIZE };
+  }
+  const { fw, fh } = shipSpritePixelSize(mesh);
+  const u = shipPreviewUnit();
+  return {
+    w: Math.max(16, Math.round(fw * u)),
+    h: Math.max(16, Math.round(fh * u))
+  };
+}
+
+function applyShipPreviewCanvasSize(canvas, mesh) {
+  if (!canvas) return;
+  const dims = shipPreviewCanvasSize(mesh);
+  if (canvas.width !== dims.w || canvas.height !== dims.h) {
+    canvas.width = dims.w;
+    canvas.height = dims.h;
+  }
+  canvas.style.width = dims.w + 'px';
+  canvas.style.height = dims.h + 'px';
+}
 
 function ensureShipPreviewImage(path) {
   if (!path) return null;
@@ -19772,6 +19826,7 @@ function ensureShipPreviewImage(path) {
   img.onload = () => {
     e.img = img;
     e.ready = true;
+    shipPrevUnitCached = 0;
     invalidateShipMeshPreviews();
   };
   img.onerror = () => console.error('Failed to load ship preview tex', path);
@@ -19787,6 +19842,8 @@ function updateShipMeshPreviews(tSec, force) {
   }
   const t = tSec != null ? tSec : 0.4;
   let pending = false;
+  // Recalc shared unit when any sprite size may have settled after rotate-on-load.
+  shipPrevUnitCached = 0;
   for (let i = 0; i < shipPreviewSlots.length; i++) {
     const slot = shipPreviewSlots[i];
     if (!slot || !slot.ctx) continue;
@@ -19797,6 +19854,7 @@ function updateShipMeshPreviews(tSec, force) {
       const ent = ensureShipPreviewImage(slot.mesh.texture);
       if (!ent || !ent.ready) pending = true;
     }
+    applyShipPreviewCanvasSize(slot.canvas, slot.mesh);
     drawShipMeshPreview(slot.ctx, slot.mesh, slot.canvas.width, slot.canvas.height, t);
   }
   // Keep redrawing until sprite / texture images finish loading.
@@ -19824,7 +19882,8 @@ function drawSpriteShipPreview(ctx, opt, w, h, t) {
   const row = spec.single ? 0 : tinyShipStateRow(spec, state);
   const sx = spec.single ? 0 : col * (spec.fw + 1);
   const sy = spec.single ? 0 : row * spec.fh;
-  const pad = 10;
+  // F1 cards are already sized from sprite pixels — keep a tiny pad only.
+  const pad = 2;
   const sc = Math.min((w - pad * 2) / fw, (h - pad * 2) / fh);
   const dw = fw * sc;
   const dh = fh * sc;
@@ -19832,7 +19891,7 @@ function drawSpriteShipPreview(ctx, opt, w, h, t) {
   const dy = (h - dh) * 0.5;
   ctx.save();
   ctx.translate(w * 0.5, h * 0.5);
-  ctx.rotate(Math.sin((t || 0) * 1.25) * 0.22);
+  ctx.rotate(Math.sin((t || 0) * 1.25) * 0.12);
   ctx.translate(-w * 0.5, -h * 0.5);
   ctx.imageSmoothingEnabled = false;
   if (spec.single) {
@@ -20021,6 +20080,7 @@ function buildShipMeshUi() {
   if (!wrap) return;
   wrap.innerHTML = '';
   shipPreviewSlots.length = 0;
+  shipPrevUnitCached = 0;
 
   const groups = new Map();
   for (const m of SHIP_OPTIONS) {
@@ -20045,9 +20105,8 @@ function buildShipMeshUi() {
       btn.setAttribute('data-ship', m.id);
       btn.title = `${m.name} (${shipMeshSourceLabel(m.source)})`;
       const c = document.createElement('canvas');
-      c.width = SHIP_PREV_SIZE;
-      c.height = SHIP_PREV_SIZE;
       c.className = 'gp-ship-preview';
+      applyShipPreviewCanvasSize(c, m);
       const label = document.createElement('span');
       label.className = 'gp-ship-label';
       label.textContent = m.name;
@@ -20190,6 +20249,7 @@ let gpTab = 'grid'; // 'grid' | 'bg' | 'ship' | 'ast' | 'light'
 function setGridPanelTab(tab) {
   gpTab = (tab === 'bg' || tab === 'ship' || tab === 'ast' || tab === 'light') ? tab : 'grid';
   if (!gridPanelEl) return;
+  gridPanelEl.classList.toggle('ships-wide', gpTab === 'ship');
   gridPanelEl.querySelectorAll('[data-gp-tab]').forEach((btn) => {
     btn.classList.toggle('active', btn.getAttribute('data-gp-tab') === gpTab);
   });
@@ -20197,7 +20257,7 @@ function setGridPanelTab(tab) {
     pane.classList.toggle('show', pane.getAttribute('data-gp-pane') === gpTab);
   });
   if (gpTab === 'ship') {
-    updateShipMeshPreviews(0.4, false);
+    updateShipMeshPreviews(0.4, true);
   }
 }
 
@@ -20218,7 +20278,7 @@ function openGridPanel() {
 function closeGridPanel() {
   if (!gridPanelEl) return;
   gridPanelOpen = false;
-  gridPanelEl.classList.remove('open');
+  gridPanelEl.classList.remove('open', 'ships-wide');
   gridPanelEl.setAttribute('aria-hidden', 'true');
   endGridProbe();
   clearGridLinePick();
