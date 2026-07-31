@@ -1413,8 +1413,8 @@ function stepEnemyMovement(e) {
   const dy = e.ty - e.y;
   const dist = Math.hypot(dx, dy);
   if (dist <= ENEMY_ARRIVE_R) {
-    if (e.kind === 'ufo') {
-      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_UFO_SPIN * Math.PI) / 180;
+    if (e.kind === 'spinner') {
+      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_SPINNER.hullSpin * Math.PI) / 180;
     }
     return true;
   }
@@ -1429,15 +1429,14 @@ function stepEnemyMovement(e) {
     e.vy = Math.sin(e.dir) * enemySpeed(e);
     e.x += e.vx;
     e.y += e.vy;
-    if (e.kind === 'ufo') {
-      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_UFO_SPIN * Math.PI) / 180;
+    if (e.kind === 'spinner') {
+      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_SPINNER.hullSpin * Math.PI) / 180;
     } else if (!carrierLocked) {
       e.angle = e.dir;
     }
   } else {
-    if (e.kind === 'ufo') {
-      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_UFO_SPIN * Math.PI) / 180;
-      // Keep travel along desired; dir tracks path for wander retargets.
+    if (e.kind === 'spinner') {
+      e.angle = (Number.isFinite(e.angle) ? e.angle : 0) + (ENEMY_SPINNER.hullSpin * Math.PI) / 180;
       e.dir = desired;
     } else if (!carrierLocked) {
       e.angle = desired;
@@ -1457,7 +1456,7 @@ function updateEnemies(room) {
   const target = soloHumanTarget(room);
   pushSoloAimHist(room, target);
   let wormHolding = false;
-  let ufoSpinning = false;
+  let spinnerSpinning = false;
 
   for (let i = room.enemies.length - 1; i >= 0; i--) {
     const e = room.enemies[i];
@@ -1471,7 +1470,7 @@ function updateEnemies(room) {
       }
       continue;
     }
-    if (e.kind === 'ufo') ufoSpinning = true;
+    if (e.kind === 'spinner') spinnerSpinning = true;
     if ((e.fireCd | 0) > 0) e.fireCd--;
     // Pre-shot charge telegraph (commons 1s, UFO turrets 0.5s).
     if (e.kind === 'common' && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
@@ -1507,9 +1506,9 @@ function updateEnemies(room) {
   }
 
   // Periodic full pose snap (~2 Hz) so clients stay locked.
-  // Worm aim / UFO spin turn every tick — snap every frame while either is active.
+  // Worm aim / spinner hull spin turn every tick — snap every frame while either is active.
   room.enemySnapLeft = (room.enemySnapLeft | 0) - 1;
-  if (wormHolding || ufoSpinning || (room.enemySnapLeft | 0) <= 0) {
+  if (wormHolding || spinnerSpinning || (room.enemySnapLeft | 0) <= 0) {
     room.enemySnapLeft = ENEMY_SNAP_INTERVAL;
     emitEnemySnap(room);
   }

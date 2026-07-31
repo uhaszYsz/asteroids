@@ -14156,7 +14156,8 @@ function isOfflineLocalPlay() {
 function maxUnackedInputs() {
   // Local host applies 1 frame/tick in-process. Staying tight prevents a sticky
   // inputQueue (laggy shots) and stops soft-trim/rate-limit from eating `sp`.
-  if (isOfflineLocalPlay()) return 2;
+  // Offline: allow a few inputs in flight so a 100ms hitch doesn't stall the host queue.
+  if (isOfflineLocalPlay()) return 8;
   const rttTicks = Math.ceil(Math.max(0, pingMs) / TICK_MS);
   const jitterTicks = Math.ceil(Math.max(0, pingJitter) / TICK_MS);
   const dly = adaptiveInputDelay();
@@ -16365,8 +16366,6 @@ const ENEMY_WORM_SPRITE_SCALE = 1;
 const ENEMY_WORM_SPIN_RATE = 3.2;
 const ENEMY_SPINNER_SPRITE_ID = 'enemy_27';
 const ENEMY_SPINNER_SPRITE_SCALE = 1;
-/** Visual yaw spin rate while alive (rad/s) — shoot spin is server-side. */
-const ENEMY_SPINNER_VIS_SPIN = 2.4;
 const ENEMY_COMMON_MESH = (() => {
   return cloneShipMeshScaled(SHIP_MESHES[0], ENEMY_COMMON_SCALE);
 })();
@@ -16557,19 +16556,18 @@ function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
   return bank;
 }
 
-/** Spinner: compact craft on one flat plane, yaw-spin for the radial-burst look. */
+/** Spinner: compact craft on one flat plane; hull angle comes from server (constant spin). */
 function drawEnemySpinner(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_SPINNER_SPRITE_ID);
-  const yaw = angle + performance.now() * 0.001 * ENEMY_SPINNER_VIS_SPIN + (id | 0) * 0.41;
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
-      x, y, yaw, 0, id, dt, opt, true, color,
+      x, y, angle, 0, id, dt, opt, true, color,
       0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
       { flat: true }
     );
   } else {
-    drawEnemyCommon(x, y, yaw, color, id, dt);
+    drawEnemyCommon(x, y, angle, color, id, dt);
   }
   return bank;
 }

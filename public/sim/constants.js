@@ -358,8 +358,6 @@ const ENEMY_COMMON_CHARGE = TPS;
 const ENEMY_UFO_RELOAD = Math.round(3.5 * TPS);
 /** UFO turret pre-shot telegraph (red charge sphere). */
 const ENEMY_UFO_CHARGE = Math.round(0.5 * TPS);
-/** UFO hull spin rate (degrees per tick) — constant, independent of move dir. */
-const ENEMY_UFO_SPIN = 13;
 /** After spawn, wait this long before the first shot (all enemy kinds). */
 const ENEMY_FIRST_SHOT_MIN_S = 4;
 const ENEMY_FIRST_SHOT_MAX_S = 6;
@@ -399,13 +397,15 @@ const ENEMY_HP = {
   worm: 1000,
   spinner: 320
 };
-/** Spinner: 2-way radial burst (180°); spin step starts at spinStart° and grows spinGrow° each volley. */
+/** Spinner: 2-way radial burst (180°); spin step starts at spinStart° and grows spinGrow° each volley.
+ *  Hull also spins constantly at hullSpin °/tick. */
 const ENEMY_SPINNER = {
   ammo: 25,
   cooldown: 7,
   reload: Math.round(5 * TPS),
   spinStart: 5,
   spinGrow: 2,
+  hullSpin: 13,
   speed: ENEMY_COMMON_BULLET_SPEED,
   dmg: ENEMY_COMMON_BULLET_DMG
 };
