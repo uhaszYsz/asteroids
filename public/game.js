@@ -13421,11 +13421,17 @@ function applyNtp(ct, st, serverTick) {
 
 /** Adaptive send-now / act-later delay from one-way latency + jitter. */
 function adaptiveInputDelay() {
+  // Local host has no network delay — holding inputs only creates reconcile shutter.
+  if (usingLocalSolo || (ws && ws.__local)) return 0;
   const oneWay = pingMs * 0.5;
   let d = Math.max(0, cv('cl_cmddelay') | 0);
   const dMax = Math.max(d, cv('cl_cmddelay_max') | 0);
-  if (oneWay > TICK_MS * 1.25 || pingJitter > 20) d = Math.max(d, Math.min(2, dMax));
-  if (oneWay > TICK_MS * 2.5 || pingJitter > 45) d = Math.max(d, Math.min(3, dMax));
+  // Very low RTT: min cmd delay fights prediction and looks like ship lag.
+  if (oneWay < 15 && pingJitter < 18) d = 0;
+  else {
+    if (oneWay > TICK_MS * 1.25 || pingJitter > 20) d = Math.max(d, Math.min(2, dMax));
+    if (oneWay > TICK_MS * 2.5 || pingJitter > 45) d = Math.max(d, Math.min(3, dMax));
+  }
   return Math.min(dMax, d);
 }
 
@@ -13762,6 +13768,13 @@ function showMenu() {
 }
 
 function showQueue() {
+  // Offline solo welcome is immediate — don't flash Play/Settings under the canvas.
+  if (usingLocalSolo || (ws && ws.__local)) {
+    if (menuEl) menuEl.classList.add('hidden');
+    if (playBtn) playBtn.disabled = true;
+    if (cancelBtn) cancelBtn.classList.add('visible');
+    return;
+  }
   if (menuEl) menuEl.classList.remove('hidden');
   if (playBtn) playBtn.disabled = true;
   if (cancelBtn) cancelBtn.classList.add('visible');
@@ -17209,7 +17222,8 @@ function reconcileFromServer(row) {
   // Soft visual correction: keep old on-screen pose, bleed error out over time.
   // Use toroidal deltas so edge-wraps don't create a full-map rubber-band.
   // Large drift → hard teleport, unless tab-resume blend window is active.
-  if (cv('cl_recon') <= 0) {
+  // Local solo: same-process host — softErr only adds visible lag/jitter.
+  if (cv('cl_recon') <= 0 || usingLocalSolo || (ws && ws.__local)) {
     softErr.x = 0;
     softErr.y = 0;
     softErr.angle = 0;
@@ -17694,6 +17708,7 @@ function enterGameFromWelcome(msg) {
   thrustMeleeFxUntil.clear();
   thrustAlignPrevX = null;
   thrustAlignPrevY = null;
+  closeModePanel();
   hideMenu();
   shipBankSmooth.clear();
   turretYawSmooth.clear();
@@ -17877,6 +17892,18 @@ async function connect() {
 }
 
 function handleWsMessage(e) {
+    // Background dedicated-server socket while offline solo is active: keep session/presence
+    // warm, but never let lobby/snaps yank the player back to the menu or corrupt prediction.
+    if (usingLocalSolo && remoteWs && e && e.target === remoteWs) {
+      if (e.data instanceof ArrayBuffer) return;
+      if (typeof Blob !== 'undefined' && e.data instanceof Blob) return;
+      let bg;
+      try { bg = JSON.parse(e.data); } catch { return; }
+      if (bg.t === 'session') applyAccountSession(bg);
+      else if (bg.t === 'presence') applyPresence(bg);
+      else if (bg.t === 'team') applyTeamState(bg);
+      return;
+    }
     if (e.data instanceof ArrayBuffer) {
       if (inGame && !(demoPlay && demoPlay.active)) applyBinarySnap(e.data);
       return;
@@ -18836,6 +18863,8 @@ async function ensureLocalSoloSocket() {
   ws = sock;
   usingLocalSolo = true;
   connected = true;
+  resetClockSync();
+  softErr.x = 0; softErr.y = 0; softErr.angle = 0;
   return sock;
 }
 
