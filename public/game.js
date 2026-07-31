@@ -16309,7 +16309,7 @@ function laserPulse01() {
   return 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * 3 * Math.PI * 2);
 }
 
-/** Dim cyan → hot white-cyan (sphere-style emission pulse). */
+/** Dim cyan → hot white-cyan (sphere-style emission pulse). Alpha stays fixed. */
 function laserPulseColor(base) {
   const b = base || COL.laser;
   const p = laserPulse01();
@@ -16321,15 +16321,19 @@ function laserPulseColor(base) {
   ];
 }
 
-/** Cyan laser: fixed width, light/emission pulse only. */
+/** Cyan laser: fixed width + alpha; light/emission color pulse only. */
 function drawLaserBeamSeg(x0, y0, x1, y1, width, color) {
   const p = laserPulse01();
   const col = laserPulseColor(color || COL.laser);
   const w = Math.max(1, width | 0);
-  // Solid core — brightness swings hard with pulse.
-  drawThickSegment(x0, y0, x1, y1, w, col, 0.3 + 0.7 * p, false);
-  // Additive emission flash (same width — no size pulse).
-  drawThickSegment(x0, y0, x1, y1, w, COL_WHITE, 0.05 + 0.75 * p, true);
+  drawThickSegment(x0, y0, x1, y1, w, col, 1, false);
+  // Additive emission — full alpha; brightness comes from pulsed color intensity.
+  const emit = [
+    Math.min(1, col[0] * p),
+    Math.min(1, col[1] * p),
+    Math.min(1, col[2] * p)
+  ];
+  drawThickSegment(x0, y0, x1, y1, w, emit, 1, true);
 }
 
 function drawLaserBeams() {
