@@ -91,7 +91,7 @@ const ROCKET_BLAST_RADIUS = 32 * RES_SCALE;
 /** Enough to one-shot common enemies (95 HP) even on a grazing contact detonation. */
 const ROCKET_BLAST_DMG = 125;
 const BULLET_TYPES = {
-  default: { dmg: 35, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
+  default: { dmg: 35, col: 'circle', size: 1.8 * RES_SCALE, scaleY: 1, length: 3.6 * RES_SCALE, width: 1.8 * RES_SCALE },
   /** Direct dmg unused — rockets only deal ROCKET_BLAST_* circle damage on detonate. */
   rocket: { dmg: 0, col: 'circle', size: 7 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   laser: { dmg: 7, col: 'ray', size: 0, scaleY: 1, length: 0, width: 2 * RES_SCALE },

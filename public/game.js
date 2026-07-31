@@ -4934,7 +4934,7 @@ function drawAlphaSegment(x0, y0, x1, y1, color, alpha) {
   drawLines(scratch, color, gl.LINE_STRIP, alpha, false, 4);
 }
 
-function drawPoints(items, color, alpha) {
+function drawPoints(items, color, alpha, sizeWorld) {
   if (!items.length) return;
   const n = items.length;
   scratchEnsure(n * 2);
@@ -4951,7 +4951,8 @@ function drawPoints(items, color, alpha) {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   }
   useDraw(color, alpha == null ? 1 : alpha);
-  gl.uniform1f(uSize, (big ? 3 : 2) * RES_SCALE * getRenderScale());
+  const base = sizeWorld != null ? sizeWorld : ((big ? 3 : 2) * RES_SCALE);
+  gl.uniform1f(uSize, base * getRenderScale());
   gl.drawArrays(gl.POINTS, 0, n);
 }
 
@@ -7303,7 +7304,7 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
   const tint = color || COL.bullet;
   const cone = (opts && opts.cone > 0) ? opts.cone : 1;
   // Default bullet GL points: diameter 2×RES_SCALE in world space.
-  const bulletSize = 2 * RES_SCALE;
+  const bulletSize = 1.8 * RES_SCALE;
   // Weapon speed is px/tick → particles use px/s.
   const bulletSpd = (WEAPONS.default.speed || (8 * RES_SCALE)) * TPS;
   const base = {
@@ -19767,7 +19768,7 @@ function renderMenuBackdrop() {
 
 /** Match server BULLET_TYPES collision extents for cl_hitbox debug. */
 const BULLET_HIT_DEBUG = {
-  default: { col: 'circle', size: 2 * RES_SCALE },
+  default: { col: 'circle', size: 1.8 * RES_SCALE },
   rocket: { col: 'circle', size: 7 * RES_SCALE },
   shotgun: { col: 'circle', size: 2 * RES_SCALE },
   plasma: { col: 'circle', size: 5 * RES_SCALE },
@@ -19816,8 +19817,10 @@ function drawBulletHitboxes() {
 function renderBullets() {
   pruneBullets();
   const normal = [];
+  const shotgunPts = [];
   const plasmaPts = [];
   const rainbowPts = [];
+  const rainbowShotgunPts = [];
   const turretPts = [];
   // Default trail runs every other frame so it stays lighter than rockets.
   const defaultTrail = ((performance.now() / 32) | 0) % 2 === 0;
@@ -19858,16 +19861,23 @@ function renderBullets() {
     );
     if (pt) {
       const rainbow = ownerHasDamagePowerup(b.owner) && DAMAGE_RAINBOW_TYPES.has(b.type || 'default');
-      if (rainbow) rainbowPts.push(pt);
-      else if (b.type === 'plasma') plasmaPts.push(pt);
+      const isShotgun = b.type === 'shotgun';
+      if (rainbow) {
+        if (isShotgun) rainbowShotgunPts.push(pt);
+        else rainbowPts.push(pt);
+      } else if (b.type === 'plasma') plasmaPts.push(pt);
       else if (b.type === 'turret') turretPts.push(pt);
+      else if (isShotgun) shotgunPts.push(pt);
       else normal.push(pt);
     }
   }
-  if (normal.length) drawPoints(normal, COL.bullet);
+  // Default gun: 10% smaller than the old 2×RES_SCALE point.
+  if (normal.length) drawPoints(normal, COL.bullet, null, 1.8 * RES_SCALE);
+  if (shotgunPts.length) drawPoints(shotgunPts, COL.bullet);
   if (turretPts.length) drawPoints(turretPts, COL.powerTurret);
   if (plasmaPts.length) drawPoints(plasmaPts, COL.plasma);
-  if (rainbowPts.length) drawPoints(rainbowPts, damageRainbowColor());
+  if (rainbowPts.length) drawPoints(rainbowPts, damageRainbowColor(), null, 1.8 * RES_SCALE);
+  if (rainbowShotgunPts.length) drawPoints(rainbowShotgunPts, damageRainbowColor());
   drawBulletHitboxes();
 }
 
