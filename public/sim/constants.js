@@ -404,7 +404,7 @@ const ENEMY_SPINNER = {
   ammo: 25,
   cooldown: 7,
   reload: Math.round(5 * TPS),
-  spin: 13,
+  spin: 26,
   speed: ENEMY_COMMON_BULLET_SPEED,
   dmg: 12
 };
