@@ -16136,10 +16136,24 @@ ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 
 function enemyWanderSpeedOf(e) {
   const s = e && +e.speed;
-  if (Number.isFinite(s) && s > 0) return s;
-  const sp = Math.hypot((e && e.vx) || 0, (e && e.vy) || 0);
-  if (sp > 0.05) return sp;
-  return ENEMY_WANDER_SPEED;
+  let base = (Number.isFinite(s) && s > 0) ? s : 0;
+  if (!(base > 0)) {
+    const sp = Math.hypot((e && e.vx) || 0, (e && e.vy) || 0);
+    base = sp > 0.05 ? sp : ENEMY_WANDER_SPEED;
+  }
+  // Mirror server: worm shotgun rush (phases 6–7) dashes at 2×.
+  if (e && e.kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) {
+    base *= 2;
+  }
+  return base;
+}
+
+function enemyTurnMaxOf(e) {
+  let t = ENEMY_TURN_MAX;
+  if (e && e.kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) {
+    t *= 2;
+  }
+  return t;
 }
 
 function enemyHitR(e) {
@@ -16278,7 +16292,7 @@ function unpackEnemy(row) {
     hp,
     speed: spd,
     enteredPlay: true,
-    wormAtk: !!(row[17] | 0)
+    wormPhase: kind === 'worm' ? (row[17] | 0) : 0
   };
 }
 
@@ -16328,9 +16342,14 @@ function applyEnemySnapList(list, st) {
     e.spawnSt = snapSt;
     e.travelDist = Math.hypot(e.tx - e.spawnX, e.ty - e.spawnY);
     const packedSpeed = row[14] != null ? +row[14] : 0;
+    e.wormPhase = kind === 'worm' ? (row[15] | 0) : 0;
     if (packedSpeed > 0) e.speed = packedSpeed;
-    else if (Math.hypot(e.vx, e.vy) > 0.05) e.speed = Math.hypot(e.vx, e.vy);
-    e.wormAtk = !!(row[15] | 0);
+    else if (Math.hypot(e.vx, e.vy) > 0.05) {
+      // Don't bake rush/crawl multipliers into stored base speed.
+      let fallback = Math.hypot(e.vx, e.vy);
+      if (kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) fallback *= 0.5;
+      e.speed = fallback;
+    }
   }
 }
 
@@ -16379,7 +16398,7 @@ function stepEnemyDestinationSmoothLocal(state) {
     return;
   }
   const desired = Math.atan2(dy, dx);
-  state.dir = enemyTurnAngleToward(state.dir, desired, ENEMY_TURN_MAX);
+  state.dir = enemyTurnAngleToward(state.dir, desired, enemyTurnMaxOf(state));
   const spd = enemyWanderSpeedOf(state);
   state.vx = Math.cos(state.dir) * spd;
   state.vy = Math.sin(state.dir) * spd;
@@ -16408,7 +16427,9 @@ function enemyAt(e) {
       ty: e.ty,
       vx: e.vx || 0,
       vy: e.vy || 0,
-      speed: enemyWanderSpeedOf(e),
+      speed: e.speed,
+      kind: e.kind,
+      wormPhase: e.wormPhase | 0,
       enteredPlay: e.enteredPlay !== false
     };
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));

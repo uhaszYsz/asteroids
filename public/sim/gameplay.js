@@ -500,8 +500,16 @@ function wormIsShotgunRush(e) {
 
 /**
  * Pack for ef/eu (spawn / retarget).
- * [id, kind, spawnX, spawnY, tx, ty, spawnSt, hp, weapon, angle, move, vx, vy, x, y, dir, speed, wormAtk]
+ * [id, kind, spawnX, spawnY, tx, ty, spawnSt, hp, weapon, angle, move, vx, vy, x, y, dir, speed, wormPhase]
+ * speed = base wander (worm rush / spinner crawl applied on predict via wormPhase / packed spinner speed).
  */
+function packEnemyNetSpeed(e) {
+  // Spinner magazine isn't on the wire — pack effective speed so crawl still predicts.
+  if (e && e.kind === 'spinner') return enemySpeed(e);
+  const s = e && +e.speed;
+  return (Number.isFinite(s) && s > 0) ? s : ENEMY_WANDER_SPEED;
+}
+
 function packEnemy(e) {
   const move = enemyMoveType(e);
   const dir = e.dir != null && Number.isFinite(e.dir) ? e.dir : e.angle;
@@ -521,12 +529,12 @@ function packEnemy(e) {
     e.x,
     e.y,
     dir,
-    enemySpeed(e),
-    wormIsHolding(e) ? 1 : 0
+    packEnemyNetSpeed(e),
+    e.kind === 'worm' ? (e.wormPhase | 0) : 0
   ];
 }
 
-/** Compact pose snap: [id, kind, x, y, vx, vy, angle, tx, ty, hp, weapon, move, dir, entered, speed, wormAtk] */
+/** Compact pose snap: [id, kind, x, y, vx, vy, angle, tx, ty, hp, weapon, move, dir, entered, speed, wormPhase] */
 function packEnemySnap(e) {
   const move = enemyMoveType(e);
   const dir = e.dir != null && Number.isFinite(e.dir) ? e.dir : e.angle;
@@ -542,8 +550,8 @@ function packEnemySnap(e) {
     move,
     dir,
     e.enteredPlay ? 1 : 0,
-    enemySpeed(e),
-    wormIsHolding(e) ? 1 : 0
+    packEnemyNetSpeed(e),
+    e.kind === 'worm' ? (e.wormPhase | 0) : 0
   ];
 }
 
@@ -938,6 +946,11 @@ function beginWormShotgunAttack(room, e) {
   e.shootAmmo = ENEMY_WORM_SHOTGUN.ammo;
   e.shootCd = 0;
   e.reloadLeft = 0;
+  // Immediate 2× dash + turn — client predicts from wormPhase on this eu.
+  const ang = e.dir != null && Number.isFinite(e.dir) ? e.dir : (e.angle || 0);
+  const spd = enemySpeed(e);
+  e.vx = Math.cos(ang) * spd;
+  e.vy = Math.sin(ang) * spd;
   emitEnemyUpdate(room, e);
 }
 
