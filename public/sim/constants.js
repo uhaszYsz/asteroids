@@ -119,10 +119,10 @@ const ENEMY_SHOT_VIS_SCALE = 2;
 const ENEMY_SHOT_CORE_BASE = 2.4 * RES_SCALE;
 const ENEMY_SHOT_GLOW_BASE = 4.2 * RES_SCALE;
 /**
- * softOval FS: near-full alpha for UV length d < 0.35, then fades to the mesh rim.
- * Hit circle uses that opaque core, not the full soft mesh (which reads like the glow).
+ * softOval FS: near-full alpha for UV length d < HIT_FRAC, then AA fade to rim.
+ * Hit circle uses that opaque white core.
  */
-const ENEMY_SHOT_HIT_FRAC = 0.35;
+const ENEMY_SHOT_HIT_FRAC = 0.92;
 
 function enemyShotTypeScale(type, length, width) {
   if (type === 'enemySpinner') return 20 / 15;

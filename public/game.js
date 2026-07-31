@@ -5196,7 +5196,8 @@ function drawSoftOval(cx, cy, ang, halfW, halfL, color, alpha, additive, softInn
   gl.uniform1f(soUInner, inner);
   bindSceneLightUniforms(softOvalLightU);
   gl.enable(gl.BLEND);
-  gl.blendFunc(additive ? gl.ONE : gl.SRC_ALPHA, additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
+  // Shader outputs premul (rgb*a, a). Additive: ONE/ONE. Alpha: ONE/ONE_MINUS_SRC_ALPHA.
+  gl.blendFunc(gl.ONE, additive ? gl.ONE : gl.ONE_MINUS_SRC_ALPHA);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
   gl.disable(gl.BLEND);
   gl.disableVertexAttribArray(soAUV);
@@ -15286,8 +15287,8 @@ function bulletAt(b) {
 const ENEMY_SHOT_VIS_SCALE = 2;
 const ENEMY_SHOT_CORE_BASE = 2.4 * RES_SCALE;
 const ENEMY_SHOT_GLOW_BASE = 4.2 * RES_SCALE;
-/** Match softOval solid core (smoothstep starts at UV d=0.35). */
-const ENEMY_SHOT_HIT_FRAC = 0.35;
+/** Match softOval solid core (smoothstep starts at UV d≈0.92). */
+const ENEMY_SHOT_HIT_FRAC = 0.92;
 
 function enemyShotTypeScale(type, length, width) {
   if (type === 'enemySpinner') return 20 / 15;
@@ -15312,7 +15313,8 @@ function drawEnemyCommonShot(x, y, ang, scale) {
   // Solid red under the white core footprint; alpha fades only outside the core.
   const glowInner = Math.min(0.95, coreR / Math.max(glowR, 1e-6));
   drawSoftOval(x, y, 0, glowR, glowR, red, 0.85, false, glowInner);
-  drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false, 0.35);
+  // Near-solid white disc (tiny AA rim) — matches ENEMY_SHOT_HIT_FRAC.
+  drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false, ENEMY_SHOT_HIT_FRAC);
 }
 
 function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, ownerId, sizeOpts) {
