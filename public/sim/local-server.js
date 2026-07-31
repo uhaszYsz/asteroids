@@ -339,7 +339,7 @@
 
       const texts = [];
       for (let i = 0; i < SIM_PARTS.length; i++) {
-        const url = simBase + SIM_PARTS[i] + '?v=11';
+        const url = simBase + SIM_PARTS[i] + '?v=12';
         const res = await fetch(url, { cache: 'no-cache' });
         if (!res.ok) throw new Error('Failed to load ' + SIM_PARTS[i] + ' (' + res.status + ')');
         texts.push(await res.text());

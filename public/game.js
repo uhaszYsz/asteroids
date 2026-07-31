@@ -5696,19 +5696,9 @@ function syncSoloWaitBanner() {
   waitBannerEl.style.top = '5px';
   waitBannerEl.style.bottom = 'auto';
   const w = soloWave > 0 ? soloWave : 1;
-  if (waitingOnlineQueue) {
-    const n = onlineQueueWaiting | 0;
-    const need = Math.max(1, onlineQueueNeed | 0);
-    const kind = waitingOnlineQueue === 'coop' ? 'Coop' : 'Solo';
-    waitBannerEl.textContent = kind + ' waves · Wave ' + w + ' · Lives ' + soloLives
-      + ' · matchmaking ' + n + '/' + need;
-  } else if (coopMode) {
-    waitBannerEl.textContent = 'Coop waves · Wave ' + w + ' · Lives ' + soloLives;
-  } else if (soloOnlyMode) {
-    waitBannerEl.textContent = 'Singleplayer · Wave ' + w + ' · Lives ' + soloLives;
-  } else {
-    waitBannerEl.textContent = 'Solo waves · Wave ' + w + ' · Lives ' + soloLives + ' · matchmaking…';
-  }
+  // Waves HUD: lives / gold / wave only (no Singleplayer / Coop labels).
+  waitBannerEl.textContent =
+    'Lives: ' + soloLives + ' · Gold: ' + (localCoins | 0) + ' · Wave: ' + w;
 }
 
 function drawWaveBanner(now) {
@@ -12007,6 +11997,7 @@ function applyScores(rows) {
     scores.set(id, row[1] | 0);
     if (row[2]) rosterNames.set(id, String(row[2]));
   }
+  if (inGame && !practiceMode) updateHud();
 }
 
 function applyNames(rows) {
@@ -13253,7 +13244,7 @@ function startPlayMode(mode) {
 
   ensureLocalSoloSocket().then(() => {
     if (!waitingOnlineQueue) {
-      // Match already started while local host booted.
+      // Cancelled, or real match already promoted while local host booted.
       restoreRemoteSocketAfterSolo();
       return;
     }
@@ -14601,8 +14592,19 @@ function updateHud() {
   statusEl.textContent =
     `room ${roomId || '?'} | p${myId} ${player.hp}hp | ping ${Math.round(pingMs)}ms ±${Math.round(pingJitter)} | dly ${adaptiveInputDelay()} | unack ${unackedInputCount()}/${maxUnackedInputs()} | srv ${fmtServerTime()} | game ${fmtGameTime(gameTimeSec())}${practiceMode ? ' | SOLO WAVE ' + (soloWave || 1) : ''}`;
 
-  // No persistent score strip during play — big board only on death / match end.
-  if (scoreHudEl) scoreHudEl.classList.add('hidden');
+  if (practiceMode) {
+    // Waves use #wait-banner (lives / gold / wave).
+    if (scoreHudEl) scoreHudEl.classList.add('hidden');
+    syncSoloWaitBanner();
+    return;
+  }
+  // Multiplayer: persistent gold + kill scores.
+  if (scoreHudEl) {
+    scoreHudEl.classList.remove('hidden');
+    if (scoreMeEl) scoreMeEl.textContent = String(myScore());
+    if (scoreFoeEl) scoreFoeEl.textContent = String(foeScore());
+    if (scoreLimitEl) scoreLimitEl.textContent = ' · Gold: ' + (localCoins | 0);
+  }
 }
 
 function setPracticeWaiting(on) {
@@ -16917,6 +16919,10 @@ function clearCoins() {
 
 function setLocalCoins(n) {
   localCoins = Math.max(0, n | 0);
+  if (inGame) {
+    if (practiceMode) syncSoloWaitBanner();
+    else updateHud();
+  }
 }
 
 function setLocalScore(n) {
@@ -18911,6 +18917,12 @@ function handleWsMessage(e) {
         CVARS.sv_dynamic_prediction.value = Number.isFinite(s) ? Math.max(0, s) : 0;
       }
       if (soloOverOpen) return;
+      // Local host always emits lobby on connect. That handshake must NOT wipe
+      // matchmaking / kick back to the menu before wait-waves welcome arrives.
+      if (e && e.target && e.target.__local) {
+        if (!inGame) return;
+        if (waitingOnlineQueue) return;
+      }
       returnToLobby();
       return;
     }
