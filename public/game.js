@@ -10617,6 +10617,7 @@ const SPRITE_SHIP_PX_SCALE = 1;
  *  bankOverride: use enemy bank instead of player av smoothing.
  *  sizeScale: extra multiplier (default 1). Plane size follows sprite fw×fh.
  *  opts.tube: also draw two mirrored under-planes (4 faces) for a full tube/worm.
+ *  opts.flat: single z=0 quad (full sprite) — no roof fold.
  *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor, opts) {
   const spec = opt && opt.sprite;
@@ -10624,18 +10625,19 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const entry = spriteShipTexById.get(spec.id);
   if (!entry || !entry.ready || !entry.tex) return;
 
-  let bank = (bankOverride != null && Number.isFinite(bankOverride))
+  const flat = !!(opts && opts.flat);
+  let bank = flat ? 0 : ((bankOverride != null && Number.isFinite(bankOverride))
     ? bankOverride * 0.5
-    : shipBankSmoothed(id, av, dt) * 0.5;
+    : shipBankSmoothed(id, av, dt) * 0.5);
   const spinRate = opts && opts.spinRate;
-  if (spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
+  if (!flat && spinRate && Number.isFinite(spinRate) && spinRate !== 0) {
     bank += performance.now() * 0.001 * spinRate + (id | 0) * 0.73;
   }
   const sc = SPRITE_SHIP_PX_SCALE * (sizeScale > 0 ? sizeScale : 1);
   // Nose–tail from frame height; wing span from frame width — true pixel proportions.
   const halfL = Math.max(1, spec.fh) * 0.5 * sc;
   const halfW = Math.max(1, spec.fw) * 0.5 * sc;
-  const tube = !!(opts && opts.tube);
+  const tube = !flat && !!(opts && opts.tube);
   // Worm bend was half-pitch; 2× that = full SPRITE_ROOF_PITCH.
   // wingY/drop keep outer edges on z=0 (90° copies → edges on y=0).
   const pitch = SPRITE_ROOF_PITCH;
@@ -10661,7 +10663,25 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   ];
 
   let panels;
-  if (tube) {
+  if (flat) {
+    // One billboard-style quad on the playfield plane (full frame UVs).
+    panels = [
+      {
+        verts: [
+          [halfL, -halfW, 0],
+          [halfL, halfW, 0],
+          [-halfL, halfW, 0],
+          [-halfL, -halfW, 0]
+        ],
+        uvs: [
+          [uv.u0, uv.v0],
+          [uv.u1, uv.v0],
+          [uv.u1, uv.v1],
+          [uv.u0, uv.v1]
+        ]
+      }
+    ];
+  } else if (tube) {
     // Diamond tube: outer edges sit on z=0; ridge bend is ±drop (not on the midplane).
     panels = [
       {
@@ -16456,7 +16476,7 @@ function drawEnemyWorm(x, y, angle, color, id, dt, wormAtk) {
   return bank;
 }
 
-/** Spinner: compact craft with continuous yaw spin for the radial-burst look. */
+/** Spinner: compact craft on one flat plane, yaw-spin for the radial-burst look. */
 function drawEnemySpinner(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_SPINNER_SPRITE_ID);
@@ -16464,8 +16484,8 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
       x, y, yaw, 0, id, dt, opt, true, color,
-      bank, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
-      null
+      0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
+      { flat: true }
     );
   } else {
     drawEnemyCommon(x, y, yaw, color, id, dt);
