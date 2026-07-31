@@ -18082,6 +18082,7 @@ function applySnapshot(msg) {
   if (msg.st != null) {
     syncTick = msg.tick;
     syncSt = msg.st;
+    if (isOfflineLocalPlay()) syncStPerf = performance.now();
   }
 
   const seen = new Set();
