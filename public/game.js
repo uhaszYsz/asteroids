@@ -9977,9 +9977,21 @@ function clearHitVibration(kind, id) {
   hitVibByKey.delete(hitVibKey(kind, id));
 }
 
-/** Red→yellow impact tint on sprite ships (opaque texels only). */
+/** Red→yellow impact emission on sprite ships (opaque texels only). */
 const HIT_TINT_DUR_MS = 6000;
+const HIT_TINT_MAX = 5;
 const shipHitTintByKey = new Map();
+const _hitLocalBuf = new Float32Array(HIT_TINT_MAX * 2);
+const _hitAgeBuf = new Float32Array(HIT_TINT_MAX);
+
+function pruneShipHitTints(list, now) {
+  let w = 0;
+  for (let i = 0; i < list.length; i++) {
+    const age = (now - list[i].start) / HIT_TINT_DUR_MS;
+    if (age >= 0 && age < 1) list[w++] = list[i];
+  }
+  list.length = w;
+}
 
 /** Nearest living player/enemy to a world hit (for ship-local tint). */
 function findImpactShipTarget(hx, hy, hitKind) {
@@ -10014,7 +10026,7 @@ function findImpactShipTarget(hx, hy, hitKind) {
   return best;
 }
 
-/** Store hit in ship-local units (+X nose, +Y left wing). */
+/** Append hit in ship-local units (+X nose, +Y left wing); keep newest HIT_TINT_MAX. */
 function triggerShipHitTint(kind, id, hx, hy, cx, cy, angle) {
   if (id == null) return;
   const dx = shortestWrapDelta(cx, hx, W);
@@ -10023,11 +10035,16 @@ function triggerShipHitTint(kind, id, hx, hy, cx, cy, angle) {
   const sa = Math.sin(angle);
   const lx = dx * ca + dy * sa;
   const ly = -dx * sa + dy * ca;
-  shipHitTintByKey.set(hitVibKey(kind, id), {
-    lx,
-    ly,
-    start: performance.now()
-  });
+  const key = hitVibKey(kind, id);
+  let list = shipHitTintByKey.get(key);
+  if (!list) {
+    list = [];
+    shipHitTintByKey.set(key, list);
+  }
+  const now = performance.now();
+  pruneShipHitTints(list, now);
+  list.push({ lx, ly, start: now });
+  while (list.length > HIT_TINT_MAX) list.shift();
 }
 
 function armShipHitTintAt(hx, hy, hitKind) {
@@ -10038,24 +10055,35 @@ function armShipHitTintAt(hx, hy, hitKind) {
   triggerShipHitTint(t.kind, t.id, hx, hy, t.x, t.y, t.angle);
 }
 
-/** Bind hit-tint uniforms for the current sprite ship draw (fill pass). */
+/** Bind up to HIT_TINT_MAX hit-emission uniforms for the current sprite ship draw. */
 function bindSpriteShipHitTint(kind, id, halfL, halfW) {
   if (!ssUHitAge) return;
-  const e = id != null ? shipHitTintByKey.get(hitVibKey(kind, id)) : null;
-  if (!e) {
-    gl.uniform1f(ssUHitAge, 1);
-    return;
+  for (let i = 0; i < HIT_TINT_MAX; i++) {
+    _hitAgeBuf[i] = 1;
+    _hitLocalBuf[i * 2] = 0;
+    _hitLocalBuf[i * 2 + 1] = 0;
   }
-  const age = (performance.now() - e.start) / HIT_TINT_DUR_MS;
-  if (!(age >= 0) || age >= 1) {
-    shipHitTintByKey.delete(hitVibKey(kind, id));
-    gl.uniform1f(ssUHitAge, 1);
-    return;
+  const key = id != null ? hitVibKey(kind, id) : null;
+  const list = key != null ? shipHitTintByKey.get(key) : null;
+  if (list) {
+    const now = performance.now();
+    pruneShipHitTints(list, now);
+    if (!list.length) {
+      shipHitTintByKey.delete(key);
+    } else {
+      const invL = 1 / Math.max(1e-3, halfL);
+      const invW = 1 / Math.max(1e-3, halfW);
+      const n = Math.min(list.length, HIT_TINT_MAX);
+      for (let i = 0; i < n; i++) {
+        const e = list[i];
+        _hitLocalBuf[i * 2] = e.lx * invL;
+        _hitLocalBuf[i * 2 + 1] = e.ly * invW;
+        _hitAgeBuf[i] = (now - e.start) / HIT_TINT_DUR_MS;
+      }
+    }
   }
-  const invL = 1 / Math.max(1e-3, halfL);
-  const invW = 1 / Math.max(1e-3, halfW);
-  gl.uniform2f(ssUHitLocal, e.lx * invL, e.ly * invW);
-  gl.uniform1f(ssUHitAge, age);
+  gl.uniform2fv(ssUHitLocal, _hitLocalBuf);
+  gl.uniform1fv(ssUHitAge, _hitAgeBuf);
 }
 
 function shipBankTarget(av) {
@@ -10412,8 +10440,8 @@ const spriteShipFS = `
   uniform vec3 uRemapSrc;
   uniform vec3 uRemapDst;
   uniform float uRemapRange;
-  uniform vec2 uHitLocal;
-  uniform float uHitAge;
+  uniform vec2 uHitLocal[5];
+  uniform float uHitAge[5];
   varying vec2 vUV;
   varying vec2 vWorld;
   varying vec2 vLocal;
@@ -10452,18 +10480,18 @@ const spriteShipFS = `
     float lum = dot(t.rgb, vec3(0.299, 0.587, 0.114));
     float emitMask = smoothstep(0.12, 0.72, lum);
     vec3 rgb = albedo + uTint * emitMask * max(0.0, uEmit);
-    // Impact flash as emission (additive), same model as material emit:
-    // hot tint × bright-texel mask × energy; soft radial falloff; fades with uHitAge.
-    if (uHitAge < 0.999) {
-      float d = length(vLocal - uHitLocal);
-      float rad = 0.304; // ~30% smaller again from 0.434
-      float tCol = smoothstep(0.0, rad * 0.92, d);
-      vec3 hot = mix(vec3(1.0, 0.08, 0.02), vec3(1.0, 0.95, 0.18), tCol);
-      float fall = 1.0 - smoothstep(rad * 0.42, rad, d);
-      float fade = 1.0 - uHitAge;
-      // Prefer bright albedo (Godot emitMask); dim hull still gets a soft floor.
-      float hitMask = max(emitMask, smoothstep(0.08, 0.4, t.a) * 0.4);
-      rgb += hot * hitMask * fall * fade * 1.9;
+    // Up to 5 impact emissions (additive); unused slots have age >= 1.
+    float hitMask = max(emitMask, smoothstep(0.08, 0.4, t.a) * 0.4);
+    const float rad = 0.304;
+    for (int i = 0; i < 5; i++) {
+      if (uHitAge[i] < 0.999) {
+        float d = length(vLocal - uHitLocal[i]);
+        float tCol = smoothstep(0.0, rad * 0.92, d);
+        vec3 hot = mix(vec3(1.0, 0.08, 0.02), vec3(1.0, 0.95, 0.18), tCol);
+        float fall = 1.0 - smoothstep(rad * 0.42, rad, d);
+        float fade = 1.0 - uHitAge[i];
+        rgb += hot * hitMask * fall * fade * 1.9;
+      }
     }
     gl_FragColor = applyNightLit(rgb, t.a * uAlpha, vWorld);
   }
@@ -10487,8 +10515,8 @@ const ssUOutline = gl.getUniformLocation(spriteShipProg, 'uOutline');
 const ssURemapSrc = gl.getUniformLocation(spriteShipProg, 'uRemapSrc');
 const ssURemapDst = gl.getUniformLocation(spriteShipProg, 'uRemapDst');
 const ssURemapRange = gl.getUniformLocation(spriteShipProg, 'uRemapRange');
-const ssUHitLocal = gl.getUniformLocation(spriteShipProg, 'uHitLocal');
-const ssUHitAge = gl.getUniformLocation(spriteShipProg, 'uHitAge');
+const ssUHitLocal = gl.getUniformLocation(spriteShipProg, 'uHitLocal[0]');
+const ssUHitAge = gl.getUniformLocation(spriteShipProg, 'uHitAge[0]');
 const spriteShipLightU = {
   night: gl.getUniformLocation(spriteShipProg, 'uFlashNight'),
   ships: gl.getUniformLocation(spriteShipProg, 'uShipLight[0]'),
