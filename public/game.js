@@ -9978,7 +9978,7 @@ function clearHitVibration(kind, id) {
 }
 
 /** Red→yellow impact tint on sprite ships (opaque texels only). */
-const HIT_TINT_DUR_MS = 3000;
+const HIT_TINT_DUR_MS = 6000;
 const shipHitTintByKey = new Map();
 
 /** Nearest living player/enemy to a world hit (for ship-local tint). */
