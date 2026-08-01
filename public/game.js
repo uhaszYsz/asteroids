@@ -11540,6 +11540,9 @@ let resumeBlendUntil = 0;
 
 const POWERUP_TYPES = ['damage', 'turret', 'shield', 'homing', 'lead', 'emp', 'reload'];
 const PICKUP_CODE_POWERUP_BASE = 100;
+/** Match server: weapon/powerup crates bounce this many times, then drift off. */
+const PICKUP_BOUNCE_MAX = 3;
+const PICKUP_R = 7 * RES_SCALE;
 function freshPowerups() {
   return {
     damage: false,
@@ -15023,6 +15026,7 @@ function applyPausedMsg(msg) {
     matchPaused = true;
     pauseFreezeAt = serverNow();
     rebaseAsteroidsToTime(pauseFreezeAt);
+    rebasePickupsToTime(pauseFreezeAt);
     player.vx = 0;
     player.vy = 0;
     player.av = 0;
@@ -18416,12 +18420,14 @@ function unpackPickup(row) {
     kind,
     weapon,
     powerup,
+    r: PICKUP_R,
     spawnSt: row[8],
     bounces: row[9] | 0
   };
 }
 
 function addPickup(u) {
+  if (u.r == null) u.r = PICKUP_R;
   pickups.set(u.id, u);
 }
 
@@ -18435,16 +18441,116 @@ function removePickup(id) {
 }
 
 function pickupAgeTicks(u) {
-  return Math.max(0, (serverNow() - u.spawnSt) / 1000 * TPS);
+  const freeze = worldFreezeClock();
+  const now = freeze || serverNow();
+  return Math.max(0, (now - u.spawnSt) / 1000 * TPS);
+}
+
+/**
+ * Replay pickup motion for `age` ticks (server bounce rules).
+ * Health bounces forever; other kinds stop after PICKUP_BOUNCE_MAX then drift out.
+ */
+function simulatePickupToAge(u, age) {
+  let x = u.spawnX;
+  let y = u.spawnY;
+  let vx = u.vx;
+  let vy = u.vy;
+  let angle = u.spawnAngle;
+  const spin = u.spin || 0;
+  let bounces = u.bounces | 0;
+  const bounceLimited = u.kind !== 'health';
+  const m = (u.r || PICKUP_R) + 2;
+  let t = 0;
+  let didBounce = false;
+  const ageN = Math.max(0, age);
+  for (let guard = 0; guard < 16 && t < ageN; guard++) {
+    const spent = bounceLimited && bounces >= PICKUP_BOUNCE_MAX;
+    const remain = ageN - t;
+    if (spent || remain <= 1e-9) {
+      x += vx * remain;
+      y += vy * remain;
+      angle += spin * remain;
+      break;
+    }
+    let dtX = Infinity;
+    let dtY = Infinity;
+    if (vx < -1e-12) dtX = (m - x) / vx;
+    else if (vx > 1e-12) dtX = ((W - m) - x) / vx;
+    if (vy < -1e-12) dtY = (m - y) / vy;
+    else if (vy > 1e-12) dtY = ((H - m) - y) / vy;
+    if (!(dtX > 1e-9)) dtX = Infinity;
+    if (!(dtY > 1e-9)) dtY = Infinity;
+    const dtHit = Math.min(remain, dtX, dtY);
+    if (!(dtHit < remain - 1e-12)) {
+      x += vx * remain;
+      y += vy * remain;
+      angle += spin * remain;
+      break;
+    }
+    x += vx * dtHit;
+    y += vy * dtHit;
+    angle += spin * dtHit;
+    t += dtHit;
+    const hitX = dtX <= dtHit + 1e-9;
+    const hitY = dtY <= dtHit + 1e-9;
+    // Same reflection as server updatePickups.
+    if (hitX) {
+      if (vx < 0) { x = m; vx = Math.abs(vx); }
+      else { x = W - m; vx = -Math.abs(vx); }
+    }
+    if (hitY) {
+      if (vy < 0) { y = m; vy = Math.abs(vy); }
+      else { y = H - m; vy = -Math.abs(vy); }
+    }
+    if (bounceLimited) bounces++;
+    didBounce = true;
+  }
+  return { x, y, vx, vy, angle, bounces, didBounce };
 }
 
 function pickupAt(u) {
   const age = pickupAgeTicks(u);
+  const s = simulatePickupToAge(u, age);
   return {
-    x: u.spawnX + u.vx * age,
-    y: u.spawnY + u.vy * age,
-    angle: u.spawnAngle + u.spin * age
+    x: s.x,
+    y: s.y,
+    angle: s.angle,
+    vx: s.vx,
+    vy: s.vy
   };
+}
+
+/** Bake bounce into spawn clocks so long ages / tab resume don't fly through walls. */
+function predictPickupBounces() {
+  const now = serverNow();
+  for (const u of pickups.values()) {
+    const age = pickupAgeTicks(u);
+    if (!(age > 0)) continue;
+    const s = simulatePickupToAge(u, age);
+    if (!s.didBounce) continue;
+    u.spawnX = s.x;
+    u.spawnY = s.y;
+    u.vx = s.vx;
+    u.vy = s.vy;
+    u.spawnAngle = s.angle;
+    u.spawnSt = now;
+    u.bounces = s.bounces;
+  }
+}
+
+/** Bake live poses into spawn clocks at `now` so freeze/unfreeze doesn't jump crates. */
+function rebasePickupsToTime(now) {
+  for (const u of pickups.values()) {
+    const age = Math.max(0, (now - u.spawnSt) / 1000 * TPS);
+    const s = simulatePickupToAge(u, age);
+    u.spawnX = s.x;
+    u.spawnY = s.y;
+    u.vx = s.vx;
+    u.vy = s.vy;
+    u.spawnAngle = s.angle;
+    u.spawnSt = now;
+    u.bounces = s.bounces;
+  }
 }
 
 function applyPickupBounce(row) {
@@ -19586,7 +19692,10 @@ function render() {
 
   updateLaserState();
   tickDeathSequence(now);
-  if (!deathSpectating && !matchPaused) predictAsteroidEdgeTeleports();
+  if (!deathSpectating && !matchPaused) {
+    predictAsteroidEdgeTeleports();
+    predictPickupBounces();
+  }
   pruneAsteroids();
   updateAttractedCoins(dt);
   const me = localView();
@@ -20640,8 +20749,9 @@ function handleWsMessage(e) {
       const shakeMs = msg.shakeMs != null ? msg.shakeMs : 1000;
       deathSpectating = true;
       deathFreezeAt = serverNow();
-      // Lock asteroid clocks to the freeze instant (server also pauses rocks).
+      // Lock asteroid/pickup clocks to the freeze instant (server also pauses).
       rebaseAsteroidsToTime(deathFreezeAt);
+      rebasePickupsToTime(deathFreezeAt);
       player.vx = 0;
       player.vy = 0;
       player.av = 0;
@@ -22733,6 +22843,7 @@ function demoReplayEvent(ev) {
     deathSpectating = true;
     deathFreezeAt = serverNow();
     rebaseAsteroidsToTime(deathFreezeAt);
+    rebasePickupsToTime(deathFreezeAt);
     if ((ev.id | 0) === myId) player.hp = 0;
     return;
   }
