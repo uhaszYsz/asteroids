@@ -11760,7 +11760,7 @@ function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
   }
 }
 
-/** Bullet speed (px/tick) for the weapon currently held — used by lead indicator. */
+/** Bullet speed (px/tick) for the weapon currently held. */
 function currentWeaponBulletSpeed() {
   const n = currentWeaponName();
   const w = effectiveLocalWeapon(n);
@@ -23402,7 +23402,7 @@ function runConsole(line) {
       conPrint('usage: give <item>  (or admin keys 1–8 in-game)', 'err');
       conPrint('weapons: default rocket laser shotgun rail plasma void meteor', 'info');
       conPrint('keys: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
-      conPrint('powerups: damage turret shield homing lead emp reload', 'info');
+      conPrint('powerups: damage turret shield homing reload', 'info');
       conPrint('admingun — turret + buff (100 ammo, 1 cooldown, 1s reload, 100 dmg)', 'info');
       return;
     }
