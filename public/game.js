@@ -966,6 +966,11 @@ const CVARS = {
     def: 0,
     help: '1 = spawn local ghost bullets at shoot (local aim/time), alpha 0.6 red. Local collide + despawn off-screen.'
   },
+  cl_bullets_hide: {
+    value: 0,
+    def: 0,
+    help: '1 = hide server/network bullets (draw only). Ghost bullets still show if cl_ghost_bullet is on.'
+  },
   cl_muzzle: {
     value: 1,
     def: 1,
