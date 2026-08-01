@@ -162,7 +162,7 @@ function effectiveWeapon(p, name) {
   const w = Object.assign({}, base);
   if (base.shotgunSpeeds) w.shotgunSpeeds = base.shotgunSpeeds.slice();
   if (n === 'default') {
-    if (lvl >= 2) w.ammo += 1;
+    // L2 = 2× bullet hit/visual size (set on fire). L3 = +1 ammo.
     if (lvl >= 3) w.ammo += 1;
   } else if (n === 'rocket') {
     if (lvl >= 2) w.speed *= 1.2;

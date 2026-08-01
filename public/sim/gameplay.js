@@ -4608,6 +4608,11 @@ function fireProjectile(room, p, typeName) {
     vy: vel.vy,
     spawnSt: Date.now()
   };
+  // Default L2+: double hit circle (visual mirrors this on clients).
+  if (typeName === 'default' && getWeaponLevel(p, 'default') >= 2) {
+    const base = (BULLET_TYPES.default && BULLET_TYPES.default.size) || (2 * RES_SCALE);
+    b.size = base * 2;
+  }
   if (isRocket) {
     b.hp = ROCKET_HP_DEFAULT;
     b.accel = ROCKET_ACCEL_DEFAULT;

@@ -11049,7 +11049,7 @@ function effectiveLocalWeapon(name) {
   const lvl = getLocalWeaponLevel(n);
   const w = Object.assign({}, base);
   if (n === 'default') {
-    if (lvl >= 2) w.ammo += 1;
+    // L2 = 2× bullet size (server sets b.size). L3 = +1 ammo.
     if (lvl >= 3) w.ammo += 1;
   } else if (n === 'rocket') {
     if (lvl >= 2 && w.speed != null) w.speed *= 1.2;
@@ -15327,9 +15327,12 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
     drawEnemyCommonShot(x, y, ang, scale);
     return null;
   }
-  // Default gun: enemy-style softOval (glow + white core). Collision unchanged (server size).
+  // Default gun: enemy-style softOval (glow + white core). L2+ uses 2× size from server.
   if (type === 'default' || !type) {
     const col = bulletDrawColor('default', ownerId);
+    const baseHit = 2 * RES_SCALE;
+    const hitSize = (sizeOpts && sizeOpts.size > 0) ? +sizeOpts.size : baseHit;
+    const sizeMult = Math.max(1, hitSize / baseHit);
     if (defaultTrail) {
       emitParticles({
         x: x - Math.cos(ang) * 2 * RES_SCALE,
@@ -15339,8 +15342,8 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
         speedSpread: 12 * RES_SCALE,
         direction: ang + Math.PI,
         spread: 0.35,
-        size: 1.4 * RES_SCALE,
-        sizeSpread: 0.6 * RES_SCALE,
+        size: 1.4 * RES_SCALE * sizeMult,
+        sizeSpread: 0.6 * RES_SCALE * sizeMult,
         scaleY: 1.5,
         sizeWiggle: 0.2,
         sizeWiggleSpeed: 14,
@@ -15354,8 +15357,8 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
     }
     const g = gridBlastBulletTrailOpts(vx, vy);
     if (g) pushGridShock(x, y, g);
-    // Half of common enemy shot scale (visual only; collision unchanged).
-    drawEnemyCommonShot(x, y, ang, 0.25, col);
+    // Base visual scale 0.25; L2+ doubles with hit size.
+    drawEnemyCommonShot(x, y, ang, 0.25 * sizeMult, col);
     return null;
   }
   if (type === 'shotgun' && defaultTrail) {
@@ -15407,6 +15410,8 @@ function unpackBullet(row) {
   } else if (b.type === 'enemyWorm') {
     b.length = row[8] != null ? +row[8] : 15;
     b.width = row[9] != null ? +row[9] : 15;
+  } else if ((b.type === 'default' || !row[7]) && row[8] != null && +row[8] > 0) {
+    b.size = +row[8];
   }
   return b;
 }
@@ -19589,6 +19594,7 @@ function bulletHitDebugRadius(b) {
     const sx = cfg.size || 0;
     return Math.max(sx, sx * (cfg.scaleY || 1));
   }
+  if (b && b.size != null && Number.isFinite(+b.size) && +b.size > 0) return +b.size;
   return cfg.size || 2 * RES_SCALE;
 }
 
@@ -19646,9 +19652,13 @@ function renderBullets() {
     const vy = p.vy != null ? p.vy : b.vy;
     const ang = Math.atan2(vy, vx);
     if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+    const sizeOpts = {};
+    if (b.length != null) sizeOpts.length = b.length;
+    if (b.width != null) sizeOpts.width = b.width;
+    if (b.size != null) sizeOpts.size = b.size;
     const pt = drawBulletVisual(
       b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner,
-      (b.length != null || b.width != null) ? { length: b.length, width: b.width } : null
+      (sizeOpts.length != null || sizeOpts.width != null || sizeOpts.size != null) ? sizeOpts : null
     );
     if (pt) {
       const rainbow = ownerHasDamagePowerup(b.owner) && DAMAGE_RAINBOW_TYPES.has(b.type || 'default');

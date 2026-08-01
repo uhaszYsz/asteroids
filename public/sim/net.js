@@ -321,6 +321,8 @@ function packBullet(b) {
       b.length != null ? +b.length : 15,
       b.width != null ? +b.width : 15
     );
+  } else if ((b.type || 'default') === 'default' && b.size != null && +b.size > 0) {
+    row.push(+b.size);
   }
   return row;
 }
