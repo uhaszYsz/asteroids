@@ -7206,11 +7206,26 @@ function findImpactCenter(hx, hy, hitKind) {
   return best || { x: hx, y: hy };
 }
 
+/** L3 void: purple pulled toward red (still not pure red). */
+function voidOrbColor(reddish) {
+  const base = COL.voidcannon || [0.55, 0.25, 1.0];
+  if (!reddish) return base;
+  const red = [1.0, 0.18, 0.28];
+  const t = 0.42;
+  return [
+    base[0] + (red[0] - base[0]) * t,
+    base[1] + (red[1] - base[1]) * t,
+    base[2] + (red[2] - base[2]) * t
+  ];
+}
+
 /** Swirling void orb — no solid circle, only particles. */
-function emitVoidVortex(x, y, vx, vy) {
-  const R = 27 * RES_SCALE;
-  const col = COL.voidcannon;
+function emitVoidVortex(x, y, vx, vy, radius, reddish) {
+  const baseR = 27 * RES_SCALE;
+  const R = (radius > 0 ? radius : baseR);
+  const col = voidOrbColor(!!reddish);
   const dark = [col[0] * 0.45, col[1] * 0.35, col[2] * 0.7];
+  const pScale = R / baseR;
   for (let i = 0; i < 7; i++) {
     const a = Math.random() * Math.PI * 2;
     const rad = (0.25 + Math.random() * 0.75) * R;
@@ -7223,7 +7238,7 @@ function emitVoidVortex(x, y, vx, vy) {
       speedSpread: 0,
       direction: tang,
       spread: 0,
-      size: (1.8 + Math.random() * 3.5) * RES_SCALE,
+      size: (1.8 + Math.random() * 3.5) * RES_SCALE * pScale,
       sizeSpread: 0,
       scaleY: 1.4,
       sizeWiggle: 0.25,
@@ -7247,7 +7262,7 @@ function emitVoidVortex(x, y, vx, vy) {
       speed: (6 + Math.random() * 14) * RES_SCALE,
       direction: a + Math.PI,
       spread: 0.2,
-      size: (2.5 + Math.random() * 3) * RES_SCALE,
+      size: (2.5 + Math.random() * 3) * RES_SCALE * pScale,
       lifetime: 0.3 + Math.random() * 0.25,
       color: dark,
       drag: 2.2,
@@ -11065,6 +11080,9 @@ function effectiveLocalWeapon(name) {
     if (lvl >= 3) w.ammo = 60;
   } else if (n === 'asteroidgun') {
     // L2 = 10% faster reload. L3 = 2× hit/bounce dmg (server).
+    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
+  } else if (n === 'voidcannon') {
+    // L2 = 10% faster reload. L3 = 30% bigger + reddish (server size / client tint).
     if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
   } else if (n === 'railgun') {
     if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
@@ -15320,7 +15338,10 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
     return null;
   }
   if (type === 'voidcannon') {
-    emitVoidVortex(x, y, vx, vy);
+    const baseR = 27 * RES_SCALE;
+    const R = (sizeOpts && sizeOpts.size > 0) ? +sizeOpts.size : baseR;
+    const reddish = R > baseR * 1.12;
+    emitVoidVortex(x, y, vx, vy, R, reddish);
     return null;
   }
   if (type === 'enemy' || type === 'enemySpinner' || type === 'enemyWorm') {
@@ -15417,7 +15438,10 @@ function unpackBullet(row) {
   } else if (b.type === 'enemyWorm') {
     b.length = row[8] != null ? +row[8] : 15;
     b.width = row[9] != null ? +row[9] : 15;
-  } else if ((b.type === 'default' || !row[7]) && row[8] != null && +row[8] > 0) {
+  } else if (
+    (b.type === 'default' || b.type === 'voidcannon' || !row[7])
+    && row[8] != null && +row[8] > 0
+  ) {
     b.size = +row[8];
   }
   return b;

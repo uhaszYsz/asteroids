@@ -4621,6 +4621,11 @@ function fireProjectile(room, p, typeName) {
     const base = (BULLET_TYPES.default && BULLET_TYPES.default.size) || (2 * RES_SCALE);
     b.size = base * 2;
   }
+  // Void L3: 30% larger hit radius (client scales vortex + reddish tint).
+  if (typeName === 'voidcannon' && getWeaponLevel(p, 'voidcannon') >= 3) {
+    const base = (BULLET_TYPES.voidcannon && BULLET_TYPES.voidcannon.size) || (27 * RES_SCALE);
+    b.size = base * 1.3;
+  }
   if (isRocket) {
     b.hp = ROCKET_HP_DEFAULT;
     b.accel = ROCKET_ACCEL_DEFAULT;

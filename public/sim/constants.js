@@ -183,6 +183,9 @@ function effectiveWeapon(p, name) {
   } else if (n === 'asteroidgun') {
     // L2 = 10% faster reload. L3 = 2× hit/bounce dmg (set on fire).
     if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
+  } else if (n === 'voidcannon') {
+    // L2 = 10% faster reload. L3 = 30% bigger orb (set on fire + client tint).
+    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
   } else if (n === 'railgun') {
     // L2 = edge bounce (handled in fireRailgun). L3 = 30% faster shot cooldown.
     if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
