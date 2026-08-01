@@ -18739,7 +18739,8 @@ function unpackPickup(row) {
   let kind = 'weapon';
   let weapon = 'default';
   let powerup = null;
-  if (code === 99 || code === 7) kind = 'health';
+  // 99 = health. Do not treat 7 as health — that is voidcannon (WEAPON_NAMES[6] + 1).
+  if (code === 99) kind = 'health';
   else if (code >= PICKUP_CODE_POWERUP_BASE) {
     kind = 'powerup';
     powerup = POWERUP_TYPES[code - PICKUP_CODE_POWERUP_BASE] || 'damage';
