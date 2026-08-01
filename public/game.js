@@ -974,7 +974,7 @@ const CVARS = {
   cl_muzzle: {
     value: 1,
     def: 1,
-    help: '1 = muzzle flash particles on shoot. 0 = disable muzzle FX.'
+    help: '1 = all muzzle particle sprays. 0 = hide server/remote bullet muzzle only; keep local ship shoot muzzle.'
   },
   cl_hitscan: {
     value: 0,
@@ -6720,9 +6720,12 @@ function mixRgb(a, b, t) {
  * (random 0%…230%), speed = default bullet speed ±50%.
  * Emits two layers: one inheriting ship/rocket vel, one with base 0 + particle speeds only.
  * `count` scales intensity; optional opts.cone widens the spray (shotgun).
+ * opts.shipMuzzle: local ship shoot FX — kept even when cl_muzzle is 0.
+ * Without shipMuzzle (server/remote bullet spawn), cl_muzzle 0 suppresses the spray.
  */
 function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
-  if ((cv('cl_muzzle') | 0) === 0) return;
+  const shipMuzzle = !!(opts && opts.shipMuzzle);
+  if ((cv('cl_muzzle') | 0) === 0 && !shipMuzzle) return;
   // Ship vel is px/tick; particle vel is px/s — same base as idle thrust.
   const shipVx = (vx || 0) * TPS;
   const shipVy = (vy || 0) * TPS;
@@ -6767,40 +6770,38 @@ function emitLocalShootFx() {
   spawnGhostBulletsForLocalShot();
 
   if (wpn === 3) {
-    // Laser: nose spark; beam is handled separately.
-    if ((cv('cl_muzzle') | 0) !== 0) {
-      const ivx = (me.vx || 0) * TPS;
-      const ivy = (me.vy || 0) * TPS;
-      emitParticles({
-        x: m.x, y: m.y,
-        count: 5,
-        speed: 70 * RES_SCALE,
-        speedSpread: 40 * RES_SCALE,
-        direction: ang,
-        spread: 0.45,
-        size: 2.4 * RES_SCALE,
-        scaleY: 2.2,
-        sizeWiggle: 0.3,
-        sizeWiggleSpeed: 16,
-        lifetime: 0.1,
-        color: ownerShootColor(myId),
-        drag: 5,
-        inheritVx: ivx,
-        inheritVy: ivy
-      });
-    }
+    // Laser: nose spark; beam is handled separately (ship muzzle — always on).
+    const ivx = (me.vx || 0) * TPS;
+    const ivy = (me.vy || 0) * TPS;
+    emitParticles({
+      x: m.x, y: m.y,
+      count: 5,
+      speed: 70 * RES_SCALE,
+      speedSpread: 40 * RES_SCALE,
+      direction: ang,
+      spread: 0.45,
+      size: 2.4 * RES_SCALE,
+      scaleY: 2.2,
+      sizeWiggle: 0.3,
+      sizeWiggleSpeed: 16,
+      lifetime: 0.1,
+      color: ownerShootColor(myId),
+      drag: 5,
+      inheritVx: ivx,
+      inheritVy: ivy
+    });
     return;
   }
 
   if (wpn === 2) {
     playSfx(SFX.rocketFire, { vol: 0.9, pool: 6 });
-    emitMuzzleFx(m.x, m.y, ang, COL.rocket, 12, me.vx, me.vy);
+    emitMuzzleFx(m.x, m.y, ang, COL.rocket, 12, me.vx, me.vy, { shipMuzzle: true });
     return;
   }
 
   if (wpn === 4) {
     // Shotgun: SFX is one blast on Space press only (not here / not per pellet).
-    emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 14, me.vx, me.vy, { cone: 1.45 });
+    emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 14, me.vx, me.vy, { cone: 1.45, shipMuzzle: true });
     return;
   }
 
@@ -6810,14 +6811,14 @@ function emitLocalShootFx() {
     } else {
       playSfx(SFX.shoot, { vol: 0.75, pool: 8 });
     }
-    emitMuzzleFx(m.x, m.y, ang, COL.plasma, 9, me.vx, me.vy, { cone: 0.85 });
+    emitMuzzleFx(m.x, m.y, ang, COL.plasma, 9, me.vx, me.vy, { cone: 0.85, shipMuzzle: true });
     return;
   }
 
   if (wpn === 7) {
     // Void: travel loop starts when the orb bullet is added (no generic shoot sting).
     if (localShoot.sfxSkipNext) localShoot.sfxSkipNext = false;
-    emitMuzzleFx(m.x, m.y, ang, COL.voidcannon, 11, me.vx, me.vy, { cone: 1.2 });
+    emitMuzzleFx(m.x, m.y, ang, COL.voidcannon, 11, me.vx, me.vy, { cone: 1.2, shipMuzzle: true });
     return;
   }
 
@@ -6833,7 +6834,7 @@ function emitLocalShootFx() {
   } else {
     playSfx(SFX.shoot, { vol: 0.9, pool: 8 });
   }
-  emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 10, me.vx, me.vy);
+  emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 10, me.vx, me.vy, { shipMuzzle: true });
 }
 
 /** Client-only predictive ghosts — red, α0.6; local collide; cull off-screen. */
@@ -13632,7 +13633,7 @@ function renderAccountShipPreviewGL() {
     accountPreviewMuzzleAt = now;
     pulseSpriteShipAttack(ACCOUNT_PREVIEW_OWNER);
     const m = shipMuzzle(cx, cy, angle);
-    emitMuzzleFx(m.x, m.y, angle, shootRgb, 8, 0, 0);
+    emitMuzzleFx(m.x, m.y, angle, shootRgb, 8, 0, 0, { shipMuzzle: true });
   }
   updateParticles(dt);
 
