@@ -3890,9 +3890,7 @@ function hitPlayerAsteroid(room, p, a, hit) {
   if (a.playerShot && blocksFriendlyFire(room, a.ownerId)) return;
   let dmg;
   if (a.playerShot) {
-    const spd = Math.hypot(a.vx || 0, a.vy || 0);
-    const frac = Math.max(0, spd / Math.max(1e-6, MAX_SPEED));
-    dmg = PLAYER_SHOT_HIT_BASE + PLAYER_SHOT_HIT_SPEED_BONUS * frac;
+    dmg = PLAYER_SHOT_HIT_DMG;
     notePlayerAttacker(p, a.ownerId);
   } else {
     dmg = asteroidCollideDamage(p, a, 0.5);
