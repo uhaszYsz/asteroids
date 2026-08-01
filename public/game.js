@@ -3715,22 +3715,29 @@ function updateDynamicLightState() {
   const me = localView();
   const alive = !!(player && (player.hp | 0) > 0);
   const precise = !!(inMatch && alive && precisionTurn());
-  _lightFlashOn = precise ? 1 : 0;
+  // Cone always on while alive; idle = full width @ low alpha, precision = shrink + full strength.
+  const coneOn = !!(inMatch && alive);
+  _lightFlashOn = coneOn ? 1 : 0;
   _lightFlashNight = nightOn ? 1 : 0;
-  if (precise) {
+  if (coneOn) {
     const now = performance.now();
-    if (!_precisionConeHeld) {
-      _precisionConeHeld = true;
-      _precisionConeHalf = GRID_FLASH_HALF_START;
-      _precisionConeLastMs = now;
-    } else {
-      while (now - _precisionConeLastMs >= GRID_FLASH_SHRINK_MS) {
-        _precisionConeLastMs += GRID_FLASH_SHRINK_MS;
-        _precisionConeHalf = Math.max(
-          GRID_FLASH_HALF_MIN,
-          _precisionConeHalf - GRID_FLASH_SHRINK_DEG * Math.PI / 180
-        );
+    if (precise) {
+      if (!_precisionConeHeld) {
+        _precisionConeHeld = true;
+        _precisionConeHalf = GRID_FLASH_HALF_START;
+        _precisionConeLastMs = now;
+      } else {
+        while (now - _precisionConeLastMs >= GRID_FLASH_SHRINK_MS) {
+          _precisionConeLastMs += GRID_FLASH_SHRINK_MS;
+          _precisionConeHalf = Math.max(
+            GRID_FLASH_HALF_MIN,
+            _precisionConeHalf - GRID_FLASH_SHRINK_DEG * Math.PI / 180
+          );
+        }
       }
+    } else {
+      _precisionConeHeld = false;
+      _precisionConeHalf = GRID_FLASH_HALF_START;
     }
     // Cone axis = actual shoot direction (server fire angle), not softErr visual.
     const aLead = shootPredictAngleLeadTicks();
@@ -3740,12 +3747,14 @@ function updateDynamicLightState() {
     _lightFlashY = m.y;
     _lightFlashAng = shootAng;
     _lightFlashLen = GRID_FLASH_MAX_LEN;
-    _lightFlashHalf = _precisionConeHalf;
+    _lightFlashHalf = precise ? _precisionConeHalf : GRID_FLASH_HALF_START;
     _lightFlashColR = aimConeColorRgb[0];
     _lightFlashColG = aimConeColorRgb[1];
     _lightFlashColB = aimConeColorRgb[2];
-    // Whole-cone alpha wiggle (~±12%).
-    _lightFlashAmt = 0.88 + 0.12 * Math.sin(now * 0.0285);
+    // Precision: whole-cone alpha wiggle (~±12%). Idle: faint full-width ghost.
+    _lightFlashAmt = precise
+      ? (0.88 + 0.12 * Math.sin(now * 0.0285))
+      : 0.1;
     // Radar phase: bands travel cone length at current bullet speed (3 visible lights).
     _lightFlashRadar = precisionAimRadarPhase(now);
   } else {
@@ -3759,10 +3768,10 @@ function updateDynamicLightState() {
     _lightFlashAmt = 1;
     _lightFlashRadar = 0;
   }
-  _lightFlashBoost = (lightsOn || precise) ? GRID_FLASH_BOOST : 0;
+  _lightFlashBoost = (lightsOn || coneOn) ? GRID_FLASH_BOOST : 0;
   // Lights never interact with asteroids (no silhouette edges / shadows).
   _gridFlashEdgeN = 0;
-  if (!lightsOn && !precise) {
+  if (!lightsOn && !coneOn) {
     _gridShipLight.fill(0);
     return;
   }
