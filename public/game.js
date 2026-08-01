@@ -431,12 +431,12 @@ const SFX = {
   shootEnemy: 'sounds/shootEnemy.wav',
   rocketFire: 'sounds/rocket_fire.wav',
   rocketTravel: 'sounds/rocket_travel.wav',
-  scored: 'sounds/scored.ogg',
+  scored: 'sounds/scored.wav',
   hitPlayer: 'sounds/hitPlayer.ogg',
   hitPlayerBullet: 'sounds/hitPlayer2.ogg',
   hitAsteroid: 'sounds/hitAsteroid.ogg',
   hitAsteroidBullet: 'sounds/hitAsteroid1.ogg',
-  explosion: 'sounds/explosion.ogg',
+  explosion: 'sounds/explosion.wav',
   /** Enemy ship kill — same VFX as asteroid burst, dedicated one-shot. */
   enemyExplosion: 'sounds/explosion.wav',
   ambientExplosion: [
