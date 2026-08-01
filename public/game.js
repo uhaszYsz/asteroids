@@ -16813,12 +16813,31 @@ function unpackEnemy(row) {
 }
 
 function addEnemy(e) {
+  rebaseEnemyPredictOrigin(e);
   enemies.set(e.id, e);
+}
+
+/**
+ * ef/eu pack live x,y AND original spawnSt. Predicting from live pose with full
+ * spawn age double-counts motion → client runs ahead, then es snaps back.
+ * Rebase like es: treat packet pose as origin at receive time.
+ */
+function rebaseEnemyPredictOrigin(e) {
+  if (!e) return;
+  const x = e.x != null ? +e.x : +e.spawnX;
+  const y = e.y != null ? +e.y : +e.spawnY;
+  e.x = x;
+  e.y = y;
+  e.spawnX = x;
+  e.spawnY = y;
+  e.spawnSt = serverNow();
+  e.travelDist = Math.hypot((e.tx || 0) - x, (e.ty || 0) - y);
 }
 
 function applyEnemyUpdate(row) {
   const id = row[0] | 0;
   const e = unpackEnemy(row);
+  rebaseEnemyPredictOrigin(e);
   enemies.set(id, e);
 }
 
@@ -17965,7 +17984,7 @@ function drawEnemyCommonCharges() {
     const spin = now * 0.007 + id * 1.7;
 
     if (kind === 'ufo') {
-      // Same origin as server fireEnemyRocket / leadIntercept — hull center, not turrets.
+      // Rocket still fires from hull center; charge telegraph sits on the right cannon.
       const target = ufoAimTargetPose();
       const rocketSpd = (WEAPONS.default.speed || (8 * RES_SCALE)) * 0.7 * 0.85;
       let aim = p.angle || 0;
@@ -17975,7 +17994,13 @@ function drawEnemyCommonCharges() {
         );
         aim = Math.atan2(lead.y - p.y, lead.x - p.x);
       }
-      let w = { x: p.x, y: p.y };
+      const ufoOpt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
+      const bank = enemyDrawBank.get(id | 0) || 0;
+      const sideY = ufoTurretSideY(ufoOpt, 1); // right cannon (+Y)
+      let w = shipLocalToWorldLift(
+        0, sideY, ENEMY_UFO_TURRET_Z,
+        p.x, p.y, p.angle, bank, SPRITE_ROOF_LIFT
+      );
       if (shake > 0) {
         const ph = now * 0.055 + id * 2.1;
         w = {
