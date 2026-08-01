@@ -1862,7 +1862,6 @@ function rebuildSynthGrid(step, opts) {
       gridInvMass[k] = border ? 0 : 1;
     }
   }
-  applyGridStaticPins();
 
   buildGridEdges(gridPhysicsTopo(topo));
   gridLineScratch = new Float32Array(Math.max(GRID_COLS, GRID_ROWS, GRID_EDGE_N * 2) * 2);
@@ -1874,20 +1873,7 @@ function rebuildSynthGrid(step, opts) {
   invalidateGridBake();
 }
 
-/** Spawn pad lock radius (world px) — punches leave these nodes flat. */
-const GRID_PIN_SPAWN_R = 20;
-
-/** PvP sport marks only — waves / menu / queue leave the mesh free. */
-function shouldPinSportGridMarks() {
-  // inGame / practiceMode are declared later; typeof still throws in TDZ at boot.
-  try {
-    return !!(inGame && !practiceMode);
-  } catch (_) {
-    return false;
-  }
-}
-
-/** Reset non-border pins, then re-apply sport pins if PvP. */
+/** Border pins only — no sport-field midfield/spawn locks. */
 function refreshGridStaticPins() {
   if (!GRID_N || !GRID_COLS) return;
   for (let k = 0; k < GRID_N; k++) {
@@ -1896,46 +1882,6 @@ function refreshGridStaticPins() {
     const border = i === 0 || j === 0 || i === GRID_COLS - 1 || j === GRID_ROWS - 1;
     gridStaticPin[k] = border ? 1 : 0;
     gridInvMass[k] = border ? 0 : 1;
-  }
-  applyGridStaticPins();
-}
-
-/** Pin midfield star + spawn discs (PvP sport markings only). */
-function applyGridStaticPins() {
-  if (!GRID_N) return;
-  if (!shouldPinSportGridMarks()) return;
-  const cx = W * 0.5;
-  const cy = H * 0.5;
-  const rStar = Math.min(W, H) * 0.14;
-  const rStar2 = rStar * rStar;
-  const starVerts = buildStarPolyFlat(cx, cy, 5, rStar, rStar * 0.38, 0);
-  const pinR2 = GRID_PIN_SPAWN_R * GRID_PIN_SPAWN_R;
-  const sx0 = cx - SPAWN_CENTER_OFFSET;
-  const sx1 = cx + SPAWN_CENTER_OFFSET;
-  for (let k = 0; k < GRID_N; k++) {
-    if (gridStaticPin[k]) continue;
-    const x = gridBaseX[k];
-    const y = gridBaseY[k];
-    const dx = x - cx;
-    const dy = y - cy;
-    if (dx * dx + dy * dy <= rStar2 && pointInPolyFlat(x, y, starVerts)) {
-      gridStaticPin[k] = 1;
-      gridInvMass[k] = 0;
-      continue;
-    }
-    const d0x = x - sx0;
-    const d0y = y - cy;
-    if (d0x * d0x + d0y * d0y <= pinR2) {
-      gridStaticPin[k] = 1;
-      gridInvMass[k] = 0;
-      continue;
-    }
-    const d1x = x - sx1;
-    const d1y = y - cy;
-    if (d1x * d1x + d1y * d1y <= pinR2) {
-      gridStaticPin[k] = 1;
-      gridInvMass[k] = 0;
-    }
   }
 }
 
@@ -2903,7 +2849,6 @@ function drawSynthGrid(now) {
   // Undistorted nebula underlay (same scroll as stroke nebula). Under the warp grid.
   if (!night && ((cv('cl_bg_layer') | 0) !== 0 || !inGame)) drawNebulaUnderlay();
   if (!gridTopoMode()) {
-    if (!night && arenaLightShow) drawArenaLightShow(now);
     return;
   }
   if (gridTestUntilMs > now) {
@@ -2929,19 +2874,12 @@ function drawSynthGrid(now) {
   tickGodmodeSpawnRipples(dt);
   if ((cv('cl_background_bake') | 0) !== 0) {
     drawGridBaked();
-    if (!night && arenaLightShow) drawArenaLightShow(now);
     return;
   }
   if (night) return; // Night needs baked flashlight path.
   gl.disable(gl.BLEND);
   try { gl.lineWidth(Math.max(1, getRenderScale() * gridLineWidthMul())); } catch (_) { gl.lineWidth(1); }
-  const col = practiceMode
-    ? [1, 1, 1]
-    : [
-      Math.max(0, Math.min(1, cv('cl_grid_color_r'))),
-      Math.max(0, Math.min(1, cv('cl_grid_color_g'))),
-      Math.max(0, Math.min(1, cv('cl_grid_color_b')))
-    ];
+  const col = [1, 1, 1];
 
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -2968,7 +2906,6 @@ function drawSynthGrid(now) {
     }
   }
   gl.disable(gl.BLEND);
-  if (arenaLightShow) drawArenaLightShow(now);
 }
 
 /** Pointy-top hexes centered on triangular-lattice nodes (Voronoi of the mesh). */
@@ -3423,8 +3360,6 @@ function ensureNebulaGLTexture() {
 
 function tickNebulaScroll(dt) {
   if (!gridNebulaReady) return;
-  // Scroll for practice stroke nebula and/or optional underlay layer.
-  if (!practiceMode && inGame && !(cv('cl_bg_layer') | 0)) return;
   const d = dt > 0 ? dt : 0.016;
   // Shared scroll drives grid stroke nebula; underlay may flip it at draw time.
   gridNebulaScrollX += gridNebulaVelX * d;
@@ -3942,42 +3877,6 @@ function tickGodmodeSpawnRipples(dt) {
   }
 }
 
-/** Player occupying spawn slot 0 (left) or 1 (right), else null. */
-function playerIdForSpawnSlot(slot) {
-  slot = slot & 1;
-  if (myId != null && (((myId - 1) & 1) === slot)) return myId;
-  if (typeof remotes !== 'undefined' && remotes) {
-    for (const r of remotes.values()) {
-      if ((((r.id - 1) & 1) === slot)) return r.id;
-    }
-  }
-  return null;
-}
-
-function rgb01ToCssRgba(rgb, a) {
-  const r = Math.round(Math.max(0, Math.min(1, rgb[0])) * 255);
-  const g = Math.round(Math.max(0, Math.min(1, rgb[1])) * 255);
-  const b = Math.round(Math.max(0, Math.min(1, rgb[2])) * 255);
-  return 'rgba(' + r + ',' + g + ',' + b + ',' + (a == null ? 1 : a) + ')';
-}
-
-/** CSS color for spawn-pad lattice, or null if that pad has no player yet (practice empty side). */
-function spawnPadCssColor(slot) {
-  const id = playerIdForSpawnSlot(slot);
-  if (id == null) {
-    // Match lobby: still tint pads with defaults so both sides read as teams.
-    if (practiceMode) return null;
-    const fallback = slot === 0 ? (COL.self || [0.2, 0.85, 1]) : (COL.remote || [1, 0.35, 0.35]);
-    return rgb01ToCssRgba(fallback, 1);
-  }
-  return rgb01ToCssRgba(ownerPlayerColor(id), 1);
-}
-
-function spawnPadColorKey(slot) {
-  const css = spawnPadCssColor(slot);
-  return css || 'none';
-}
-
 function ensureGridBakeTexture() {
   if (!GRID_N || GRID_COLS < 2 || GRID_ROWS < 2) return false;
   const rs = getRenderScale();
@@ -3985,11 +3884,9 @@ function ensureGridBakeTexture() {
   const lineStep = Math.max(2, Number(cv('cl_grid_size')) || 5);
   const lineW = gridLineWidthMul();
   const topo = GRID_TOPO || 1;
-  const c0 = spawnPadColorKey(0);
-  const c1 = spawnPadColorKey(1);
   const key = [
-    'arena35', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
-    practiceMode ? 'p1' : 'p0', inGame ? 'g1' : 'menu', c0, c1
+    'space1', topo, GRID_COLS, GRID_ROWS, GRID_STEP, GRID_OX, GRID_OY, lineStep, lineW, rs,
+    inGame ? 'g1' : 'menu'
   ].join(':');
   if (!gridBakeDirty && gridBakeTex && gridBakeKey === key) return true;
 
@@ -4037,226 +3934,19 @@ function ensureGridBakeTexture() {
 }
 
 /**
- * Esports / rink playfield markings.
- * Menu: plain space lattice (nebula-colored) only — no title bake / no ripples.
- * Match: blue lattice + player-colored spawn pads + thick sport accents.
- * Practice/solo/waves: nebula (or white) lattice only — no sport paint.
+ * Bake lattice for space background (white alpha mask; nebula fills in shader).
+ * Same look for menu, waves/solo, and PvP — no sport/rink markings.
  */
 function paintSportArenaGrid(ctx, tw, th, lineStep, rs, ox, oy, worldW, worldH, topo) {
   topo = topo || 1;
   const lw = Math.max(0.5, rs * gridLineWidthMul());
-  const cx = tw * 0.5;
-  const cy = th * 0.5;
-  const toTexX = (wx) => ((wx - ox) / worldW) * tw;
-  const toTexY = (wy) => ((wy - oy) / worldH) * th;
-  const toTexR = (wr) => wr * (tw / Math.max(1, worldW));
-  const menuTitle = !inGame;
-
-  // Full opacity strokes (same as live grid useDraw(..., 1)); fill stays softer.
-  const BLUE = 'rgba(56, 140, 220, 1)';
   const WHITE = 'rgba(255, 255, 255, 1)';
-  // Practice / menu bake is white alpha mask; nebula color is sampled in the shader (scrolls).
-  const lattice = (practiceMode || menuTitle) ? WHITE : BLUE;
-  // Bake texels per world pixel (≈ rs; lower if max-tex clamp shrinks the atlas).
-  const px = tw / Math.max(1, worldW);
-  // Framebuffer pixels → bake stroke width. (tw ≈ worldW*rs ⇒ factor 1; shrinks if atlas clamped.)
-  const fbToBake = px / Math.max(1, rs);
-  const accentLw = 5 * fbToBake;
-  const dashLw = 2 * fbToBake;
-  const dashGap = 4 * px;
-  const dashOn = dashGap * 3; // each dash 3× longer than the gap
-
-  // --- fine lattice ---
-  ctx.strokeStyle = lattice;
+  ctx.strokeStyle = WHITE;
   ctx.lineWidth = lw;
   paintLatticePattern(ctx, tw, th, lineStep, rs, topo, false);
-  // --- every-4th majors (same spacing index as fine — do NOT pass lineStep*4) ---
-  ctx.strokeStyle = lattice;
+  ctx.strokeStyle = WHITE;
   ctx.lineWidth = lw;
   paintLatticePattern(ctx, tw, th, lineStep, rs, topo, true);
-
-  // Title screen: space grid only (no PvP sport field, no logo bake).
-  if (menuTitle) return;
-
-  // Solo/practice: stop here — lattice only (nebula or white).
-  if (practiceMode) return;
-
-  // --- spawn pads: recolor lattice to that player's color ---
-  const spawnR = toTexR(GODMODE_SPAWN_CLEAR_R);
-  const spawnPads = [
-    [toTexX(W * 0.5 - SPAWN_CENTER_OFFSET), toTexY(H * 0.5)],
-    [toTexX(W * 0.5 + SPAWN_CENTER_OFFSET), toTexY(H * 0.5)]
-  ];
-  for (let slot = 0; slot < 2; slot++) {
-    const col = spawnPadCssColor(slot);
-    if (!col) continue;
-    const [sx, sy] = spawnPads[slot];
-    recolorLatticeInCircle(ctx, sx, sy, spawnR, tw, th, lineStep, rs, topo, lw, col);
-  }
-
-  // Stage rect: same inset from atlas edge as the old left/right goal lines
-  // (edge margin + former crease depth). No separate L/R goal strokes.
-  const edgePad = Math.max(2, accentLw);
-  const stageInset = edgePad + tw * 0.12;
-  ctx.strokeStyle = WHITE;
-  ctx.lineWidth = accentLw;
-  ctx.strokeRect(stageInset, stageInset, tw - stageInset * 2, th - stageInset * 2);
-
-  // --- midfield axes (stop at center star; do not cross through it) ---
-  const rStar = Math.min(tw, th) * 0.14;
-  const starInner = rStar * 0.38;
-  const starVerts = [];
-  const starPts = 5;
-  for (let i = 0; i < starPts * 2; i++) {
-    const a = -Math.PI / 2 + (i / (starPts * 2)) * Math.PI * 2;
-    const rr = (i & 1) === 0 ? rStar : starInner;
-    starVerts.push(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
-  }
-  function axisGap(dx, dy) {
-    // Nearest star-edge hit along axis from center.
-    let best = Infinity;
-    const n = starVerts.length / 2;
-    for (let i = 0; i < n; i++) {
-      const ax = starVerts[i * 2];
-      const ay = starVerts[i * 2 + 1];
-      const bx = starVerts[((i + 1) % n) * 2];
-      const by = starVerts[((i + 1) % n) * 2 + 1];
-      const ex = bx - ax;
-      const ey = by - ay;
-      const denom = dx * ey - dy * ex;
-      if (Math.abs(denom) < 1e-9) continue;
-      const fx = ax - cx;
-      const fy = ay - cy;
-      const t = (fx * ey - fy * ex) / denom;
-      const u = (fx * dy - fy * dx) / denom;
-      if (t > 1e-5 && u >= 0 && u <= 1 && t < best) best = t;
-    }
-    return best < Infinity ? best : starInner;
-  }
-  const gapN = axisGap(0, -1);
-  const gapS = axisGap(0, 1);
-  const gapW = axisGap(-1, 0);
-  const gapE = axisGap(1, 0);
-  ctx.beginPath();
-  ctx.moveTo(cx, stageInset);
-  ctx.lineTo(cx, cy - gapN);
-  ctx.moveTo(cx, cy + gapS);
-  ctx.lineTo(cx, th - stageInset);
-  ctx.moveTo(stageInset, cy);
-  ctx.lineTo(cx - gapW, cy);
-  ctx.moveTo(cx + gapE, cy);
-  ctx.lineTo(tw - stageInset, cy);
-  ctx.stroke();
-
-  // --- center star (replaces old midfield circle) ---
-  ctx.beginPath();
-  for (let i = 0; i < starVerts.length; i += 2) {
-    if (i === 0) ctx.moveTo(starVerts[i], starVerts[i + 1]);
-    else ctx.lineTo(starVerts[i], starVerts[i + 1]);
-  }
-  ctx.closePath();
-  ctx.stroke();
-
-  // --- dashed hash marks along mid vertical ---
-  ctx.lineWidth = dashLw;
-  ctx.setLineDash([dashOn, dashGap]);
-  const hashHalf = tw * 0.08;
-  ctx.beginPath();
-  for (let k = 1; k < 8; k++) {
-    const y = stageInset + ((th - stageInset * 2) * k) / 8;
-    if (Math.abs(y - cy) < rStar * 0.85) continue;
-    ctx.moveTo(cx - hashHalf, y);
-    ctx.lineTo(cx + hashHalf, y);
-  }
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // --- corner L-marks ---
-  const corner = Math.min(tw, th) * 0.05;
-  ctx.lineWidth = accentLw;
-  ctx.beginPath();
-  ctx.moveTo(stageInset, stageInset + corner); ctx.lineTo(stageInset, stageInset); ctx.lineTo(stageInset + corner, stageInset);
-  ctx.moveTo(tw - stageInset - corner, stageInset); ctx.lineTo(tw - stageInset, stageInset); ctx.lineTo(tw - stageInset, stageInset + corner);
-  ctx.moveTo(stageInset, th - stageInset - corner); ctx.lineTo(stageInset, th - stageInset); ctx.lineTo(stageInset + corner, th - stageInset);
-  ctx.moveTo(tw - stageInset - corner, th - stageInset); ctx.lineTo(tw - stageInset, th - stageInset); ctx.lineTo(tw - stageInset, th - stageInset - corner);
-  ctx.stroke();
-
-  // --- spawn sport lines (white rings / cross / ticks; 2px; no disc fill) ---
-  const SPAWN_LINE = 'rgba(255, 255, 255, 1)';
-  const spawnLineLw = 2 * fbToBake;
-  for (const [sx, sy] of spawnPads) {
-    paintSpawnPadOnGrid(ctx, sx, sy, spawnR, spawnLineLw, SPAWN_LINE);
-  }
-
-  // Flipper-style lamp paints along white sport lines (runtime anim lights these).
-  paintArenaFancyLamps(ctx, tw, th, cx, cy, stageInset, rStar, starVerts, spawnPads, spawnR, px, fbToBake);
-}
-
-/** Dim lamp ticks / chevrons baked onto sport lines for chase lighting. */
-function paintArenaFancyLamps(ctx, tw, th, cx, cy, stageInset, rStar, starVerts, spawnPads, spawnR, px, fbToBake) {
-  const tick = Math.max(1.2, 2.2 * fbToBake);
-  const gap = Math.max(10, 16 * px);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.lineWidth = Math.max(1, fbToBake);
-
-  function dotsAlong(x0, y0, x1, y1) {
-    const dx = x1 - x0, dy = y1 - y0;
-    const len = Math.hypot(dx, dy) || 1;
-    const n = Math.max(1, Math.floor(len / gap));
-    for (let i = 0; i <= n; i++) {
-      const t = i / n;
-      const x = x0 + dx * t;
-      const y = y0 + dy * t;
-      ctx.fillRect(x - tick * 0.5, y - tick * 0.5, tick, tick);
-    }
-  }
-
-  // Stage perimeter lamps
-  const x0 = stageInset, y0 = stageInset, x1 = tw - stageInset, y1 = th - stageInset;
-  dotsAlong(x0, y0, x1, y0);
-  dotsAlong(x1, y0, x1, y1);
-  dotsAlong(x1, y1, x0, y1);
-  dotsAlong(x0, y1, x0, y0);
-
-  // Mid axes chevrons (point toward center)
-  const chevron = Math.max(4, 7 * px);
-  ctx.beginPath();
-  for (let side = -1; side <= 1; side += 2) {
-    for (let k = 1; k <= 5; k++) {
-      const x = cx + side * (rStar + k * gap * 1.1);
-      if (x < x0 + 8 || x > x1 - 8) continue;
-      ctx.moveTo(x - side * chevron, cy - chevron * 0.7);
-      ctx.lineTo(x, cy);
-      ctx.lineTo(x - side * chevron, cy + chevron * 0.7);
-    }
-    for (let k = 1; k <= 4; k++) {
-      const y = cy + side * (rStar + k * gap * 1.1);
-      if (y < y0 + 8 || y > y1 - 8) continue;
-      ctx.moveTo(cx - chevron * 0.7, y - side * chevron);
-      ctx.lineTo(cx, y);
-      ctx.lineTo(cx + chevron * 0.7, y - side * chevron);
-    }
-  }
-  ctx.stroke();
-
-  // Star vertex gems
-  for (let i = 0; i < starVerts.length; i += 2) {
-    ctx.beginPath();
-    ctx.arc(starVerts[i], starVerts[i + 1], tick * 0.85, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Spawn ring lamp beads
-  for (const [sx, sy] of spawnPads) {
-    const n = 16;
-    for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
-      const x = sx + Math.cos(a) * spawnR;
-      const y = sy + Math.sin(a) * spawnR;
-      ctx.fillRect(x - tick * 0.45, y - tick * 0.45, tick * 0.9, tick * 0.9);
-    }
-  }
 }
 
 /** Draw square / hex / triangle / centers / stars lattice into bake texture. */
@@ -4474,266 +4164,6 @@ function drawLatticeMarksLive(col, alpha, topo) {
   }
 }
 
-/** Clip to circle and redraw lattice in player color — gaps stay transparent. */
-function recolorLatticeInCircle(ctx, sx, sy, r, tw, th, lineStep, rs, topo, lw, color) {
-  if (!(r > 1)) return;
-  ctx.save();
-  ctx.beginPath();
-  ctx.arc(sx, sy, r, 0, Math.PI * 2);
-  ctx.clip();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lw;
-  paintLatticePattern(ctx, tw, th, lineStep, rs, topo, false);
-  paintLatticePattern(ctx, tw, th, lineStep, rs, topo, true);
-  ctx.restore();
-}
-
-/** White face-off markings only (rings, cross, hash ticks) — no filled disc. */
-function paintSpawnPadOnGrid(ctx, sx, sy, r, lw, stroke) {
-  if (!(r > 1)) return;
-  ctx.strokeStyle = stroke;
-  ctx.lineWidth = lw;
-  ctx.beginPath();
-  ctx.arc(sx, sy, r, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(sx, sy, r * 0.55, 0, Math.PI * 2);
-  ctx.stroke();
-  // Crosshair
-  ctx.beginPath();
-  ctx.moveTo(sx - r, sy);
-  ctx.lineTo(sx + r, sy);
-  ctx.moveTo(sx, sy - r);
-  ctx.lineTo(sx, sy + r);
-  ctx.stroke();
-  // Short hash ticks at 45° (face-off style)
-  const tick = r * 0.18;
-  for (let k = 0; k < 8; k++) {
-    const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
-    const c = Math.cos(a);
-    const s = Math.sin(a);
-    ctx.beginPath();
-    ctx.moveTo(sx + c * (r - tick), sy + s * (r - tick));
-    ctx.lineTo(sx + c * (r + tick * 0.35), sy + s * (r + tick * 0.35));
-    ctx.stroke();
-  }
-  // Center spot
-  ctx.beginPath();
-  ctx.arc(sx, sy, Math.max(1.5, lw * 0.6), 0, Math.PI * 2);
-  ctx.fillStyle = stroke;
-  ctx.fill();
-}
-
-/* ========== Flipper-style arena light chase (match start / respawn) ========== */
-const ARENA_LAMP_SPACING = 14 * RES_SCALE;
-let arenaLightPaths = null; // [{ x:[], y:[], n, len }]
-let arenaLightShow = null; // { kind, t0, color, dur }
-
-function arenaPathPush(paths, pts) {
-  if (!pts || pts.length < 4) return;
-  const x = [];
-  const y = [];
-  for (let i = 0; i < pts.length; i += 2) {
-    x.push(pts[i]);
-    y.push(pts[i + 1]);
-  }
-  // Resample to even lamp spacing.
-  let len = 0;
-  for (let i = 1; i < x.length; i++) len += Math.hypot(x[i] - x[i - 1], y[i] - y[i - 1]);
-  if (len < 1) return;
-  const n = Math.max(2, Math.round(len / ARENA_LAMP_SPACING) + 1);
-  const ox = new Float32Array(n);
-  const oy = new Float32Array(n);
-  ox[0] = x[0]; oy[0] = y[0];
-  let seg = 0;
-  let segT = 0;
-  let segLen = Math.hypot(x[1] - x[0], y[1] - y[0]) || 1e-6;
-  for (let k = 1; k < n; k++) {
-    const target = (k / (n - 1)) * len;
-    let traveled = 0;
-    // Restart walk (small n — fine).
-    seg = 0; segT = 0;
-    segLen = Math.hypot(x[1] - x[0], y[1] - y[0]) || 1e-6;
-    let acc = 0;
-    while (seg < x.length - 1) {
-      if (acc + segLen >= target) {
-        const u = (target - acc) / segLen;
-        ox[k] = x[seg] + (x[seg + 1] - x[seg]) * u;
-        oy[k] = y[seg] + (y[seg + 1] - y[seg]) * u;
-        break;
-      }
-      acc += segLen;
-      seg++;
-      if (seg >= x.length - 1) {
-        ox[k] = x[x.length - 1];
-        oy[k] = y[y.length - 1];
-        break;
-      }
-      segLen = Math.hypot(x[seg + 1] - x[seg], y[seg + 1] - y[seg]) || 1e-6;
-    }
-  }
-  paths.push({ x: ox, y: oy, n, len });
-}
-
-function rebuildArenaLightPaths() {
-  const paths = [];
-  const m = Math.min(W, H) * 0.08;
-  const x0 = m, y0 = m, x1 = W - m, y1 = H - m;
-  const cx = W * 0.5, cy = H * 0.5;
-  // Perimeter chase (CW from top-left): top → right → bottom → left
-  arenaPathPush(paths, [x0, y0, x1, y0, x1, y1, x0, y1, x0, y0]);
-  // Mid axes (split so chase can run outward)
-  const rStar = Math.min(W, H) * 0.14;
-  arenaPathPush(paths, [cx - rStar, cy, x0, cy]);
-  arenaPathPush(paths, [cx + rStar, cy, x1, cy]);
-  arenaPathPush(paths, [cx, cy - rStar, cx, y0]);
-  arenaPathPush(paths, [cx, cy + rStar, cx, y1]);
-  // Center star outline
-  const star = [];
-  const starInner = rStar * 0.38;
-  for (let i = 0; i < 10; i++) {
-    const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
-    const rr = (i & 1) === 0 ? rStar : starInner;
-    star.push(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
-  }
-  star.push(star[0], star[1]);
-  arenaPathPush(paths, star);
-  // Spawn rings
-  for (const side of [-1, 1]) {
-    const sx = cx + side * SPAWN_CENTER_OFFSET;
-    const sy = cy;
-    const R = GODMODE_SPAWN_CLEAR_R;
-    const ring = [];
-    for (let i = 0; i <= 24; i++) {
-      const a = (i / 24) * Math.PI * 2;
-      ring.push(sx + Math.cos(a) * R, sy + Math.sin(a) * R);
-    }
-    arenaPathPush(paths, ring);
-  }
-  // Corner L marks as short paths
-  const c = Math.min(W, H) * 0.05;
-  arenaPathPush(paths, [x0, y0 + c, x0, y0, x0 + c, y0]);
-  arenaPathPush(paths, [x1 - c, y0, x1, y0, x1, y0 + c]);
-  arenaPathPush(paths, [x0, y1 - c, x0, y1, x0 + c, y1]);
-  arenaPathPush(paths, [x1 - c, y1, x1, y1, x1, y1 - c]);
-  arenaLightPaths = paths;
-}
-
-function startArenaLightShow(kind, color) {
-  // Colored sport field only (PvP match). Waves/solo/practice stay plain.
-  if (practiceMode) {
-    arenaLightShow = null;
-    return;
-  }
-  if (!arenaLightPaths) rebuildArenaLightPaths();
-  const col = color || [0.75, 0.92, 1.0];
-  arenaLightShow = {
-    kind: kind || 'match',
-    t0: performance.now(),
-    color: [col[0], col[1], col[2]],
-    dur: kind === 'respawn' ? 1800 : 3400
-  };
-}
-
-function arenaShowProgress(show, now) {
-  const u = Math.max(0, Math.min(1, (now - show.t0) / show.dur));
-  if (show.kind === 'respawn') {
-    // Fast pad → axes → blink → fade
-    if (u < 0.45) return { phase: 'chase', fill: u / 0.45, blink: 1, alpha: 1 };
-    if (u < 0.7) return { phase: 'blink', fill: 1, blink: ((now / 90) | 0) % 2 ? 1 : 0.15, alpha: 1 };
-    return { phase: 'fade', fill: 1, blink: 1, alpha: 1 - (u - 0.7) / 0.3 };
-  }
-  // Match: perimeter fill → inner paths → all lit blink → fade
-  if (u < 0.32) return { phase: 'chase', fill: u / 0.32, pathFrom: 0, pathTo: 1, blink: 1, alpha: 1 };
-  if (u < 0.55) return { phase: 'chase', fill: (u - 0.32) / 0.23, pathFrom: 1, pathTo: 5, blink: 1, alpha: 1 };
-  if (u < 0.72) return { phase: 'chase', fill: (u - 0.55) / 0.17, pathFrom: 5, pathTo: 99, blink: 1, alpha: 1 };
-  if (u < 0.88) return { phase: 'blink', fill: 1, pathFrom: 0, pathTo: 99, blink: ((now / 100) | 0) % 2 ? 1 : 0.12, alpha: 1 };
-  return { phase: 'fade', fill: 1, pathFrom: 0, pathTo: 99, blink: 1, alpha: 1 - (u - 0.88) / 0.12 };
-}
-
-function drawArenaLightShow(now) {
-  if (practiceMode) {
-    arenaLightShow = null;
-    return;
-  }
-  const show = arenaLightShow;
-  if (!show) return;
-  if (!arenaLightPaths) rebuildArenaLightPaths();
-  if (now - show.t0 >= show.dur) {
-    arenaLightShow = null;
-    return;
-  }
-  const st = arenaShowProgress(show, now);
-  if (!(st.alpha > 0.02)) return;
-
-  const paths = arenaLightPaths;
-  const col = show.color;
-  const wLit = Math.max(2.2, 3.4 * RES_SCALE);
-  const wHead = Math.max(3.5, 5.5 * RES_SCALE);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-
-  const pathFrom = st.pathFrom != null ? st.pathFrom : 0;
-  const pathTo = st.pathTo != null ? st.pathTo : paths.length;
-  const respawnFocus = show.kind === 'respawn';
-
-  for (let pi = 0; pi < paths.length; pi++) {
-    // Respawn: prioritize spawn rings (paths 5-6) then axes then perimeter
-    let localFill = st.fill;
-    let active = true;
-    if (respawnFocus) {
-      const order = [6, 7, 1, 2, 3, 4, 5, 0, 8, 9, 10, 11];
-      const rank = order.indexOf(pi);
-      const r = rank < 0 ? 1 : rank / Math.max(1, order.length - 1);
-      if (st.phase === 'chase') {
-        const window = 0.35;
-        localFill = Math.max(0, Math.min(1, (st.fill - r * 0.65) / window));
-        active = localFill > 0;
-      }
-    } else {
-      if (pi < pathFrom) localFill = 1;
-      else if (pi >= pathTo) active = false;
-      else if (st.phase === 'chase') {
-        // Within current band, paths light in order
-        const band = Math.max(1, pathTo - pathFrom);
-        const idx = pi - pathFrom;
-        const r = idx / band;
-        const window = 0.55;
-        localFill = Math.max(0, Math.min(1, (st.fill - r * 0.7) / window));
-      } else {
-        localFill = 1;
-      }
-    }
-    if (!active) continue;
-
-    const P = paths[pi];
-    const litN = Math.max(0, Math.min(P.n, Math.ceil(localFill * P.n)));
-    if (litN < 1 && st.phase === 'chase') continue;
-
-    const aMul = st.alpha * st.blink;
-    const cGlow = [col[0] * aMul, col[1] * aMul, col[2] * aMul];
-    const drawUntil = st.phase === 'chase' ? litN : P.n;
-    for (let i = 0; i < drawUntil - 1; i++) {
-      drawThickSegment(P.x[i], P.y[i], P.x[i + 1], P.y[i + 1], wLit, cGlow);
-    }
-    // Chase head sparkle
-    if (st.phase === 'chase' && litN > 0 && litN <= P.n) {
-      const i = Math.min(P.n - 1, litN - 1);
-      const j = Math.min(P.n - 1, i + 1);
-      const hx = P.x[i], hy = P.y[i];
-      const nx = P.x[j], ny = P.y[j];
-      drawThickSegment(hx, hy, nx, ny, wHead, [Math.min(1, cGlow[0] + 0.35), Math.min(1, cGlow[1] + 0.35), Math.min(1, cGlow[2] + 0.35)]);
-      // Tiny cross
-      const s = 4 * RES_SCALE;
-      drawThickSegment(hx - s, hy, hx + s, hy, 1.5, COL_WHITE);
-      drawThickSegment(hx, hy - s, hx, hy + s, 1.5, COL_WHITE);
-    }
-  }
-
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  gl.disable(gl.BLEND);
-}
-
 function drawGridBaked() {
   if (!ensureGridBakeTexture()) return;
   const cells = (GRID_COLS - 1) * (GRID_ROWS - 1);
@@ -4775,7 +4205,7 @@ function drawGridBaked() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, bakeFilt);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, bakeFilt);
   gl.uniform1i(gbUTex, 0);
-  const useNebula = (practiceMode || !inGame) && ensureNebulaGLTexture();
+  const useNebula = ensureNebulaGLTexture();
   if (gbUNebula) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, useNebula ? gridNebulaGL : gridBakeTex);
@@ -8110,8 +7540,6 @@ function emitGodmodeStartFx(x, y) {
     color: COL.self,
     drag: 1.6
   });
-  const col = (myId != null) ? ownerPlayerColor(myId) : COL.self;
-  startArenaLightShow('respawn', col);
 }
 
 /** Kill credit spark for the scoring player. */
@@ -12441,7 +11869,6 @@ function showMatchIntro() {
   void matchIntroEl.offsetWidth;
   matchIntroEl.classList.add('show');
   matchIntroEl.setAttribute('aria-hidden', 'false');
-  startArenaLightShow('match', [0.85, 0.95, 1.0]);
   if (introHideTimer) clearTimeout(introHideTimer);
   introHideTimer = setTimeout(() => hideMatchIntro(false, { sendReady: true }), 3400);
 }
@@ -12467,7 +11894,6 @@ function applyMatchGo(msg) {
     waitBannerEl.textContent = 'Waiting for player...';
   }
   // Short confirm blink on go.
-  startArenaLightShow('respawn', [1.0, 0.92, 0.55]);
   if (msg.tick != null && msg.st != null) {
     syncTick = msg.tick | 0;
     syncSt = msg.st;
