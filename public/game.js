@@ -15354,8 +15354,8 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
     }
     const g = gridBlastBulletTrailOpts(vx, vy);
     if (g) pushGridShock(x, y, g);
-    // Same scale recipe as common enemy shots (visual only).
-    drawEnemyCommonShot(x, y, ang, 0.5, col);
+    // Half of common enemy shot scale (visual only; collision unchanged).
+    drawEnemyCommonShot(x, y, ang, 0.25, col);
     return null;
   }
   if (type === 'shotgun' && defaultTrail) {
