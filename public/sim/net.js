@@ -1,10 +1,38 @@
 /** @file server/net.js — loaded into shared server scope (do not require() alone). */
+
+/** One-way artificial delay (ms) for room sv_ping simulation. */
+function simPingOneWayMs(ws) {
+  const room = ws && ws.room;
+  const rtt = room && room.simPingMs | 0;
+  if (!(rtt > 0)) return 0;
+  return Math.max(0, Math.min(1000, (rtt / 2) | 0));
+}
+
+function sendRaw(ws, raw, opts) {
+  if (!ws || ws.readyState !== 1) return;
+  const immediate = !!(opts && opts.immediate);
+  const delay = immediate ? 0 : simPingOneWayMs(ws);
+  if (!delay) {
+    try { ws.send(raw); } catch (_) {}
+    return;
+  }
+  setTimeout(() => {
+    if (ws.readyState !== 1) return;
+    try { ws.send(raw); } catch (_) {}
+  }, delay);
+}
+
 function send(ws, msg) {
-  if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+  sendRaw(ws, JSON.stringify(msg));
+}
+
+/** Control-plane reply — never delayed by sv_ping. */
+function sendImmediate(ws, msg) {
+  sendRaw(ws, JSON.stringify(msg), { immediate: true });
 }
 
 function sendBinary(ws, buf) {
-  if (ws.readyState === 1) ws.send(buf);
+  sendRaw(ws, buf);
 }
 
 function initClientLimits(ws) {
@@ -298,7 +326,7 @@ function roomBroadcast(room, msg) {
   }
   const raw = JSON.stringify(msg);
   for (const ws of room.clients) {
-    if (ws.readyState === 1) ws.send(raw);
+    sendRaw(ws, raw);
   }
 }
 

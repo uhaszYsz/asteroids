@@ -1,4 +1,30 @@
 /** @file server/ws.js — loaded into shared server scope (do not require() alone). */
+
+/** Admin `sv_ping N` — simulate N ms RTT for the caller's room only (0 = off). */
+function handleSvPingCommand(ws, msg) {
+  if (!ws.isAdmin) {
+    sendImmediate(ws, { t: 'svPing', ok: 0, err: 'not admin' });
+    return;
+  }
+  const room = ws.room;
+  if (!room || (ws.state !== 'playing' && ws.state !== 'practice')) {
+    sendImmediate(ws, { t: 'svPing', ok: 0, err: 'not in a room' });
+    return;
+  }
+  let v = Number(msg && msg.v);
+  if (!Number.isFinite(v) || v < 0) v = 0;
+  if (v > 2000) v = 2000;
+  v = Math.round(v) | 0;
+  room.simPingMs = v;
+  for (const c of room.clients) {
+    if (v > 0) c.rttMs = v;
+  }
+  for (const c of room.clients) {
+    sendImmediate(c, { t: 'svPing', ok: 1, v, roomId: room.id });
+  }
+  console.log(`[sim] room ${room.id} sv_ping = ${v}ms`);
+}
+
 wss.on('connection', (ws) => {
   ws.state = 'lobby';
   ws.room = null;
@@ -29,6 +55,24 @@ wss.on('connection', (ws) => {
     try { msg = JSON.parse(raw); } catch { return; }
     if (!msg || typeof msg !== 'object' || msg.t == null) return;
 
+    // Room lag sim control — never delayed (so you can turn it off).
+    if (msg.t === 'svPing') {
+      handleSvPingCommand(ws, msg);
+      return;
+    }
+
+    const simDelay = simPingOneWayMs(ws);
+    if (simDelay > 0) {
+      setTimeout(() => {
+        if (ws.readyState !== 1) return;
+        dispatchWsClientMessage(ws, msg);
+      }, simDelay);
+      return;
+    }
+    dispatchWsClientMessage(ws, msg);
+  });
+
+  function dispatchWsClientMessage(ws, msg) {
     if (msg.t === 'adminLogin') {
       const pw = String(msg.pw == null ? '' : msg.pw);
       if (pw && pw === adminPassword) {
@@ -98,7 +142,10 @@ wss.on('connection', (ws) => {
     if (msg.t === 'ping') {
       // Pings are cheap; don't burn action cooldowns. Clamp fake RTT.
       const room = ws.room;
-      if (msg.rtt != null) {
+      if (room && (room.simPingMs | 0) > 0) {
+        // Forced simulated RTT for fire lead / status (client still measures via delayed pong).
+        ws.rttMs = room.simPingMs | 0;
+      } else if (msg.rtt != null) {
         const rtt = Number(msg.rtt);
         ws.rttMs = Number.isFinite(rtt) ? Math.max(0, Math.min(2000, rtt)) : 0;
       }
@@ -560,7 +607,7 @@ wss.on('connection', (ws) => {
     if (!pl) return;
     const frames = Array.isArray(msg.frames) ? msg.frames : [msg];
     enqueuePlayerInputs(ws, pl, frames);
-  });
+  }
 
   ws.on('close', () => {
     removeFromQueue(ws);

@@ -4267,14 +4267,15 @@ function playerCmdDelayTicks(room, playerId) {
 
 function playerPredictShootSteps(room, p) {
   // Practice / offline solo: zero latency — never lead fire away from the ship.
-  if (room && room.practice) return 0;
+  // Exception: room sv_ping sim should still apply ping-based lead.
+  if (room && room.practice && !(room.simPingMs > 0)) return 0;
   if (svDynamicPrediction) return pingBasedPredictLeadTicks(room, p);
   let n = p && p.predictShootStep != null ? (p.predictShootStep | 0) : 1;
   return clampPredictLeadTicks(n);
 }
 
 function playerPredictShootAngleSteps(room, p) {
-  if (room && room.practice) return 0;
+  if (room && room.practice && !(room.simPingMs > 0)) return 0;
   if (svDynamicPrediction) return pingBasedPredictLeadTicks(room, p);
   let n = p && p.predictShootAngle != null ? (p.predictShootAngle | 0) : 1;
   return clampPredictLeadTicks(n);
@@ -5194,7 +5195,8 @@ function packAdminStatus(ws) {
     deathBoomLeft: room.deathBoomLeft | 0,
     deathBoomed: !!room.deathBoomed,
     bullets: (room.bullets && room.bullets.length) || 0,
-    pickups: (room.pickups && room.pickups.length) || 0
+    pickups: (room.pickups && room.pickups.length) || 0,
+    simPingMs: room.simPingMs | 0
   };
 
   out.players = [];

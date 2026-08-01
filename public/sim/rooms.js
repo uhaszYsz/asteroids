@@ -78,7 +78,9 @@ function createRoom(opts) {
     pauseBurnId: null,
     pauseCountdown: 0,
     /** playerId -> { accountKey, name } while disconnected mid-match. */
-    pauseHold: new Map()
+    pauseHold: new Map(),
+    /** Admin sv_ping: simulated RTT (ms) for this room only. 0 = off. */
+    simPingMs: 0
   };
   syncAsteroidByAid(room);
   rooms.set(room.id, room);

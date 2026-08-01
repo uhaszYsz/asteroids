@@ -996,6 +996,11 @@ const CVARS = {
     def: 2,
     help: 'Server demos: 0=off, 1=PvP only, 2=PvP + matchmaking/coop wave rooms. Admin only. Global.'
   },
+  sv_ping: {
+    value: 0,
+    def: 0,
+    help: 'Simulate RTT (ms) for YOUR current room only (both directions). 0=off. Admin. e.g. sv_ping 200'
+  },
   sv_spawn_worm: {
     value: 0,
     def: 0,
@@ -1268,6 +1273,11 @@ function setCvar(name, raw) {
     c.value = Math.max(0, Math.min(2, n | 0));
     syncDemoCvar();
   }
+  if (name === 'sv_ping') {
+    c.value = Math.max(0, Math.min(2000, Math.round(n) | 0));
+    syncSvPingCvar();
+    return true;
+  }
   if (name === 'sv_spawn_worm') {
     c.value = 0;
     if ((n | 0) !== 0) {
@@ -1374,6 +1384,15 @@ function syncPortalCvar() {
 function syncDemoCvar() {
   if (!ws || ws.readyState !== 1) return;
   ws.send(JSON.stringify({ t: 'svDemo', v: cv('sv_demo') | 0 }));
+}
+
+/** Tell server room-scoped lag simulation (sv_ping). */
+function syncSvPingCvar() {
+  if (!ws || ws.readyState !== 1 || !consoleAdmin) return;
+  ws.send(JSON.stringify({
+    t: 'svPing',
+    v: Math.max(0, Math.min(2000, cv('sv_ping') | 0))
+  }));
 }
 
 /** Soft night/dyn lighting for entities — ship radial only (no flashlight cone). */
@@ -14187,6 +14206,8 @@ let pingMs = 0;
 let pingJitter = 0;
 /** Raw last pong RTT (ms). */
 let lastRttMs = 0;
+/** Room lag sim from server `svPing` (ms RTT). 0 = off. */
+let roomSimPingMs = 0;
 /** performance.now() — while active, skip local pose reconcile (status/ack still apply). */
 let rttSpikeUntil = 0;
 let syncTick = 0;
@@ -14204,6 +14225,7 @@ function resetClockSync() {
   pingMs = 0;
   pingJitter = 0;
   lastRttMs = 0;
+  roomSimPingMs = 0;
   rttSpikeUntil = 0;
   syncStPerf = 0;
 }
@@ -14211,7 +14233,8 @@ function resetClockSync() {
 function applyNtp(ct, st, serverTick) {
   // In-browser local host shares the JS thread with the sim. Date.now()/NTP
   // extrapolation races the setTimeout tick loop and floods input → solo lag.
-  if (isOfflineLocalPlay()) {
+  // Exception: room sv_ping sim must keep client RTT/interp aligned with the delay.
+  if (isOfflineLocalPlay() && !(roomSimPingMs > 0)) {
     pingMs = 0;
     pingJitter = 0;
     lastRttMs = 0;
@@ -14227,6 +14250,17 @@ function applyNtp(ct, st, serverTick) {
   const t3 = Date.now();
   const rtt = Math.max(0, t3 - ct);
   lastRttMs = rtt;
+  if (roomSimPingMs > 0) {
+    pingMs = roomSimPingMs;
+    pingJitter = Math.max(pingJitter * 0.9, Math.abs(rtt - roomSimPingMs) * 0.1);
+    clockOffsetReady = true;
+    if (!inGame || !syncSt) {
+      if (serverTick) syncTick = serverTick | 0;
+      syncSt = st;
+      syncStPerf = performance.now();
+    }
+    return;
+  }
   // Ignore one-off delayed pongs for ping AND clock (tab timers, GC, spikes).
   const baseline = pingMs > 0 ? pingMs : 30;
   const saneRtt = rtt < baseline * 4 + 80;
@@ -20305,6 +20339,24 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'svDemo') {
       if (CVARS.sv_demo) CVARS.sv_demo.value = msg.v | 0;
+      return;
+    }
+    if (msg.t === 'svPing') {
+      if (!msg.ok) {
+        if (msg.err) conPrint('sv_ping: ' + msg.err, 'err');
+        return;
+      }
+      const v = Math.max(0, Math.min(2000, msg.v | 0));
+      roomSimPingMs = v;
+      if (CVARS.sv_ping) CVARS.sv_ping.value = v;
+      // Snap client RTT/interp to the simulated value immediately.
+      if (v > 0) {
+        pingMs = v;
+        lastRttMs = v;
+        pingJitter = Math.max(pingJitter, 2);
+      }
+      conPrint(v > 0 ? `sv_ping ${v}ms (this room)` : 'sv_ping off', 'info');
+      updateHud();
       return;
     }
     if (msg.t === 'svDynamicPrediction') {
