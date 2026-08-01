@@ -10455,7 +10455,7 @@ const spriteShipFS = `
     // Impact flash: red center → yellow edges, soft rim, fades over uHitAge 0→1.
     if (uHitAge < 0.999) {
       float d = length(vLocal - uHitLocal);
-      float rad = 0.434; // ~30% smaller than 0.62
+      float rad = 0.304; // ~30% smaller again from 0.434
       // Color: red at center, yellow toward edge.
       float tCol = smoothstep(0.0, rad * 0.92, d);
       vec3 hot = mix(vec3(1.0, 0.08, 0.02), vec3(1.0, 0.95, 0.18), tCol);
