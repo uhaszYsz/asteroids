@@ -1470,8 +1470,6 @@ const COL = {
   powerTurret: [0.95, 0.85, 0.3],
   powerShield: [0.4, 0.85, 1.0],
   powerHoming: [1.0, 0.55, 0.2],
-  powerLead: [0.55, 1.0, 0.75],
-  powerEmp: [0.85, 0.95, 1.0],
   powerReload: [0.45, 1.0, 0.4],
   enemy: [1.0, 0.55, 0.25],
   enemyUfo: [0.55, 1.0, 0.65],
@@ -5484,8 +5482,6 @@ function powerupLetter(name) {
     case 'turret': return 'T';
     case 'shield': return 'S';
     case 'homing': return 'H';
-    case 'lead': return 'L';
-    case 'emp': return 'E';
     case 'reload': return 'R';
     default: return '?';
   }
@@ -5504,10 +5500,6 @@ const POWERUP_ORBIT = {
   shield: { text: 'S', pattern: 'cube8', orbit: 'cube', textScale: 0.82, orbitR: 1.08 },
   // 8 equatorial ring — flat ring cage
   homing: { text: 'H', pattern: 'ring8', orbit: 'ring', textScale: 0.88, orbitR: 1.12 },
-  // Full short name on 6 faces — irregular cage
-  lead: { text: 'LEAD', pattern: 'cube6', orbit: 'irregular', textScale: 0.46, orbitR: 1.14 },
-  // Full EMP on triangular-prism verts — prism cage
-  emp: { text: 'EMP', pattern: 'triPrism6', orbit: 'prism', textScale: 0.5, orbitR: 1.12 },
   // 10 = ring8 + poles — hex cage
   reload: { text: 'R', pattern: 'ring8poles', orbit: 'hex', textScale: 0.8, orbitR: 1.08 }
 };
@@ -5788,46 +5780,6 @@ function buildTetrahedronMesh() {
   return finalizePowerupMesh(verts, faces);
 }
 
-/** Distorted cube (8 verts) — lead. */
-function buildIrregular8Mesh() {
-  const verts = [
-    [-0.95, -0.82, -1.05],
-    [1.12, -0.70, -0.88],
-    [0.78, 1.18, -0.95],
-    [-1.05, 0.90, -0.72],
-    [-0.88, -1.10, 0.95],
-    [1.05, -0.85, 1.12],
-    [0.92, 0.98, 0.78],
-    [-0.75, 1.05, 1.15]
-  ];
-  const faces = [
-    [0, 1, 2], [0, 2, 3],
-    [4, 6, 5], [4, 7, 6],
-    [0, 4, 5], [0, 5, 1],
-    [2, 6, 7], [2, 7, 3],
-    [0, 3, 7], [0, 7, 4],
-    [1, 5, 6], [1, 6, 2]
-  ];
-  return finalizePowerupMesh(verts, faces);
-}
-
-/** Triangular prism — emp. */
-function buildTriPrismMesh() {
-  const s = Math.sqrt(3) * 0.5;
-  const verts = [
-    [1, 0, 0.85], [-0.5, s, 0.85], [-0.5, -s, 0.85],
-    [1, 0, -0.85], [-0.5, s, -0.85], [-0.5, -s, -0.85]
-  ];
-  const faces = [
-    [0, 1, 2],
-    [3, 5, 4],
-    [0, 3, 4], [0, 4, 1],
-    [1, 4, 5], [1, 5, 2],
-    [2, 5, 3], [2, 3, 0]
-  ];
-  return finalizePowerupMesh(verts, faces);
-}
-
 /** Hexagonal bipyramid (8 verts) — reload. */
 function buildHexBipyramidMesh() {
   const verts = [[0, 0, 1.15], [0, 0, -1.15]];
@@ -5856,8 +5808,6 @@ const POWERUP_SHAPE_MESH = {
   turret: null, // sphere LODs
   shield: buildCubeMesh(),
   homing: buildTetrahedronMesh(),
-  lead: buildIrregular8Mesh(),
-  emp: buildTriPrismMesh(),
   reload: buildHexBipyramidMesh()
 };
 
@@ -5877,9 +5827,7 @@ const POWERUP_RING_ORBIT_MESH = buildRingOrbitMesh();
 function powerupOrbitShellMesh(orbit) {
   if (orbit === 'cube') return POWERUP_SHAPE_MESH.shield;
   if (orbit === 'octa') return POWERUP_SHAPE_MESH.damage;
-  if (orbit === 'prism') return POWERUP_SHAPE_MESH.emp;
   if (orbit === 'hex') return POWERUP_SHAPE_MESH.reload;
-  if (orbit === 'irregular') return POWERUP_SHAPE_MESH.lead;
   if (orbit === 'ring') return POWERUP_RING_ORBIT_MESH;
   return POWERUP_SPHERE_LODS[0];
 }
@@ -11538,7 +11486,7 @@ const serverGhost = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, av:
 /** performance.now() deadline — skip tight drift-snap so tab-resume can soft-blend. */
 let resumeBlendUntil = 0;
 
-const POWERUP_TYPES = ['damage', 'turret', 'shield', 'homing', 'lead', 'emp', 'reload'];
+const POWERUP_TYPES = ['damage', 'turret', 'shield', 'homing', 'reload'];
 const PICKUP_CODE_POWERUP_BASE = 100;
 /** Match server: weapon/powerup crates bounce this many times, then drift off. */
 const PICKUP_BOUNCE_MAX = 3;
@@ -11549,8 +11497,6 @@ function freshPowerups() {
     turret: false,
     shield: false,
     homing: false,
-    lead: false,
-    emp: false,
     reload: false
   };
 }
@@ -11559,8 +11505,6 @@ function powerupColor(name) {
   if (name === 'turret') return COL.powerTurret;
   if (name === 'shield') return COL.powerShield;
   if (name === 'homing') return COL.powerHoming;
-  if (name === 'lead') return COL.powerLead;
-  if (name === 'emp') return COL.powerEmp;
   if (name === 'reload') return COL.powerReload;
   return COL.pickup;
 }
@@ -11814,9 +11758,6 @@ function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
     const yaw = turretYawSmoothed(ownerId, target, dt);
     drawTurret3D(x, y, yaw, COL.powerTurret);
   }
-  if (ownerId === myId && ownerHasPowerup(ownerId, 'lead')) {
-    drawLeadIndicator(x, y);
-  }
 }
 
 /** Bullet speed (px/tick) for the weapon currently held — used by lead indicator. */
@@ -11857,30 +11798,6 @@ function leadInterceptPoint(ox, oy, tx, ty, tvx, tvy, speed) {
   }
   if (t == null || !(t > 0)) return { x: ox + dx, y: oy + dy };
   return { x: ox + dx + tvx * t, y: oy + dy + tvy * t };
-}
-
-function drawLeadIndicator(ox, oy) {
-  let best = null;
-  let bestD2 = Infinity;
-  for (const r of remotes.values()) {
-    if (r.hp <= 0) continue;
-    const v = remoteView(r);
-    const dx = v.x - ox;
-    const dy = v.y - oy;
-    const d2 = dx * dx + dy * dy;
-    if (d2 < bestD2) {
-      bestD2 = d2;
-      best = v;
-    }
-  }
-  if (!best) return;
-  const spd = currentWeaponBulletSpeed();
-  const p = leadInterceptPoint(ox, oy, best.x, best.y, best.vx || 0, best.vy || 0, spd);
-  const col = COL.powerLead;
-  const s = 5 * RES_SCALE;
-  drawThickSegment(p.x - s, p.y, p.x + s, p.y, 1.5 * RES_SCALE, col);
-  drawThickSegment(p.x, p.y - s, p.x, p.y + s, 1.5 * RES_SCALE, col);
-  drawThickLoop(circleVerts(p.x, p.y, 3.5 * RES_SCALE, 16), col, 1.2 * RES_SCALE);
 }
 
 let myId = null;
@@ -20886,22 +20803,6 @@ function handleWsMessage(e) {
       player.collideCd = COLLIDE_IFRAME_TICKS;
       softErr.x = 0; softErr.y = 0; softErr.angle = 0;
       if (!alreadyFelt) emitPlayerAsteroidHit(player.x, player.y);
-      updateHud();
-      return;
-    }
-    if (msg.t === 'empHit' && inGame && msg.you) {
-      const y = msg.you;
-      player.x = y[0]; player.y = y[1];
-      player.vx = y[2]; player.vy = y[3];
-      player.angle = y[4];
-      player.av = y[5];
-      if (y[6] != null) player.hp = y[6];
-      player.stunned = !!y[7];
-      player.turnDecelStep = 0;
-      player.turnDecelLeft = 0;
-      player.turnDecelRev = 0;
-      softErr.x = 0; softErr.y = 0; softErr.angle = 0;
-      pushFxRing(player.x, player.y, COL.powerEmp, { r0: 4, r1: 28, life: 280 });
       updateHud();
       return;
     }

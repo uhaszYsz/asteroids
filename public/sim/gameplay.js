@@ -2781,8 +2781,6 @@ function resolveAdminGiveItem(raw) {
     turret: 'turret',
     shield: 'shield',
     homing: 'homing',
-    lead: 'lead',
-    emp: 'emp',
     reload: 'reload'
   };
   if (powerAlias[s]) return { kind: 'powerup', name: powerAlias[s] };
@@ -2850,7 +2848,7 @@ function handleAdminGive(ws, itemRaw) {
   if (!item) {
     return {
       ok: 0,
-      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield homing lead emp reload | admingun'
+      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield homing reload | admingun'
     };
   }
 
@@ -4687,7 +4685,6 @@ function fireLaser(room, p, weaponName) {
   });
   if (hit.kind === 'player') {
     dealDamageToPlayer(room, hit.target, dmg, p.id);
-    tryEmpStun(room, p, hit.target, name, null);
   } else if (hit.kind === 'asteroid') {
     damageAsteroid(room, hit.target, dmg, p.id);
   } else if (hit.kind === 'enemy') {
@@ -4729,7 +4726,6 @@ function fireThrustRay(room, p) {
   });
   if (hit.kind === 'player') {
     dealDamageToPlayer(room, hit.target, dmg, p.id);
-    tryEmpStun(room, p, hit.target, 'thrust', null);
   } else if (hit.kind === 'asteroid') {
     damageAsteroid(room, hit.target, dmg, p.id);
   } else if (hit.kind === 'enemy') {
@@ -4912,7 +4908,6 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
       : dmg;
     if (h.kind === 'player') {
       dealDamageToPlayer(room, h.target, pdmg, p.id);
-      tryEmpStun(room, p, h.target, 'railgun', null);
     } else if (h.kind === 'enemy') {
       damageEnemy(room, h.target, pdmg);
     }
@@ -5667,7 +5662,6 @@ function updateBullets(room) {
           if (owner && playerHasPowerup(owner, 'damage')) d *= DAMAGE_POWERUP_MULT;
           dealDamageToPlayer(room, p, d, b.owner | 0);
           voidScramblePlayerAim(p, 4);
-          if (owner) tryEmpStun(room, owner, p, 'voidcannon', b);
           roomBroadcast(room, { t: 'vd', k: 'p', id: p.id | 0, x: p.x, y: p.y });
         });
       }
@@ -5739,8 +5733,6 @@ function updateBullets(room) {
       if (b.type === 'rocket') {
         if (b.noBlast) dealDamageToPlayer(room, p, b.dmg || 30, b.owner | 0);
         detonateRocket(room, b, 1);
-        const owner = players.get(b.owner);
-        if (owner) tryEmpStun(room, owner, p, 'rocket', b);
       } else if (b.type === 'enemyRocket') {
         // UFO micro-rocket: damage + asteroid-style stun / bounce.
         let nx = b.vx || 0, ny = b.vy || 0;
@@ -5757,8 +5749,6 @@ function updateBullets(room) {
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 1, x: b.x, y: b.y });
       } else {
         dealDamageToPlayer(room, p, b.dmg, b.owner | 0);
-        const owner = players.get(b.owner);
-        if (owner) tryEmpStun(room, owner, p, b.type || 'default', b);
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 1, x: b.x, y: b.y });
       }
       if (room.roundResetting) return; // death already wiped bullets

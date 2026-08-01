@@ -194,8 +194,6 @@ function freshPowerups() {
     turret: false,
     shield: false,
     homing: false,
-    lead: false,
-    emp: false,
     reload: false
   };
 }
@@ -265,64 +263,6 @@ function resetTurretState(p) {
   p.turretRetry = 0;
 }
 
-/** Magazine size used for EMP proc chance (chance = 1 / ammo). */
-function empMagazineAmmo(attacker, typeName) {
-  if (typeName === 'turret') return turretMaxAmmo(attacker);
-  // Ex-melee magazine size (1/100 EMP chance while thrusting).
-  if (typeName === 'thrust') return 100;
-  const wpn = typeName && WEAPONS[typeName] ? typeName : (attacker && attacker.weapon) || 'default';
-  const w = effectiveWeapon(attacker, wpn);
-  return Math.max(1, w.ammo | 0);
-}
-
-/**
- * EMP stun: keep velocity direction, clamp to stun speed cap, spin like asteroid hit.
- * No bounce / no extra damage.
- */
-function applyEmpStun(room, p, spinDir) {
-  if (!p || p.hp <= 0 || p.godLeft > 0) return;
-  const spd = Math.hypot(p.vx, p.vy);
-  if (spd > STUN_MAX_SPEED && spd > 1e-6) {
-    const s = STUN_MAX_SPEED / spd;
-    p.vx *= s;
-    p.vy *= s;
-  }
-  p.stunned = true;
-  const dir = spinDir >= 0 ? 1 : -1;
-  p.av = dir * STUN_SPIN;
-  p.turnDecelStep = 0;
-  p.turnDecelLeft = 0;
-  p.turnDecelRev = 0;
-  notifyEmpStun(room, p);
-}
-
-function notifyEmpStun(room, p) {
-  for (const ws of room.clients) {
-    if (ws.playerId === p.id && ws.readyState === 1) {
-      send(ws, {
-        t: 'empHit',
-        you: [p.x, p.y, p.vx, p.vy, p.angle, p.av, p.hp, 1]
-      });
-      break;
-    }
-  }
-}
-
-/** Roll EMP on a successful hit from attacker → victim. */
-function tryEmpStun(room, attacker, victim, typeName, bullet) {
-  if (!playerHasPowerup(attacker, 'emp')) return;
-  if (!victim || victim.hp <= 0 || victim.godLeft > 0) return;
-  const ammo = empMagazineAmmo(attacker, typeName);
-  if (Math.random() >= 1 / ammo) return;
-  let spinDir = Math.random() < 0.5 ? 1 : -1;
-  if (bullet) {
-    const dx = shortestWrapDelta(bullet.x, victim.x, W);
-    const dy = shortestWrapDelta(bullet.y, victim.y, H);
-    const cross = dx * (bullet.vy || 0) - dy * (bullet.vx || 0);
-    spinDir = cross >= 0 ? 1 : -1;
-  }
-  applyEmpStun(room, victim, spinDir);
-}
 const THRUST = 0.09 * RES_SCALE * 1.15 * 1.2 * 1.2 * 0.85;  // prior buffs, then −15%
 const MAX_SPEED = 8 * RES_SCALE * 0.8 * 0.75 * 0.75;   // −25%, then −25% again
 /** Above MAX_SPEED: shed this much speed per second (no hard clip). */
@@ -567,7 +507,7 @@ const HEALTH_PICKUP_HEAL = 30;
 /** Pickup type codes in network packs: 1+ weapons by slot, 99 health, 100+ powerups.
  *  Pickups = collectible items (weapon or health). Powerups are slotted buffs (one each). */
 const PICKUP_CODE_HEALTH = 99;
-const POWERUP_TYPES = ['damage', 'turret', 'shield', 'homing', 'lead', 'emp', 'reload'];
+const POWERUP_TYPES = ['damage', 'turret', 'shield', 'homing', 'reload'];
 const PICKUP_CODE_POWERUP_BASE = 100;
 /** Turret auto-gun (mounted powerup). */
 const TURRET_AMMO = 3;
