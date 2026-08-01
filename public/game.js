@@ -11573,6 +11573,7 @@ function bulletDrawColor(type, ownerId) {
   if (type === 'plasma') return COL.plasma;
   if (type === 'voidcannon') return COL.voidcannon;
   if (type === 'turret') return COL.powerTurret;
+  if (type === 'default' || !type) return ownerShootColor(ownerId);
   return COL.bullet;
 }
 function drawShieldFx(x, y) {
@@ -15233,15 +15234,15 @@ function enemyShotCoreRadius(type, length, width) {
     * ENEMY_SHOT_VIS_SCALE * ENEMY_SHOT_HIT_FRAC;
 }
 
-function drawEnemyCommonShot(x, y, ang, scale) {
+function drawEnemyCommonShot(x, y, ang, scale, glowColor) {
   const s = (scale > 0 ? scale : 1) * ENEMY_SHOT_VIS_SCALE;
-  const red = COL.enemyBullet || [1.0, 0.18, 0.12];
+  const glow = glowColor || COL.enemyBullet || [1.0, 0.18, 0.12];
   const glowR = ENEMY_SHOT_GLOW_BASE * s;
   const coreR = ENEMY_SHOT_CORE_BASE * s;
-  // Solid red under the white core footprint; alpha fades only outside the core.
+  // Solid glow under the white core footprint; alpha fades only outside the core.
   const glowInner = Math.min(0.95, coreR / Math.max(glowR, 1e-6));
   // Additive glow: full mask under/at core edge, fade outside; 0.6 overall strength.
-  drawSoftOval(x, y, 0, glowR, glowR, red, 0.6, true, glowInner);
+  drawSoftOval(x, y, 0, glowR, glowR, glow, 0.6, true, glowInner);
   // Near-solid white disc (tiny AA rim) — matches ENEMY_SHOT_HIT_FRAC.
   drawSoftOval(x, y, 0, coreR, coreR, COL_WHITE, 1, false, ENEMY_SHOT_HIT_FRAC);
 }
@@ -15326,7 +15327,38 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
     drawEnemyCommonShot(x, y, ang, scale);
     return null;
   }
-  if ((type === 'default' || !type || type === 'shotgun') && defaultTrail) {
+  // Default gun: enemy-style softOval (glow + white core). Collision unchanged (server size).
+  if (type === 'default' || !type) {
+    const col = bulletDrawColor('default', ownerId);
+    if (defaultTrail) {
+      emitParticles({
+        x: x - Math.cos(ang) * 2 * RES_SCALE,
+        y: y - Math.sin(ang) * 2 * RES_SCALE,
+        count: 1,
+        speed: 25 * RES_SCALE,
+        speedSpread: 12 * RES_SCALE,
+        direction: ang + Math.PI,
+        spread: 0.35,
+        size: 1.4 * RES_SCALE,
+        sizeSpread: 0.6 * RES_SCALE,
+        scaleY: 1.5,
+        sizeWiggle: 0.2,
+        sizeWiggleSpeed: 14,
+        lifetime: 0.2,
+        lifetimeSpread: 0.1,
+        color: col,
+        drag: 3.2,
+        inheritVx: vx * 0.1,
+        inheritVy: vy * 0.1
+      });
+    }
+    const g = gridBlastBulletTrailOpts(vx, vy);
+    if (g) pushGridShock(x, y, g);
+    // Same scale recipe as common enemy shots (visual only).
+    drawEnemyCommonShot(x, y, ang, 0.5, col);
+    return null;
+  }
+  if (type === 'shotgun' && defaultTrail) {
     emitParticles({
       x: x - Math.cos(ang) * 2 * RES_SCALE,
       y: y - Math.sin(ang) * 2 * RES_SCALE,
@@ -15348,7 +15380,7 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
       inheritVy: vy * 0.1
     });
   }
-  if (type === 'default' || !type || type === 'shotgun') {
+  if (type === 'shotgun') {
     const g = gridBlastBulletTrailOpts(vx, vy);
     if (g) pushGridShock(x, y, g);
   }
