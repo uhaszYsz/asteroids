@@ -964,12 +964,12 @@ const CVARS = {
   cl_ghost_bullet: {
     value: 0,
     def: 0,
-    help: '1 = spawn local ghost bullets at shoot (local aim/time), alpha 0.6 red. Local collide + despawn off-screen.'
+    help: '1 = local predictive shots look like normal bullets; server bullets draw as red α0.6 ghosts.'
   },
   cl_bullets_hide: {
     value: 0,
     def: 0,
-    help: '1 = hide server/network bullets (draw only). Ghost bullets still show if cl_ghost_bullet is on.'
+    help: '1 = hide server/network bullets only. Local predictive shots still draw if cl_ghost_bullet is on.'
   },
   cl_muzzle: {
     value: 1,
@@ -6841,7 +6841,7 @@ const GHOST_BULLET_COL = [1.0, 0.12, 0.08];
 const ghostBullets = [];
 const GHOST_BULLET_MAX = 96;
 
-function spawnGhostBullet(x, y, angle, speed, radius) {
+function spawnGhostBullet(x, y, angle, speed, radius, type) {
   if (ghostBullets.length >= GHOST_BULLET_MAX) ghostBullets.shift();
   const spd = Math.max(0.05, +speed || 0);
   ghostBullets.push({
@@ -6849,11 +6849,12 @@ function spawnGhostBullet(x, y, angle, speed, radius) {
     y: +y,
     vx: Math.cos(angle) * spd,
     vy: Math.sin(angle) * spd,
-    r: Math.max(0.8 * RES_SCALE, +radius || 2 * RES_SCALE)
+    r: Math.max(0.8 * RES_SCALE, +radius || 2 * RES_SCALE),
+    type: type || 'default'
   });
 }
 
-/** Ghost projectiles at local muzzle/aim the instant a local shot FX fires. */
+/** Local predictive projectiles at muzzle/aim the instant a local shot FX fires. */
 function spawnGhostBulletsForLocalShot() {
   if ((cv('cl_ghost_bullet') | 0) === 0) return;
   const name = currentWeaponName();
@@ -6872,29 +6873,29 @@ function spawnGhostBulletsForLocalShot() {
     for (let i = 0; i < n; i++) {
       const t = n <= 1 ? 0.5 : i / (n - 1);
       const a = ang - spreadRad * 0.5 + spreadRad * t;
-      spawnGhostBullet(m.x, m.y, a, lo + (hi - lo) * t, 2 * RES_SCALE);
+      spawnGhostBullet(m.x, m.y, a, lo + (hi - lo) * t, 2 * RES_SCALE, 'shotgun');
     }
     return;
   }
   if (name === 'rocket') {
     const spd = w.launchSpeed != null ? w.launchSpeed : (w.speed || 15);
-    spawnGhostBullet(m.x, m.y, ang, spd, 4 * RES_SCALE);
+    spawnGhostBullet(m.x, m.y, ang, spd, 4 * RES_SCALE, 'rocket');
     return;
   }
   if (name === 'plasma') {
-    spawnGhostBullet(m.x, m.y, ang, w.speed || (9 * RES_SCALE * 1.7), 3 * RES_SCALE);
+    spawnGhostBullet(m.x, m.y, ang, w.speed || (9 * RES_SCALE * 1.7), 3 * RES_SCALE, 'plasma');
     return;
   }
   if (name === 'voidcannon') {
     let size = 27 * RES_SCALE;
     if (lvl >= 3) size *= 1.3;
-    spawnGhostBullet(m.x, m.y, ang, w.speed || (2.1504 * RES_SCALE), size * 0.45);
+    spawnGhostBullet(m.x, m.y, ang, w.speed || (2.1504 * RES_SCALE), size * 0.45, 'voidcannon');
     return;
   }
   // Default blaster (L2 = 2× hit size).
   let size = 2 * RES_SCALE;
   if (lvl >= 2) size *= 2;
-  spawnGhostBullet(m.x, m.y, ang, w.speed || 13.5, size);
+  spawnGhostBullet(m.x, m.y, ang, w.speed || 13.5, size, 'default');
 }
 
 function ghostBulletCollides(g) {
@@ -6958,16 +6959,35 @@ function updateGhostBullets(dtSec) {
   }
 }
 
+function drawGhostBulletOval(x, y, r) {
+  const coreR = Math.max(1.2 * RES_SCALE, r);
+  const glowR = coreR * 1.75;
+  drawSoftOval(x, y, 0, glowR, glowR, GHOST_BULLET_COL, 0.36, true, 0.55);
+  drawSoftOval(x, y, 0, coreR, coreR, GHOST_BULLET_COL, 0.6, false, 0.88);
+}
+
+/** Local predictive shots — drawn as normal bullets when cl_ghost_bullet is on. */
 function renderGhostBullets() {
   if ((cv('cl_ghost_bullet') | 0) === 0 || !ghostBullets.length) return;
+  const defaultTrail = ((performance.now() / 32) | 0) % 2 === 0;
+  const normal = [];
+  const plasmaPts = [];
   for (let i = 0; i < ghostBullets.length; i++) {
     const g = ghostBullets[i];
     if (g.x < 0 || g.x > W || g.y < 0 || g.y > H) continue;
-    const coreR = Math.max(1.2 * RES_SCALE, g.r);
-    const glowR = coreR * 1.75;
-    drawSoftOval(g.x, g.y, 0, glowR, glowR, GHOST_BULLET_COL, 0.36, true, 0.55);
-    drawSoftOval(g.x, g.y, 0, coreR, coreR, GHOST_BULLET_COL, 0.6, false, 0.88);
+    const ang = Math.atan2(g.vy, g.vx);
+    const type = g.type || 'default';
+    const sizeOpts = (type === 'default' || type === 'voidcannon') ? { size: g.r } : null;
+    const pt = drawBulletVisual(
+      type, g.x, g.y, ang, g.vx, g.vy, defaultTrail, null, myId, sizeOpts
+    );
+    if (pt) {
+      if (type === 'plasma') plasmaPts.push(pt);
+      else normal.push(pt);
+    }
   }
+  if (normal.length) drawPoints(normal, COL.bullet);
+  if (plasmaPts.length) drawPoints(plasmaPts, COL.plasma);
 }
 
 function emitHitFx(x, y, color) {
@@ -19845,64 +19865,83 @@ function drawBulletHitboxes() {
 
 function renderBullets() {
   pruneBullets();
-  const normal = [];
-  const plasmaPts = [];
-  const rainbowPts = [];
-  const turretPts = [];
-  // Default trail runs every other frame so it stays lighter than rockets.
-  const defaultTrail = ((performance.now() / 32) | 0) % 2 === 0;
+  const hideServer = (cv('cl_bullets_hide') | 0) !== 0;
+  const serverAsGhost = (cv('cl_ghost_bullet') | 0) !== 0;
 
-  // Pass 1: glowing enemy shots → low-res FBO (pro BULLET_INTERNAL_RESOLUTION style).
-  let anyGlow = false;
-  for (const b of bullets.values()) {
-    if (isEnemyGlowBulletType(b.type)) { anyGlow = true; break; }
-  }
-  if (anyGlow) {
-    beginEnemyGlowBulletLayer();
-    for (const b of bullets.values()) {
-      if (!isEnemyGlowBulletType(b.type)) continue;
-      const p = bulletAt(b);
-      const vx = p.vx != null ? p.vx : b.vx;
-      const vy = p.vy != null ? p.vy : b.vy;
-      const ang = Math.atan2(vy, vx);
-      if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
-      drawBulletVisual(
-        b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner,
-        (b.length != null || b.width != null) ? { length: b.length, width: b.width } : null
-      );
+  if (!hideServer) {
+    if (serverAsGhost) {
+      // Server bullets as red α0.6 ghosts; local predictive shots draw as normals below.
+      for (const b of bullets.values()) {
+        const t = b.type || 'default';
+        if (t === 'laser' || t === 'railgun' || t === 'thrust') continue;
+        const p = bulletAt(b);
+        if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+        drawGhostBulletOval(p.x, p.y, bulletHitDebugRadius(b));
+      }
+      drawBulletHitboxes();
+    } else {
+      const normal = [];
+      const plasmaPts = [];
+      const rainbowPts = [];
+      const turretPts = [];
+      // Default trail runs every other frame so it stays lighter than rockets.
+      const defaultTrail = ((performance.now() / 32) | 0) % 2 === 0;
+
+      // Pass 1: glowing enemy shots → low-res FBO (pro BULLET_INTERNAL_RESOLUTION style).
+      let anyGlow = false;
+      for (const b of bullets.values()) {
+        if (isEnemyGlowBulletType(b.type)) { anyGlow = true; break; }
+      }
+      if (anyGlow) {
+        beginEnemyGlowBulletLayer();
+        for (const b of bullets.values()) {
+          if (!isEnemyGlowBulletType(b.type)) continue;
+          const p = bulletAt(b);
+          const vx = p.vx != null ? p.vx : b.vx;
+          const vy = p.vy != null ? p.vy : b.vy;
+          const ang = Math.atan2(vy, vx);
+          if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+          drawBulletVisual(
+            b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner,
+            (b.length != null || b.width != null) ? { length: b.length, width: b.width } : null
+          );
+        }
+        endEnemyGlowBulletLayer();
+      }
+
+      // Pass 2: everything else on the main framebuffer.
+      for (const b of bullets.values()) {
+        if (isEnemyGlowBulletType(b.type)) continue;
+        const p = bulletAt(b);
+        const vx = p.vx != null ? p.vx : b.vx;
+        const vy = p.vy != null ? p.vy : b.vy;
+        const ang = Math.atan2(vy, vx);
+        if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+        const sizeOpts = {};
+        if (b.length != null) sizeOpts.length = b.length;
+        if (b.width != null) sizeOpts.width = b.width;
+        if (b.size != null) sizeOpts.size = b.size;
+        const pt = drawBulletVisual(
+          b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner,
+          (sizeOpts.length != null || sizeOpts.width != null || sizeOpts.size != null) ? sizeOpts : null
+        );
+        if (pt) {
+          const rainbow = ownerHasDamagePowerup(b.owner) && DAMAGE_RAINBOW_TYPES.has(b.type || 'default');
+          if (rainbow) rainbowPts.push(pt);
+          else if (b.type === 'plasma') plasmaPts.push(pt);
+          else if (b.type === 'turret') turretPts.push(pt);
+          else normal.push(pt);
+        }
+      }
+      if (normal.length) drawPoints(normal, COL.bullet);
+      if (turretPts.length) drawPoints(turretPts, COL.powerTurret);
+      if (plasmaPts.length) drawPoints(plasmaPts, COL.plasma);
+      if (rainbowPts.length) drawPoints(rainbowPts, damageRainbowColor());
+      drawBulletHitboxes();
     }
-    endEnemyGlowBulletLayer();
   }
 
-  // Pass 2: everything else on the main framebuffer.
-  for (const b of bullets.values()) {
-    if (isEnemyGlowBulletType(b.type)) continue;
-    const p = bulletAt(b);
-    const vx = p.vx != null ? p.vx : b.vx;
-    const vy = p.vy != null ? p.vy : b.vy;
-    const ang = Math.atan2(vy, vx);
-    if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
-    const sizeOpts = {};
-    if (b.length != null) sizeOpts.length = b.length;
-    if (b.width != null) sizeOpts.width = b.width;
-    if (b.size != null) sizeOpts.size = b.size;
-    const pt = drawBulletVisual(
-      b.type, p.x, p.y, ang, vx, vy, defaultTrail, b.id, b.owner,
-      (sizeOpts.length != null || sizeOpts.width != null || sizeOpts.size != null) ? sizeOpts : null
-    );
-    if (pt) {
-      const rainbow = ownerHasDamagePowerup(b.owner) && DAMAGE_RAINBOW_TYPES.has(b.type || 'default');
-      if (rainbow) rainbowPts.push(pt);
-      else if (b.type === 'plasma') plasmaPts.push(pt);
-      else if (b.type === 'turret') turretPts.push(pt);
-      else normal.push(pt);
-    }
-  }
-  if (normal.length) drawPoints(normal, COL.bullet);
-  if (turretPts.length) drawPoints(turretPts, COL.powerTurret);
-  if (plasmaPts.length) drawPoints(plasmaPts, COL.plasma);
-  if (rainbowPts.length) drawPoints(rainbowPts, damageRainbowColor());
-  drawBulletHitboxes();
+  // Local predictive shots — never affected by cl_bullets_hide.
   renderGhostBullets();
 }
 
