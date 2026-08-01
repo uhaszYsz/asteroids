@@ -11601,12 +11601,18 @@ function bulletDrawColor(type, ownerId) {
   if (type === 'default' || !type) return ownerShootColor(ownerId);
   return COL.bullet;
 }
-function drawShieldFx(x, y) {
-  const col = COL.powerShield;
-  const rad = 14 * RES_SCALE;
-  const pulse = 1 + 0.06 * Math.sin(performance.now() * 0.008);
-  drawThickLoop(circleVerts(x, y, rad * pulse, 36), col, 2 * RES_SCALE);
-  drawThickLoop(circleVerts(x, y, rad * pulse * 0.72, 28), col, 1.2 * RES_SCALE);
+/** Shield pickup: charge-noise 3D sphere around ship (no load embers). */
+function drawShieldFx(x, y, shipAngle) {
+  const now = performance.now();
+  const tSec = now * 0.001;
+  // Breathe at ±10% of size per second peak rate: r = base * exp(0.1 * sin(t)).
+  const baseR = 14 * RES_SCALE;
+  const radius = baseR * Math.exp(0.1 * Math.sin(tSec));
+  const spin = now * 0.007;
+  drawEnemyChargeSphere(x, y, radius, shipAngle || 0, spin, COL.powerShield, 0.5, {
+    chargeT: 0.55,
+    noCore: true
+  });
 }
 /** Match server turret projectile speed for visual lead aim. */
 const TURRET_VIS_SPEED = 8 * RES_SCALE;
@@ -11786,7 +11792,7 @@ function drawTurret3D(x, y, aimAng, color) {
   }
 }
 function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
-  if (ownerHasPowerup(ownerId, 'shield')) drawShieldFx(x, y);
+  if (ownerHasPowerup(ownerId, 'shield')) drawShieldFx(x, y, shipAngle);
   if (ownerHasPowerup(ownerId, 'turret')) {
     const aim = turretAimAngle(ownerId, x, y);
     const target = aim != null ? aim : shipAngle;
@@ -17407,12 +17413,14 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   faceItems.sort((a, b) => a.z - b.z);
 
   const base = color || COL_CHARGE_HOT;
-  const fillA = 0.6;
+  const fillA = alpha != null ? alpha : 0.6;
+  const noCore = !!(opts && opts.noCore);
   // Charge pulse: 5 Hz → 30 Hz as charge fills.
   const pulseHz = 5 + 25 * Math.min(1, Math.max(0, chargeT));
   const pulse01 = 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * pulseHz * Math.PI * 2);
   const pulseSoft = 0.88 + 0.22 * pulse01;
   const emitPow = (1.1 + 1.6 * chargeT) * (0.45 + 0.55 * pulse01);
+  const aScale = fillA / 0.6;
 
   function chargeFaceUV(i0, i1, i2) {
     let u0 = meshUvs[i0][0], v0 = meshUvs[i0][1];
@@ -17430,12 +17438,12 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
 
   // —— Layer 1: soft outer aura (behind mesh) ——
   if (!hwDepth) {
-    drawSoftOval(tipX, tipY, 0, s * 1.95 * pulseSoft, s * 1.95 * pulseSoft, base, (0.18 + 0.22 * chargeT) * (0.55 + 0.45 * pulse01), true, 0.35);
-    drawSoftOval(tipX, tipY, 0, s * 1.2 * pulseSoft, s * 1.2 * pulseSoft, COL_CHARGE_HOT, (0.16 + 0.2 * chargeT) * (0.5 + 0.5 * pulse01), true, 0.55);
+    drawSoftOval(tipX, tipY, 0, s * 1.95 * pulseSoft, s * 1.95 * pulseSoft, base, (0.18 + 0.22 * chargeT) * (0.55 + 0.45 * pulse01) * aScale, true, 0.35);
+    drawSoftOval(tipX, tipY, 0, s * 1.2 * pulseSoft, s * 1.2 * pulseSoft, COL_CHARGE_HOT, (0.16 + 0.2 * chargeT) * (0.5 + 0.5 * pulse01) * aScale, true, 0.55);
   } else {
     gl.depthMask(false);
     gl.disable(gl.DEPTH_TEST);
-    drawSoftOval(tipX, tipY, 0, s * 1.8 * pulseSoft, s * 1.8 * pulseSoft, base, (0.14 + 0.16 * chargeT) * (0.5 + 0.5 * pulse01), true, 0.4);
+    drawSoftOval(tipX, tipY, 0, s * 1.8 * pulseSoft, s * 1.8 * pulseSoft, base, (0.14 + 0.16 * chargeT) * (0.5 + 0.5 * pulse01) * aScale, true, 0.4);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LESS);
     gl.depthMask(true);
@@ -17492,7 +17500,7 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
       }
       drawChargeTexTris(
         chargeTexMesh, o, COL_CHARGE_CORE,
-        (0.12 + 0.22 * chargeT) * (pulse01 - 0.55) * 2.2,
+        (0.12 + 0.22 * chargeT) * (pulse01 - 0.55) * 2.2 * aScale,
         emitPow * 1.4, pulse01, true
       );
       if (hwDepth) {
@@ -17503,19 +17511,21 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   }
 
   // —— Layer 3: hot inner core ——
-  const coreS = 0.38 + 0.08 * chargeT;
-  if (hwDepth) {
-    const co = packChargeTexFaces(chargeTexMesh, faceItems, coreS);
-    gl.depthMask(true);
-    drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_HOT, 0.6, emitPow * 1.2, pulse01, false);
-    gl.depthMask(false);
-    gl.depthFunc(gl.LEQUAL);
-    drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_CORE, 0.25 + 0.2 * chargeT * pulse01, emitPow * 1.6, pulse01, true);
-    gl.depthMask(true);
-    gl.depthFunc(gl.LESS);
-  } else {
-    drawSoftOval(tipX, tipY, 0, s * coreS * 1.05 * pulseSoft, s * coreS * 1.05 * pulseSoft, COL_CHARGE_HOT, 0.75 + 0.2 * pulse01, false, 0.7);
-    drawSoftOval(tipX, tipY, 0, s * coreS * 0.55 * pulseSoft, s * coreS * 0.55 * pulseSoft, COL_CHARGE_CORE, 0.75 + 0.2 * pulse01, true, 0.85);
+  if (!noCore) {
+    const coreS = 0.38 + 0.08 * chargeT;
+    if (hwDepth) {
+      const co = packChargeTexFaces(chargeTexMesh, faceItems, coreS);
+      gl.depthMask(true);
+      drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_HOT, 0.6, emitPow * 1.2, pulse01, false);
+      gl.depthMask(false);
+      gl.depthFunc(gl.LEQUAL);
+      drawChargeTexTris(chargeTexMesh, co, COL_CHARGE_CORE, 0.25 + 0.2 * chargeT * pulse01, emitPow * 1.6, pulse01, true);
+      gl.depthMask(true);
+      gl.depthFunc(gl.LESS);
+    } else {
+      drawSoftOval(tipX, tipY, 0, s * coreS * 1.05 * pulseSoft, s * coreS * 1.05 * pulseSoft, COL_CHARGE_HOT, 0.75 + 0.2 * pulse01, false, 0.7);
+      drawSoftOval(tipX, tipY, 0, s * coreS * 0.55 * pulseSoft, s * coreS * 0.55 * pulseSoft, COL_CHARGE_CORE, 0.75 + 0.2 * pulse01, true, 0.85);
+    }
   }
 
   // —— Layer 4: spiraling 3D embers + streaks ——
