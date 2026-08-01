@@ -3937,7 +3937,9 @@ function hitPlayerAsteroid(room, p, a, hit) {
   if (a.playerShot && blocksFriendlyFire(room, a.ownerId)) return;
   let dmg;
   if (a.playerShot) {
-    dmg = PLAYER_SHOT_HIT_DMG;
+    dmg = (a.shotHitDmg != null && Number.isFinite(+a.shotHitDmg))
+      ? +a.shotHitDmg
+      : PLAYER_SHOT_HIT_DMG;
     notePlayerAttacker(p, a.ownerId);
   } else {
     dmg = asteroidCollideDamage(p, a, 0.5);
@@ -4048,7 +4050,11 @@ function resolvePlayerShotAsteroidBounces(room) {
           ny: hit.ny
         });
       }
-      damageAsteroid(room, other, PLAYER_SHOT_BOUNCE_DMG, shot.ownerId | 0);
+      // Damage after bounce so a kill still leaves the shot on the reflected path.
+      const bounceDmg = (shot.shotBounceDmg != null && Number.isFinite(+shot.shotBounceDmg))
+        ? +shot.shotBounceDmg
+        : PLAYER_SHOT_BOUNCE_DMG;
+      damageAsteroid(room, other, bounceDmg, shot.ownerId | 0);
       return true;
     });
   }
@@ -5029,6 +5035,14 @@ function fireAsteroidGun(room, p) {
   a.maxHp = PLAYER_SHOT_ASTEROID_HP;
   a.portalArmed = false;
   a.noCollide = false;
+  // L3: higher player/rock damage; bounce still runs before damageAsteroid.
+  if (getWeaponLevel(p, 'asteroidgun') >= 3) {
+    a.shotHitDmg = PLAYER_SHOT_HIT_DMG_L3;
+    a.shotBounceDmg = PLAYER_SHOT_BOUNCE_DMG_L3;
+  } else {
+    a.shotHitDmg = PLAYER_SHOT_HIT_DMG;
+    a.shotBounceDmg = PLAYER_SHOT_BOUNCE_DMG;
+  }
   pushAsteroid(room, a);
   emitAsteroidFire(room, a);
 }

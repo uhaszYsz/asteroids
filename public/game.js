@@ -11063,6 +11063,9 @@ function effectiveLocalWeapon(name) {
   } else if (n === 'plasma') {
     // L2 = 7.5 dmg (server). L3 = 60 ammo.
     if (lvl >= 3) w.ammo = 60;
+  } else if (n === 'asteroidgun') {
+    // L2 = 10% faster reload. L3 = 2× hit/bounce dmg (server).
+    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
   } else if (n === 'railgun') {
     if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
   }

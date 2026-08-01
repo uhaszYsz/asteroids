@@ -80,8 +80,12 @@ const THRUST_RAY_ALIGN_RAD = 30 * Math.PI / 180;
 const THRUST_RAY_MIN_MOVE = 0.2 * RES_SCALE;
 const PLAYER_SHOT_ASTEROID_HP = 200;
 const PLAYER_SHOT_BOUNCE_DMG = 30;
+/** Meteor Gun L3: bounce damage vs world rocks (applied after velocity bounce). */
+const PLAYER_SHOT_BOUNCE_DMG_L3 = PLAYER_SHOT_BOUNCE_DMG * 2;
 /** Meteor Gun rock vs player — flat damage (same crash/stun path as world rocks). */
 const PLAYER_SHOT_HIT_DMG = 70;
+/** Meteor Gun L3: damage vs players. */
+const PLAYER_SHOT_HIT_DMG_L3 = PLAYER_SHOT_HIT_DMG * 2;
 /** Meteor Gun rock vs solo enemies — flat damage, no stun / no knockback. */
 const PLAYER_SHOT_ENEMY_DMG = 100;
 /** Hitting a player rocket damages hull and randomizes its heading if it survives. */
@@ -176,6 +180,9 @@ function effectiveWeapon(p, name) {
   } else if (n === 'plasma') {
     // L2 = 7.5 dmg (effectiveBulletDmg). L3 = 60 ammo.
     if (lvl >= 3) w.ammo = 60;
+  } else if (n === 'asteroidgun') {
+    // L2 = 10% faster reload. L3 = 2× hit/bounce dmg (set on fire).
+    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
   } else if (n === 'railgun') {
     // L2 = edge bounce (handled in fireRailgun). L3 = 30% faster shot cooldown.
     if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
