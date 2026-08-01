@@ -11008,7 +11008,8 @@ function pulseSpriteShipAttack(id) {
 function spriteShipAttacking(id) {
   if (id == null) return false;
   const now = performance.now();
-  if ((id | 0) === (myId | 0) && now < (localLaserUntil || 0)) return true;
+  // Local laser: follow burst flag (sim ticks), not a wall-clock clip timer.
+  if ((id | 0) === (myId | 0) && localLaserClip && localShoot.bursting) return true;
   const remoteBeam = remoteLasers.get(id);
   if (remoteBeam && now < (remoteBeam.until || 0)) return true;
   return now < (spriteShipAttackUntil.get(id) || 0);
@@ -11545,6 +11546,10 @@ function resetLocalShoot(weaponName) {
   localShoot.bursting = false;
   localShoot.railChargeLeft = 0;
   localShoot.sfxSkipNext = false;
+  if (localLaserClip) {
+    localLaserClip = null;
+    syncLaserSfx(false);
+  }
 }
 
 function tryStartLocalBurst() {
@@ -11558,16 +11563,10 @@ function tryStartLocalBurst() {
   localShoot.bursting = true;
   if (selectedWeapon === 3) {
     const w = effectiveLocalWeapon(currentWeaponName());
-    const tickMs = 1000 / TPS;
-    // Clip length from weapon type ammo (not current counter) × cooldown ticks.
-    const perShotTicks = Math.max(1, w.cooldown | 0);
-    const shots = Math.max(1, w.ammo | 0);
-    const range = w.range != null ? w.range : LASER_RANGE;
-    const col = COL.laser;
+    // Beam stays up while localShoot.bursting (ammo dump on sim ticks) — not wall-clock ms.
     startLocalLaserClip(
-      Math.round(shots * perShotTicks * tickMs),
-      range,
-      col,
+      w.range != null ? w.range : LASER_RANGE,
+      COL.laser,
       true
     );
   }
@@ -11643,20 +11642,22 @@ function updateLocalShooting() {
   localShoot.shootCd = w.cooldown;
   if (localShoot.shootAmmo <= 0) {
     localShoot.bursting = false;
+    if (localLaserClip) {
+      localLaserClip = null;
+      syncLaserSfx(false);
+    }
     let reload = w.reload;
     if (player.powerups && player.powerups.reload) reload = Math.max(1, Math.round(reload * 0.5));
     localShoot.reloadLeft = reload;
   }
 }
 
-// Laser visual: 100% local from ship. Duration = mag dump (ammo × cooldown ticks).
+// Laser visual: 100% local from ship. Duration = while localShoot.bursting (sim ticks).
 const LASER_CLIP_MS = Math.round(30 * 1 * (1000 / TPS)); // remotes fallback (= base laser ammo×cd)
 const LASER_LINGER_MS = 750; // remotes only
 const LASER_HIT_MS = Math.round(8 * (1000 / TPS));
 const LASER_RANGE = Math.hypot(W, H);
-/** Local laser beam end time (performance.now) — set once per burst. */
-let localLaserUntil = 0;
-/** Range/color locked at burst start from shoot-type stats. */
+/** Range/color/hum locked at burst start; cleared when bursting ends. */
 let localLaserClip = null;
 /** Other players' beams: owner -> { len, until, wpn }. */
 const remoteLasers = new Map();
@@ -11677,9 +11678,8 @@ function laserKeyHeld() {
   return !!(keys.Space || keys.Enter);
 }
 
-/** Arm local laser for exactly `ms` from now (one press → one clip). */
-function startLocalLaserClip(ms, range, color, hum) {
-  localLaserUntil = performance.now() + Math.max(0, ms | 0);
+/** Arm local laser VFX for the current burst (ends with localShoot.bursting). */
+function startLocalLaserClip(range, color, hum) {
   pulseSpriteShipAttack(myId);
   localLaserClip = {
     range: range != null ? range : LASER_RANGE,
@@ -11687,13 +11687,6 @@ function startLocalLaserClip(ms, range, color, hum) {
     hum: !!hum
   };
   syncLaserSfx(!!hum);
-}
-
-function armLocalLaser(extraMs) {
-  // Legacy helper for remotes / fallbacks — does not extend an active local clip.
-  const now = performance.now();
-  const until = now + (extraMs != null ? extraMs : LASER_CLIP_MS);
-  if (until > localLaserUntil) localLaserUntil = until;
 }
 
 /**
@@ -15506,7 +15499,6 @@ function resetMatchState() {
   remoteLasers.clear();
   hitLasers.length = 0;
   wormLaserDbg.length = 0;
-  localLaserUntil = 0;
   localLaserClip = null;
   selectedWeapon = 1;
   weaponLevels = { default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 };
@@ -16346,8 +16338,12 @@ function drawLaserBeamSeg(x0, y0, x1, y1, width, color) {
 function drawLaserBeams() {
   // Fixed beam width (old time%5 flicker looked like size pulsing).
   const width = 4 * RES_SCALE;
-  // Local laser: from local ship; range from shoot-type at burst start.
-  const localOn = performance.now() < localLaserUntil && localLaserClip;
+  // Local laser: follow ammo burst on sim ticks (same cadence as server), not wall-clock ms.
+  if (localLaserClip && !localShoot.bursting) {
+    localLaserClip = null;
+    syncLaserSfx(false);
+  }
+  const localOn = !!(localLaserClip && localShoot.bursting);
   if (localOn) {
     const me = localView();
     const m = shipMuzzle(me.x, me.y, me.angle);
@@ -16358,7 +16354,6 @@ function drawLaserBeams() {
     }
     syncLaserSfx(!!localLaserClip.hum);
   } else {
-    if (performance.now() >= localLaserUntil) localLaserClip = null;
     syncLaserSfx(false);
   }
   for (const [owner, rl] of remoteLasers) {
@@ -20086,7 +20081,6 @@ function enterGameFromWelcome(msg) {
   remoteLasers.clear();
   hitLasers.length = 0;
   wormLaserDbg.length = 0;
-  localLaserUntil = 0;
   localLaserClip = null;
   selectedWeapon = 1;
   weaponLevels = { default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 };
