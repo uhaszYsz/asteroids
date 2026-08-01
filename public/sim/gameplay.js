@@ -1998,8 +1998,14 @@ function markShopDone(room, playerId) {
  * Shop purchase. item: 'weapon'|'powerup'|'life', name: weapon/powerup id.
  * Returns { ok, err? } and syncs buyer.
  */
+function playerShopSessionOpen(room, p) {
+  if (!room || !p) return false;
+  if (room.shopOpen) return true;
+  return !!(room.pvpShopOpen && room.pvpShopOpen.has(p.id));
+}
+
 function handleShopBuy(room, p, item, name) {
-  if (!room || !room.shopOpen || !p || p.hp <= 0) return { ok: 0, err: 'closed' };
+  if (!room || !p || p.hp <= 0 || !playerShopSessionOpen(room, p)) return { ok: 0, err: 'closed' };
   ensureUnlockedWeapons(p);
   if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
   if (!p.powerups) p.powerups = freshPowerups();
@@ -2577,17 +2583,20 @@ function handoffPortalTwin(room, parent) {
   return true;
 }
 
+function sharedSpawnCenter() {
+  return { x: W * 0.5, y: H * 0.5 };
+}
+
 function playerSpawnPose(id, room) {
-  // Solo waves: middle of the arena facing up.
+  const c = sharedSpawnCenter();
+  // Solo: exact center facing up.
   if (room && room.practice && !room.coop) {
-    return { x: W * 0.5, y: H * 0.5, angle: -Math.PI / 2 };
+    return { x: c.x, y: c.y, angle: -Math.PI / 2 };
   }
-  // 1v1 / coop: left of center aiming left, right of center aiming right.
+  // PvP / coop: one shared zone; slight split + face outward.
   const slot = (id - 1) & 1;
-  if (slot === 0) {
-    return { x: W * 0.5 - SPAWN_CENTER_OFFSET, y: H * 0.5, angle: Math.PI };
-  }
-  return { x: W * 0.5 + SPAWN_CENTER_OFFSET, y: H * 0.5, angle: 0 };
+  const dx = slot === 0 ? -SHARED_SPAWN_SPREAD : SHARED_SPAWN_SPREAD;
+  return { x: c.x + dx, y: c.y, angle: slot === 0 ? Math.PI : 0 };
 }
 
 const CALLSIGN_POOL = [
@@ -2625,6 +2634,8 @@ function spawnPlayer(id, name, colors, room) {
     coins: 0,
     /** Lifetime coins picked up (never decreases on spend). */
     coinsCollected: 0,
+    /** PvP shop open-time remaining (ticks); unused in solo. */
+    shopTimeLeft: 0,
     lives: 0,
     weapon: wpn,
     weaponLevels: levels,
@@ -2936,11 +2947,11 @@ function applyInput(p) {
   limitPlayerSpeed(p);
 }
 
-/** True while still inside the spawn face-off circle. */
+/** True while still inside the shared center spawn circle. */
 function playerInSpawnArea(room, p) {
-  const spawn = playerSpawnPose(p.id, room);
-  const dx = p.x - spawn.x;
-  const dy = p.y - spawn.y;
+  const c = sharedSpawnCenter();
+  const dx = p.x - c.x;
+  const dy = p.y - c.y;
   return dx * dx + dy * dy <= GODMODE_SPAWN_CLEAR_R * GODMODE_SPAWN_CLEAR_R;
 }
 
@@ -2952,10 +2963,23 @@ function clearPlayerGodmode(p) {
   p.railChargeLeft = 0;
 }
 
-/** After movement: leave spawn zone → godmode ends immediately. */
+/** Clear godmode on every player in the room (shared leave rule). */
+function clearAllPlayersGodmode(room) {
+  if (!room) return;
+  let any = false;
+  for (const q of room.players.values()) {
+    if ((q.godLeft | 0) > 0) {
+      clearPlayerGodmode(q);
+      any = true;
+    }
+  }
+  if (any) roomBroadcast(room, { t: 'godClear' });
+}
+
+/** After movement: anyone leaving the shared zone ends godmode for all. */
 function clearGodmodeIfLeftSpawn(room, p) {
   if (!(p.godLeft > 0)) return;
-  if (!playerInSpawnArea(room, p)) clearPlayerGodmode(p);
+  if (!playerInSpawnArea(room, p)) clearAllPlayersGodmode(room);
 }
 
 /** Two hit circles along ship facing: front (+offset) + back (−offset). Same volumes as bullets. */
@@ -3671,6 +3695,7 @@ function finishDeathRound(room) {
   room.deathBoomed = false;
   room.deathVictimId = null;
   room.roundResetting = false;
+  startPreRoundCountdown(room);
 }
 
 function emitRoundReset(room) {
@@ -3861,21 +3886,22 @@ function teleportAsteroidSpawnClear(room, a) {
   emitAsteroidFire(room, a);
 }
 
-/** While godmode, shove any asteroid near that player's spawn point to a screen edge. */
+/** While anyone has godmode, shove asteroids out of the shared spawn circle. */
 function clearGodmodeSpawnZones(room) {
+  let anyGod = false;
   for (const p of room.players.values()) {
-    if (!(p.godLeft > 0)) continue;
-    const spawn = playerSpawnPose(p.id, room);
-    for (const a of room.asteroids) {
-      if (a.portalOfAid) continue; // parent handoff owns these
-      // PvP: smalls leave permanently — don't bounce. Waves: bounce all sizes.
-      if (a.size === 'small' && !room.practice) continue;
-      const dx = a.x - spawn.x;
-      const dy = a.y - spawn.y;
-      const lim = GODMODE_SPAWN_CLEAR_R + (a.r || 0);
-      if (dx * dx + dy * dy >= lim * lim) continue;
-      teleportAsteroidSpawnClear(room, a);
-    }
+    if ((p.godLeft | 0) > 0) { anyGod = true; break; }
+  }
+  if (!anyGod) return;
+  const spawn = sharedSpawnCenter();
+  for (const a of room.asteroids) {
+    if (a.portalOfAid) continue;
+    if (a.size === 'small' && !room.practice) continue;
+    const dx = a.x - spawn.x;
+    const dy = a.y - spawn.y;
+    const lim = GODMODE_SPAWN_CLEAR_R + (a.r || 0);
+    if (dx * dx + dy * dy >= lim * lim) continue;
+    teleportAsteroidSpawnClear(room, a);
   }
 }
 

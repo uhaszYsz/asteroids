@@ -422,12 +422,23 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (msg.t === 'shopOpen') {
+      if (!allowAction(ws, 'shopOpen', 200)) return;
+      const room = ws.room;
+      if (!room || ws.playerId == null) return;
+      const result = openPvpShop(room, ws.playerId);
+      if (!result.ok && ws.readyState === 1) {
+        send(ws, { t: 'shopOpen', ok: 0, err: result.err || 'fail' });
+      }
+      return;
+    }
+
     if (msg.t === 'shopBuy') {
       if (!allowAction(ws, 'shopBuy', 80)) return;
       const room = ws.room;
-      if (!room || !room.practice || !room.shopOpen) return;
+      if (!room) return;
       const p = room.players.get(ws.playerId);
-      if (!p) return;
+      if (!p || !playerShopSessionOpen(room, p)) return;
       const item = String(msg.item || '');
       const name = msg.name != null ? String(msg.name) : '';
       const result = handleShopBuy(room, p, item, name);
@@ -442,15 +453,21 @@ wss.on('connection', (ws) => {
         weapon: p.weapon || 'default',
         levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
         unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
-        powerups: Object.assign({}, p.powerups || freshPowerups())
+        powerups: Object.assign({}, p.powerups || freshPowerups()),
+        shopTimeLeft: p.shopTimeLeft | 0,
+        pvp: room.practice ? 0 : 1
       }));
       return;
     }
 
     if (msg.t === 'shopDone') {
       const room = ws.room;
-      if (!room || !room.practice || !room.shopOpen) return;
-      markShopDone(room, ws.playerId);
+      if (!room || ws.playerId == null) return;
+      if (room.practice && room.shopOpen) {
+        markShopDone(room, ws.playerId);
+        return;
+      }
+      if (!room.practice) closePvpShop(room, ws.playerId, false);
       return;
     }
 

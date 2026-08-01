@@ -1159,6 +1159,34 @@
       min-height: 72px;
     }
     #pause-panel .pause-cd:empty { display: none; min-height: 0; margin: 0; }
+    #pre-round-hud {
+      position: fixed; inset: 0; pointer-events: none; z-index: 40;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      gap: 18px;
+    }
+    #pre-round-hud.show { display: flex; }
+    #pre-round-cd {
+      font-size: clamp(72px, 14vw, 140px); font-weight: 700; color: #ffe27a;
+      letter-spacing: 0.08em;
+      text-shadow: 0 0 28px rgba(255, 200, 80, 0.5);
+      font-family: "Segoe UI", system-ui, sans-serif;
+    }
+    #pre-round-cd:empty { display: none; }
+    #pre-round-hint {
+      color: #9ec8e8; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase;
+      text-shadow: 0 2px 10px rgba(0,0,0,0.7);
+    }
+    #pvp-shop-btn {
+      pointer-events: auto;
+      border: 1px solid rgba(160, 220, 100, 0.55);
+      background: rgba(40, 70, 35, 0.95);
+      color: #e8ffd0;
+      font: inherit; padding: 12px 22px; cursor: pointer;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      box-shadow: 0 0 20px rgba(80, 160, 60, 0.25);
+    }
+    #pvp-shop-btn:disabled { opacity: 0.4; cursor: default; }
+    #pvp-shop-btn .pvp-shop-time { display: block; font-size: 11px; opacity: 0.85; margin-top: 4px; letter-spacing: 0.06em; }
     #pause-panel .ac-actions {
       display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
     }
@@ -1696,6 +1724,15 @@
       <button type="button" class="pause-leave" id="pause-leave-btn">Leave match</button>
     </div>
   </div>
+</div>
+
+<div id="pre-round-hud" aria-hidden="true">
+  <div id="pre-round-cd"></div>
+  <div id="pre-round-hint">Get ready</div>
+  <button type="button" id="pvp-shop-btn" hidden>
+    Open shop
+    <span class="pvp-shop-time" id="pvp-shop-time"></span>
+  </button>
 </div>
 
 <div id="con">
@@ -2242,6 +2279,6 @@
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=66"></script>
-<script src="game.js?v=831"></script>
+<script src="game.js?v=832"></script>
 </body>
 </html>

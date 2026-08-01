@@ -349,10 +349,18 @@ const STUN_DECEL_TICKS = Math.round(3 * TPS);
 const COLLIDE_IFRAME_TICKS = Math.round(0.35 * TPS);
 /** Post-respawn / match-start invuln: max duration; also ends when leaving spawn area. */
 const GODMODE_TICKS = Math.round(5 * TPS);
-/** 1v1 spawn: offset from arena center (px). */
+/** Legacy dual-pad offset (unused — all modes share one center zone). */
 const SPAWN_CENTER_OFFSET = 250;
-/** Spawn safe zone radius (asteroid clear + leave-to-end-godmode). */
+/** Small lateral split so two ships don't stack in the shared zone. */
+const SHARED_SPAWN_SPREAD = 16;
+/** Spawn safe zone radius (asteroid clear + leave-to-end-godmode). Center of arena. */
 const GODMODE_SPAWN_CLEAR_R = 75;
+/** PvP pre-round 3-2-1 before movement (match start + each round). */
+const PRE_ROUND_COUNTDOWN_SEC = 3;
+/** Per-player PvP shop open time budget per match (ticks). */
+const PVP_SHOP_BUDGET_TICKS = 2 * 60 * TPS;
+/** Starting coins so PvP shop is usable at match start. */
+const PVP_START_COINS = 2000;
 /** Freeze frame while dying player shakes. */
 const DEATH_SHAKE_TICKS = Math.round(1 * TPS);
 /** After explosion, wait this long before respawn. */

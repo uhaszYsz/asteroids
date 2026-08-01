@@ -36,6 +36,11 @@ let introHideTimer = 0;
 let scoreBoardHideTimer = 0;
 /** Real match: false until server `go` after both players ready. Practice stays true. */
 let matchLive = true;
+/** PvP 3-2-1 before movement (match start + rounds). */
+let preRoundCd = 0;
+let preRoundShopAllowed = false;
+let pvpShopTimeLeft = 0;
+let pvpShopMode = false;
 let matchReadySent = false;
 
 /** Overlay confetti / spark particles for score + win screens. */
@@ -883,9 +888,10 @@ const STUN_AV_MAX = 17 * Math.PI / 180;
 const STUN_DECEL_TICKS = Math.round(3 * TPS);
 const COLLIDE_IFRAME_TICKS = Math.round(0.35 * TPS);
 const GODMODE_TICKS = Math.round(5 * TPS);
-/** Matches server: spawn safe zone (asteroid clear + leave-to-end-godmode). */
+/** Matches server: shared center spawn zone. */
 const GODMODE_SPAWN_CLEAR_R = 75;
-const SPAWN_CENTER_OFFSET = 250;
+const SHARED_SPAWN_SPREAD = 16;
+const SPAWN_CENTER_OFFSET = 250; // legacy unused
 const BIN_SNAP = 1;
 const SOFT_ERR_MAX_POS = 48 * RES_SCALE;
 const SOFT_ERR_MAX_ANG = 0.6;
@@ -3851,30 +3857,29 @@ function syncGridAlphaRippleUniforms(now) {
   }
 }
 
-/** While godmode: pulse light rings on that player's spawn pad (max R = spawn area). */
+/** While godmode: pulse light rings on the shared center spawn zone. */
 function tickGodmodeSpawnRipples(dt) {
-  const active = [];
-  if ((player.godLeft | 0) > 0 && myId != null) active.push(myId);
-  for (const r of remotes.values()) {
-    if ((r.godLeft | 0) > 0) active.push(r.id);
+  let any = (player.godLeft | 0) > 0 && myId != null;
+  if (!any) {
+    for (const r of remotes.values()) {
+      if ((r.godLeft | 0) > 0) { any = true; break; }
+    }
   }
-  if (!active.length) {
+  if (!any) {
     godmodeSpawnRippleAcc = 0;
     return;
   }
   godmodeSpawnRippleAcc += dt || 0.016;
   if (godmodeSpawnRippleAcc < GODMODE_SPAWN_RIPPLE_PERIOD) return;
   godmodeSpawnRippleAcc = 0;
-  for (let i = 0; i < active.length; i++) {
-    const pose = playerSpawnPoseLocal(active[i]);
-    pushGridAlphaRipple(pose.x, pose.y, {
-      r0: 0,
-      r1: GODMODE_SPAWN_CLEAR_R,
-      width: GODMODE_SPAWN_RIPPLE_WIDTH,
-      life: 880,
-      amp: 3.1
-    });
-  }
+  const pose = sharedSpawnCenterLocal();
+  pushGridAlphaRipple(pose.x, pose.y, {
+    r0: 0,
+    r1: GODMODE_SPAWN_CLEAR_R,
+    width: GODMODE_SPAWN_RIPPLE_WIDTH,
+    life: 880,
+    amp: 3.1
+  });
 }
 
 function ensureGridBakeTexture() {
@@ -7862,89 +7867,87 @@ function tickDeathSequence(now) {
   }
 }
 
+function sharedSpawnCenterLocal() {
+  return { x: W * 0.5, y: H * 0.5 };
+}
+
 function playerSpawnPoseLocal(id) {
-  // Solo waves: middle (matches server). Coop / PvP keep face-off pads.
+  const c = sharedSpawnCenterLocal();
   if (practiceMode && !coopMode) {
-    return { x: W * 0.5, y: H * 0.5, angle: -Math.PI / 2 };
+    return { x: c.x, y: c.y, angle: -Math.PI / 2 };
   }
   const slot = ((id | 0) - 1) & 1;
-  if (slot === 0) {
-    return { x: W * 0.5 - SPAWN_CENTER_OFFSET, y: H * 0.5, angle: Math.PI };
-  }
-  return { x: W * 0.5 + SPAWN_CENTER_OFFSET, y: H * 0.5, angle: 0 };
+  const dx = slot === 0 ? -SHARED_SPAWN_SPREAD : SHARED_SPAWN_SPREAD;
+  return { x: c.x + dx, y: c.y, angle: slot === 0 ? Math.PI : 0 };
 }
 
 let spawnZoneParticleAcc = 0;
 
 const SPAWN_ZONE_WHITE = [1, 1, 1];
 
-/** Sport pad outline while godmode — lines tinted to that player's color. */
+/** Shared spawn zone outline while anyone has godmode — white + soft tint. */
 function drawSpawnZones(dt) {
-  const zones = [];
-  if ((player.godLeft | 0) > 0 && myId != null) {
-    zones.push({ id: myId });
+  let tintId = null;
+  if ((player.godLeft | 0) > 0 && myId != null) tintId = myId;
+  else {
+    for (const r of remotes.values()) {
+      if ((r.godLeft | 0) > 0) { tintId = r.id; break; }
+    }
   }
-  for (const r of remotes.values()) {
-    if ((r.godLeft | 0) > 0) zones.push({ id: r.id });
-  }
-  if (!zones.length) {
+  if (tintId == null) {
     spawnZoneParticleAcc = 0;
     return;
   }
   spawnZoneParticleAcc += dt || 0.016;
-  for (const z of zones) {
-    const pose = playerSpawnPoseLocal(z.id);
-    const R = GODMODE_SPAWN_CLEAR_R;
-    const fill = ownerPlayerColor(z.id) || SPAWN_ZONE_WHITE;
-    const line = fill;
-    // Double pass — brighter pulsating god pad in all modes.
-    drawLines(circleVerts(pose.x, pose.y, R, 48), line, gl.LINE_LOOP, 1);
-    drawLines(circleVerts(pose.x, pose.y, R, 48), COL_WHITE, gl.LINE_LOOP, 0.55);
-    drawLines(circleVerts(pose.x, pose.y, R * 0.55, 32), line, gl.LINE_LOOP, 1);
-    drawLines(circleVerts(pose.x, pose.y, R * 0.55, 32), COL_WHITE, gl.LINE_LOOP, 0.4);
-    // Cross + hash ticks (sport face-off) — full axes through pad center.
-    drawLines(
-      [pose.x - R, pose.y, pose.x + R, pose.y, pose.x, pose.y - R, pose.x, pose.y + R],
-      line, gl.LINES, 1
+  const pose = sharedSpawnCenterLocal();
+  const R = GODMODE_SPAWN_CLEAR_R;
+  const fill = ownerPlayerColor(tintId) || SPAWN_ZONE_WHITE;
+  const line = fill;
+  drawLines(circleVerts(pose.x, pose.y, R, 48), line, gl.LINE_LOOP, 1);
+  drawLines(circleVerts(pose.x, pose.y, R, 48), COL_WHITE, gl.LINE_LOOP, 0.55);
+  drawLines(circleVerts(pose.x, pose.y, R * 0.55, 32), line, gl.LINE_LOOP, 1);
+  drawLines(circleVerts(pose.x, pose.y, R * 0.55, 32), COL_WHITE, gl.LINE_LOOP, 0.4);
+  drawLines(
+    [pose.x - R, pose.y, pose.x + R, pose.y, pose.x, pose.y - R, pose.x, pose.y + R],
+    line, gl.LINES, 1
+  );
+  drawLines(
+    [pose.x - R, pose.y, pose.x + R, pose.y, pose.x, pose.y - R, pose.x, pose.y + R],
+    COL_WHITE, gl.LINES, 0.35
+  );
+  const tick = R * 0.18;
+  const tickVerts = [];
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    tickVerts.push(
+      pose.x + c * (R - tick), pose.y + s * (R - tick),
+      pose.x + c * (R + tick * 0.35), pose.y + s * (R + tick * 0.35)
     );
-    drawLines(
-      [pose.x - R, pose.y, pose.x + R, pose.y, pose.x, pose.y - R, pose.x, pose.y + R],
-      COL_WHITE, gl.LINES, 0.35
-    );
-    const tick = R * 0.18;
-    const tickVerts = [];
-    for (let k = 0; k < 8; k++) {
-      const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
-      const c = Math.cos(a);
-      const s = Math.sin(a);
-      tickVerts.push(
-        pose.x + c * (R - tick), pose.y + s * (R - tick),
-        pose.x + c * (R + tick * 0.35), pose.y + s * (R + tick * 0.35)
-      );
-    }
-    drawLines(tickVerts, line, gl.LINES, 1);
-    drawLines(tickVerts, COL_WHITE, gl.LINES, 0.4);
-    if (spawnZoneParticleAcc >= 0.05) {
-      const ang = Math.random() * Math.PI * 2;
-      const rad = Math.random() * R;
-      emitParticles({
-        x: pose.x + Math.cos(ang) * rad,
-        y: pose.y + Math.sin(ang) * rad,
-        count: 2,
-        speed: 18 * RES_SCALE,
-        speedSpread: 14 * RES_SCALE,
-        direction: ang + Math.PI * 0.5,
-        spread: 0.8,
-        size: 2.2 * RES_SCALE,
-        scaleY: 1.2,
-        lifetime: 0.55,
-        lifetimeSpread: 0.25,
-        color: fill,
-        drag: 1.4
-      });
-    }
   }
-  if (spawnZoneParticleAcc >= 0.05) spawnZoneParticleAcc = 0;
+  drawLines(tickVerts, line, gl.LINES, 1);
+  drawLines(tickVerts, COL_WHITE, gl.LINES, 0.4);
+  if (spawnZoneParticleAcc >= 0.05) {
+    const ang = Math.random() * Math.PI * 2;
+    const rad = Math.random() * R;
+    emitParticles({
+      x: pose.x + Math.cos(ang) * rad,
+      y: pose.y + Math.sin(ang) * rad,
+      count: 2,
+      speed: 18 * RES_SCALE,
+      speedSpread: 14 * RES_SCALE,
+      direction: ang + Math.PI * 0.5,
+      spread: 0.8,
+      size: 2.2 * RES_SCALE,
+      scaleY: 1.2,
+      lifetime: 0.55,
+      lifetimeSpread: 0.25,
+      color: fill,
+      drag: 1.4
+    });
+    spawnZoneParticleAcc = 0;
+  }
 }
 
 
@@ -11889,11 +11892,13 @@ function sendMatchReady() {
 function applyMatchGo(msg) {
   matchLive = true;
   matchReadySent = false;
+  preRoundCd = 0;
+  preRoundShopAllowed = false;
+  renderPreRoundHud();
   if (waitBannerEl && !practiceMode) {
     waitBannerEl.classList.add('hidden');
     waitBannerEl.textContent = 'Waiting for player...';
   }
-  // Short confirm blink on go.
   if (msg.tick != null && msg.st != null) {
     syncTick = msg.tick | 0;
     syncSt = msg.st;
@@ -12263,6 +12268,75 @@ const soloMenuBtn = document.getElementById('solo-menu-btn');
 let practiceMode = false;
 let soloOverOpen = false;
 let soloShopOpen = false;
+
+function clearLocalAllGodmode() {
+  player.godLeft = 0;
+  for (const r of remotes.values()) r.godLeft = 0;
+}
+
+const preRoundHudEl = document.getElementById('pre-round-hud');
+const preRoundCdEl = document.getElementById('pre-round-cd');
+const preRoundHintEl = document.getElementById('pre-round-hint');
+const pvpShopBtnEl = document.getElementById('pvp-shop-btn');
+const pvpShopTimeEl = document.getElementById('pvp-shop-time');
+
+function fmtShopBudget(ticks) {
+  const sec = Math.max(0, Math.ceil((ticks | 0) / TPS));
+  const m = (sec / 60) | 0;
+  const s = sec % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function renderPreRoundHud() {
+  const active = !practiceMode && inGame && ((preRoundCd | 0) > 0 || preRoundShopAllowed || soloShopOpen && pvpShopMode);
+  if (preRoundHudEl) {
+    preRoundHudEl.classList.toggle('show', !!active);
+    preRoundHudEl.setAttribute('aria-hidden', active ? 'false' : 'true');
+  }
+  if (preRoundCdEl) {
+    if ((preRoundCd | 0) > 0 && !(soloShopOpen && pvpShopMode)) {
+      preRoundCdEl.textContent = String(preRoundCd | 0);
+    } else if (soloShopOpen && pvpShopMode) {
+      preRoundCdEl.textContent = '';
+    } else {
+      preRoundCdEl.textContent = (preRoundCd | 0) > 0 ? String(preRoundCd | 0) : '';
+    }
+  }
+  if (preRoundHintEl) {
+    if (soloShopOpen && pvpShopMode) preRoundHintEl.textContent = 'Shop open — countdown paused';
+    else if ((preRoundCd | 0) > 0) preRoundHintEl.textContent = 'Get ready';
+    else preRoundHintEl.textContent = '';
+  }
+  if (pvpShopBtnEl) {
+    const canShop = !practiceMode && inGame && preRoundShopAllowed && !soloShopOpen && (pvpShopTimeLeft | 0) > 0;
+    pvpShopBtnEl.hidden = !canShop;
+    pvpShopBtnEl.disabled = !canShop;
+  }
+  if (pvpShopTimeEl) {
+    pvpShopTimeEl.textContent = (pvpShopTimeLeft | 0) > 0
+      ? ('Time left ' + fmtShopBudget(pvpShopTimeLeft))
+      : 'No shop time left';
+  }
+}
+
+function applyPreRoundCdMsg(msg) {
+  preRoundCd = msg.n | 0;
+  preRoundShopAllowed = !!(msg.shop | 0) || (preRoundCd > 0);
+  if (msg.budgets && myId != null && msg.budgets[myId] != null) {
+    pvpShopTimeLeft = msg.budgets[myId] | 0;
+  }
+  if (preRoundCd <= 0 && !(msg.open && msg.open.length)) {
+    preRoundShopAllowed = false;
+  }
+  renderPreRoundHud();
+}
+
+if (pvpShopBtnEl) {
+  pvpShopBtnEl.addEventListener('click', () => {
+    if (!ws || ws.readyState !== 1 || practiceMode || soloShopOpen) return;
+    ws.send(JSON.stringify({ t: 'shopOpen' }));
+  });
+}
 let soloShopState = null;
 /** Live 3D previews for shop grid cells: { canvas, ctx, kind, name, id }. */
 let shopPreviewSlots = [];
@@ -12554,22 +12628,26 @@ function sendShopBuy(item, name) {
 
 function showSoloShop(st) {
   soloShopOpen = true;
+  pvpShopMode = !!(st && st.pvp);
   player.vx = 0;
   player.vy = 0;
   player.av = 0;
+  if (st && st.shopTimeLeft != null) pvpShopTimeLeft = st.shopTimeLeft | 0;
   applyShopState(st);
   if (ssContinueBtn) {
-    ssContinueBtn.textContent = 'START WAVE';
+    ssContinueBtn.textContent = pvpShopMode ? 'CLOSE SHOP' : 'START WAVE';
     ssContinueBtn.disabled = false;
   }
   if (soloShopEl) {
     soloShopEl.classList.add('show');
     soloShopEl.setAttribute('aria-hidden', 'false');
   }
+  renderPreRoundHud();
 }
 
 function hideSoloShop() {
   soloShopOpen = false;
+  pvpShopMode = false;
   soloShopState = null;
   shopPreviewSlots = [];
   if (ssContinueBtn) {
@@ -12580,13 +12658,19 @@ function hideSoloShop() {
     soloShopEl.classList.remove('show');
     soloShopEl.setAttribute('aria-hidden', 'true');
   }
+  renderPreRoundHud();
 }
 
 function closeSoloShopContinue() {
   if (!soloShopOpen) return;
   if (ssContinueBtn && ssContinueBtn.disabled) return;
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ t: 'shopDone' }));
-  // Stay open until server starts the wave (all living players must continue first).
+  // PvP: close locally; server resumes countdown when everyone is out.
+  if (pvpShopMode) {
+    hideSoloShop();
+    return;
+  }
+  // Solo: stay open until server starts the wave (all living players must continue).
   if (ssContinueBtn) {
     ssContinueBtn.textContent = coopMode ? 'WAIT P2…' : 'WAIT…';
     ssContinueBtn.disabled = true;
@@ -18716,13 +18800,13 @@ function applyInputTo(o, inp, opts) {
   o.x += o.vx;
   o.y += o.vy;
   wrapEntity(o);
-  // Leave spawn zone → godmode ends immediately (matches server).
+  // Leave shared spawn zone → godmode ends for everyone (matches server).
   if (o.godLeft > 0 && opts && opts.localCollide && o === player && myId != null) {
-    const spawn = playerSpawnPoseLocal(myId);
+    const spawn = sharedSpawnCenterLocal();
     const dx = o.x - spawn.x;
     const dy = o.y - spawn.y;
     if (dx * dx + dy * dy > GODMODE_SPAWN_CLEAR_R * GODMODE_SPAWN_CLEAR_R) {
-      o.godLeft = 0;
+      clearLocalAllGodmode();
     }
   }
   // Local asteroid contact: shake only (no stun / bounce / HP).
@@ -18826,8 +18910,8 @@ function predictTick(forceShoot) {
     return;
   }
 
-  // PvP intro: do not locally predict movement (server is frozen until go).
-  if (!matchLive) {
+  // PvP intro / 3-2-1 / shop: do not locally predict movement.
+  if (!matchLive || (preRoundCd | 0) > 0 || (soloShopOpen && pvpShopMode)) {
     const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sh: 0 };
     pendingInputs.push(frame);
     if (pendingInputs.length > 90) pendingInputs.shift();
@@ -19565,6 +19649,14 @@ function enterGameFromWelcome(msg) {
   if (msg.coins != null) {
     setLocalCoins(msg.coins);
   }
+  if (msg.shopTimeLeft != null) {
+    pvpShopTimeLeft = msg.shopTimeLeft | 0;
+  } else if (!msg.practice) {
+    pvpShopTimeLeft = 2 * 60 * TPS;
+  }
+  preRoundCd = 0;
+  preRoundShopAllowed = false;
+  renderPreRoundHud();
   if (msg.score != null) {
     setLocalScore(msg.score);
   }
@@ -20139,13 +20231,26 @@ function handleWsMessage(e) {
       pushFxRing(player.x, player.y, COL.laser, { r0: 8, r1: 70, life: 500 });
       return;
     }
-    if (msg.t === 'shop' && inGame && (practiceMode || consoleAdmin)) {
+    if (msg.t === 'preRoundCd' && inGame && !practiceMode) {
+      applyPreRoundCdMsg(msg);
+      return;
+    }
+    if (msg.t === 'godClear' && inGame) {
+      clearLocalAllGodmode();
+      return;
+    }
+    if (msg.t === 'shop' && inGame && (practiceMode || consoleAdmin || msg.pvp)) {
       showSoloShop(msg);
       return;
     }
-    if (msg.t === 'shopBuy' && inGame && (practiceMode || consoleAdmin)) {
+    if (msg.t === 'shopClose' && inGame) {
+      hideSoloShop();
+      return;
+    }
+    if (msg.t === 'shopBuy' && inGame && (practiceMode || consoleAdmin || pvpShopMode || msg.pvp)) {
       if (msg.ok) {
         applyShopState(msg);
+        if (msg.shopTimeLeft != null) pvpShopTimeLeft = msg.shopTimeLeft | 0;
         if (msg.weapon) {
           const slot = WEAPON_NAMES.indexOf(msg.weapon) + 1;
           if (slot > 0) selectedWeapon = slot;
@@ -20153,6 +20258,7 @@ function handleWsMessage(e) {
         if (msg.hp != null) player.hp = msg.hp | 0;
         resetLocalShoot(currentWeaponName());
         updateHud();
+        renderPreRoundHud();
       }
       return;
     }

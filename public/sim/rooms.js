@@ -65,6 +65,11 @@ function createRoom(opts) {
     enemySnapLeft: ENEMY_SNAP_INTERVAL,
     shopOpen: false,
     shopWave: 0,
+    /** PvP: player ids with personal shop open during pre-round. */
+    pvpShopOpen: new Set(),
+    /** PvP: seconds left on 3-2-1 (0 = inactive). */
+    preRoundCd: 0,
+    preRoundAcc: 0,
     /** Match pause (PvP primarily; also solo for Esc menu). */
     paused: false,
     pauseReason: null,
@@ -519,20 +524,22 @@ function stepRoom(room) {
   }
 
   tickPendingBigSpawns(room);
+  tickPvpShopTimers(room);
+  tickPreRoundCountdown(room);
 
   for (const p of room.players.values()) {
     if (p.bot) {
       if (room.perfTest) updatePerfBotInput(room, p);
       else updateBotInput(p);
-      if (room.matchLive && p.inp.sp) tryStartBurst(p);
+      if (room.matchLive && !roomPreRoundFrozen(room) && p.inp.sp) tryStartBurst(p);
     } else {
       takePlayerInput(p);
       demoRecorder.recordInput(room, p);
-      if (room.matchLive && p.inp.sp) {
+      if (room.matchLive && !roomPreRoundFrozen(room) && p.inp.sp) {
         tryStartBurst(p);
       }
     }
-    if (room.shopOpen) {
+    if (room.shopOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice)) {
       p.vx = 0;
       p.vy = 0;
       p.av = 0;
@@ -545,22 +552,6 @@ function stepRoom(room) {
       p.prevX = p.x;
       p.prevY = p.y;
       p.inp.sp = 0;
-      continue;
-    }
-    // PvP intro (waiting for ready): ack inputs but do not move — client used to
-    // predict thrust while we drifted, then snaps fought the ship.
-    if (!room.matchLive && !room.practice) {
-      p.vx = 0;
-      p.vy = 0;
-      p.av = 0;
-      p.inp.u = 0;
-      p.inp.l = 0;
-      p.inp.r = 0;
-      p.inp.sp = 0;
-      p.bursting = false;
-      p.railChargeLeft = 0;
-      p.prevX = p.x;
-      p.prevY = p.y;
       continue;
     }
     applyInput(p);
@@ -576,9 +567,17 @@ function stepRoom(room) {
     clearGodmodeIfLeftSpawn(room, p);
     p.inp.sp = 0;
   }
-  if (room.matchLive) processPendingRailBounces(room);
+  if (room.matchLive && !roomPreRoundFrozen(room)) processPendingRailBounces(room);
   // Move asteroids first, rebuild spatial hash once, then bullets + collisions
   // (avoids a second rebuild inside updateBullets).
+  // Pre-round 3-2-1 / PvP shop: freeze the field in place.
+  if (roomPreRoundFrozen(room)) {
+    clearGodmodeSpawnZones(room);
+    rebuildAsteroidSpatialHash(room);
+    pushPoseHistory(room);
+    sendAsteroidGhostDumps(room);
+    return;
+  }
   for (let i = room.asteroids.length - 1; i >= 0; i--) {
     const a = room.asteroids[i];
     // Lifetime elapsed: cancel pending wraps, but keep the rock while on-screen.
@@ -1068,6 +1067,8 @@ function startMatch(members) {
       shipId: ws.shipId
     }, room);
     p.accountKey = ws.accountKey || null;
+    p.coins = PVP_START_COINS;
+    p.shopTimeLeft = PVP_SHOP_BUDGET_TICKS;
     room.players.set(id, p);
     room.clients.add(ws);
     ws.room = room;
@@ -1205,8 +1206,11 @@ function startCoop(members) {
     p.lives = SOLO_LIVES;
     p.hp = SOLO_MAX_HP;
     p.unlockedWeapons = freshUnlockedWeapons();
-    p.x = W * 0.5 + (i === 0 ? -SPAWN_CENTER_OFFSET : SPAWN_CENTER_OFFSET);
-    p.y = H * 0.5;
+    // Shared center zone (slight split from spawn pose).
+    const pose = playerSpawnPose(id, room);
+    p.x = pose.x;
+    p.y = pose.y;
+    p.angle = pose.angle;
     p.accountKey = ws.accountKey || null;
     room.players.set(id, p);
     room.clients.add(ws);
@@ -1347,6 +1351,8 @@ function sendWelcome(ws, room, p, extra) {
     tick: room.tick,
     st: Date.now(),
     practice: !!room.practice,
+    coins: p.coins | 0,
+    shopTimeLeft: p.shopTimeLeft | 0,
     you: [p.id, p.x, p.y, p.vx, p.vy, p.angle, p.hp, p.lastSeq, p.av || 0, p.stunned ? 1 : 0, p.godLeft > 0 ? (p.godLeft | 0) : 0],
     scores: packScoreboard(room),
     names: packRosterNames(room),
@@ -1372,6 +1378,122 @@ function humanPlayers(room) {
   return [...room.players.values()].filter(p => !p.bot);
 }
 
+function packPvpShopBudgets(room) {
+  const out = {};
+  for (const p of room.players.values()) {
+    if (p.bot) continue;
+    out[p.id] = Math.max(0, p.shopTimeLeft | 0);
+  }
+  return out;
+}
+
+function roomPreRoundFrozen(room) {
+  if (!room || room.practice) return false;
+  if ((room.preRoundCd | 0) > 0) return true;
+  return !!(room.pvpShopOpen && room.pvpShopOpen.size > 0);
+}
+
+function broadcastPreRound(room) {
+  if (!room) return;
+  roomBroadcast(room, {
+    t: 'preRoundCd',
+    n: room.preRoundCd | 0,
+    shop: (room.preRoundCd | 0) > 0 || (room.pvpShopOpen && room.pvpShopOpen.size > 0) ? 1 : 0,
+    open: room.pvpShopOpen ? [...room.pvpShopOpen] : [],
+    budgets: packPvpShopBudgets(room)
+  });
+}
+
+/** Start / restart 3-2-1 (paused while any PvP shop is open). */
+function startPreRoundCountdown(room) {
+  if (!room || room.practice) return;
+  room.preRoundCd = PRE_ROUND_COUNTDOWN_SEC;
+  room.preRoundAcc = 0;
+  broadcastPreRound(room);
+}
+
+function finishPreRoundCountdown(room) {
+  if (!room) return;
+  room.preRoundCd = 0;
+  room.preRoundAcc = 0;
+  if (room.pvpShopOpen && room.pvpShopOpen.size) {
+    for (const id of [...room.pvpShopOpen]) closePvpShop(room, id, true);
+  }
+  broadcastPreRound(room);
+  if (!room.matchLive) beginMatchLive(room);
+}
+
+function tickPreRoundCountdown(room) {
+  if (!room || room.practice) return;
+  if ((room.preRoundCd | 0) <= 0) return;
+  if (room.pvpShopOpen && room.pvpShopOpen.size > 0) return; // paused while shopping
+  room.preRoundAcc = (room.preRoundAcc | 0) + 1;
+  if (room.preRoundAcc < TPS) return;
+  room.preRoundAcc = 0;
+  room.preRoundCd = Math.max(0, (room.preRoundCd | 0) - 1);
+  broadcastPreRound(room);
+  if ((room.preRoundCd | 0) <= 0) finishPreRoundCountdown(room);
+}
+
+function tickPvpShopTimers(room) {
+  if (!room || room.practice || !room.pvpShopOpen || !room.pvpShopOpen.size) return;
+  for (const id of [...room.pvpShopOpen]) {
+    const p = room.players.get(id);
+    if (!p) {
+      room.pvpShopOpen.delete(id);
+      continue;
+    }
+    p.shopTimeLeft = Math.max(0, (p.shopTimeLeft | 0) - 1);
+    if ((p.shopTimeLeft | 0) <= 0) closePvpShop(room, id, true);
+  }
+  // ~4 Hz budget sync while shops open.
+  if ((room.tick % Math.max(1, (TPS / 4) | 0)) === 0) broadcastPreRound(room);
+}
+
+function openPvpShop(room, playerId) {
+  if (!room || room.practice) return { ok: 0, err: 'mode' };
+  if ((room.preRoundCd | 0) <= 0 && !(room.pvpShopOpen && room.pvpShopOpen.size)) {
+    return { ok: 0, err: 'closed' };
+  }
+  const p = room.players.get(playerId);
+  if (!p || p.bot || (p.hp | 0) <= 0) return { ok: 0, err: 'player' };
+  if ((p.shopTimeLeft | 0) <= 0) return { ok: 0, err: 'time' };
+  if (!room.pvpShopOpen) room.pvpShopOpen = new Set();
+  if (room.pvpShopOpen.has(playerId)) return { ok: 1 };
+  room.pvpShopOpen.add(playerId);
+  // Pause + reset countdown until everyone closes.
+  room.preRoundCd = PRE_ROUND_COUNTDOWN_SEC;
+  room.preRoundAcc = 0;
+  if (p.weapon) ownOnlyWeapon(p, p.weapon, getWeaponLevel(p, p.weapon));
+  for (const ws of room.clients) {
+    if (ws.playerId === p.id && ws.readyState === 1) {
+      send(ws, Object.assign(packShopState(room, p), {
+        pvp: 1,
+        shopTimeLeft: p.shopTimeLeft | 0
+      }));
+    }
+  }
+  broadcastPreRound(room);
+  return { ok: 1 };
+}
+
+function closePvpShop(room, playerId, forced) {
+  if (!room || !room.pvpShopOpen) return;
+  if (!room.pvpShopOpen.has(playerId)) return;
+  room.pvpShopOpen.delete(playerId);
+  for (const ws of room.clients) {
+    if (ws.playerId === playerId && ws.readyState === 1) {
+      send(ws, { t: 'shopClose', forced: forced ? 1 : 0 });
+    }
+  }
+  if (room.pvpShopOpen.size === 0 && (room.preRoundCd | 0) > 0) {
+    // All closed → restart full 3-2-1.
+    room.preRoundCd = PRE_ROUND_COUNTDOWN_SEC;
+    room.preRoundAcc = 0;
+  }
+  broadcastPreRound(room);
+}
+
 function beginMatchLive(room) {
   if (!room || room.matchLive || room.practice) return;
   room.matchLive = true;
@@ -1395,6 +1517,7 @@ function beginMatchLive(room) {
 
 function markPlayerReady(room, playerId) {
   if (!room || room.matchLive || room.practice) return;
+  if ((room.preRoundCd | 0) > 0) return;
   if (playerId == null || !room.players.has(playerId)) return;
   const p = room.players.get(playerId);
   if (!p || p.bot) return;
@@ -1406,6 +1529,6 @@ function markPlayerReady(room, playerId) {
   });
   const humans = humanPlayers(room);
   if (humans.length > 0 && humans.every(h => room.readyIds.has(h.id))) {
-    beginMatchLive(room);
+    startPreRoundCountdown(room);
   }
 }
