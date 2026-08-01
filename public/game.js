@@ -15303,6 +15303,7 @@ function resetMatchState() {
   stopAllVoidTravelSfx();
   bullets.clear();
   pickups.clear();
+  ghostBullets.length = 0;
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
   remoteLasers.clear();
   hitLasers.length = 0;
@@ -20082,6 +20083,7 @@ function enterGameFromWelcome(msg) {
   stopAllVoidTravelSfx();
   bullets.clear();
   pickups.clear();
+  ghostBullets.length = 0;
   softErr.x = 0; softErr.y = 0; softErr.angle = 0;
   remoteLasers.clear();
   hitLasers.length = 0;
