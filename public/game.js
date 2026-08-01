@@ -11920,6 +11920,8 @@ addEventListener('keydown', e => {
   if (matchPaused || (pausePanelEl && pausePanelEl.classList.contains('open'))) {
     if (e.code === 'Escape') {
       e.preventDefault();
+      // Solo / matchmaking wait-waves: Esc toggles resume instantly.
+      if (practiceMode && !coopMode) requestMatchPause();
       return;
     }
     if (GAME_KEYS.has(e.code) || e.code === 'Space' || e.code === 'Enter') {
@@ -15328,7 +15330,7 @@ function renderPausePanel() {
   if (cd > 0) {
     lines.push('Resuming…');
   } else if (practiceMode && !coopMode) {
-    lines.push('Press Ready, then 3-2-1 to continue.');
+    lines.push('Press Esc or Ready to continue.');
   } else {
     lines.push('Ready: ' + ready.length + '/' + need);
     lines.push('Both players must Ready, then 3-2-1.');
@@ -15421,6 +15423,11 @@ function applyResumedMsg(msg) {
 function requestMatchPause() {
   if (!inGame || !ws || ws.readyState !== 1) return;
   if (matchPaused) {
+    // Solo / wait-waves: Esc sends pause again → server ends pause instantly.
+    if (practiceMode && !coopMode) {
+      ws.send(JSON.stringify({ t: 'pause' }));
+      return;
+    }
     openPausePanel();
     return;
   }

@@ -238,6 +238,11 @@ function markPauseReady(room, playerId) {
   if (playerId == null || !room.players.has(playerId)) return;
   const hold = room.pauseHold.get(playerId);
   if (hold && hold.disconnected) return;
+  // Solo / wait-waves: Ready resumes immediately (no shared countdown).
+  if (room.practice && !room.coop) {
+    endPause(room);
+    return;
+  }
   // Cannot resume while a teammate/opponent is still disconnected.
   for (const h of room.pauseHold.values()) {
     if (h && h.disconnected) {
@@ -260,8 +265,12 @@ function markPauseReady(room, playerId) {
 function requestMatchPause(ws) {
   const room = ws.room;
   if (!room || ws.playerId == null) return { ok: 0, err: 'noroom' };
-  // Solo / practice: always allow local pause (no shared budget).
+  // Solo / practice / matchmaking wait-waves: Esc toggles pause with no 3-2-1.
   if (room.practice && !room.coop) {
+    if (room.paused) {
+      endPause(room);
+      return { ok: 1, resumed: 1 };
+    }
     beginPause(room, null, 'manual');
     return { ok: 1 };
   }
