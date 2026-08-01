@@ -964,7 +964,7 @@ const CVARS = {
   cl_server_pose: {
     value: 0,
     def: 0,
-    help: '1 = draw your last server snap pose as a ghost (hit circles + nose). Compare vs local prediction.'
+    help: '1 = draw your last server snap as a ghost + muzzle when your server bullet (bf) arrives. No extra net traffic.'
   },
   cl_ghost_bullet: {
     value: 0,
@@ -19777,6 +19777,54 @@ function drawCollisionRing(x, y, angle, color) {
 
 /** cl_server_pose: last authoritative snap of local player (serverGhost). */
 const SERVER_POSE_GHOST_COL = [1.0, 0.2, 0.75];
+/** Brief flash window after a local player's server bullet (bf) arrives. */
+let serverPoseMuzzleUntil = 0;
+
+/**
+ * Muzzle at server fire origin when our own `bf` arrives (no extra net msg).
+ * Uses bullet spawn pose; falls back to serverGhost ship muzzle if needed.
+ */
+function emitServerPoseMuzzleFromFire(spawnX, spawnY, aimAng, type) {
+  if ((cv('cl_server_pose') | 0) === 0) return;
+  if (myId == null) return;
+  const t = type || 'default';
+  if (
+    t === 'enemy' || t === 'enemySpinner' || t === 'enemyWorm'
+    || t === 'enemyRocket' || t === 'turret' || t === 'laser' || t === 'railgun'
+  ) return;
+
+  let mx = +spawnX;
+  let my = +spawnY;
+  let ma = +aimAng;
+  if (!Number.isFinite(ma)) ma = 0;
+  // Prefer ship nose on the ghost pose when we have a fresh server snap.
+  if (serverGhost.valid) {
+    const m = shipMuzzle(serverGhost.x, serverGhost.y, serverGhost.angle || 0);
+    mx = m.x;
+    my = m.y;
+    ma = serverGhost.angle || ma;
+  }
+  serverPoseMuzzleUntil = performance.now() + 320;
+  const svx = serverGhost.valid ? (serverGhost.vx || 0) : 0;
+  const svy = serverGhost.valid ? (serverGhost.vy || 0) : 0;
+  let cone = 1;
+  let count = 9;
+  if (t === 'shotgun') { cone = 1.45; count = 12; }
+  else if (t === 'plasma' || t === 'voidcannon') { cone = 0.9; count = 9; }
+  else if (t === 'rocket') { count = 12; }
+  // shipMuzzle: still show when cl_muzzle 0 (that cvar only hides remote bullet muzzles).
+  emitMuzzleFx(mx, my, ma, SERVER_POSE_GHOST_COL, count, svx, svy, {
+    cone,
+    shipMuzzle: true
+  });
+}
+
+function emitServerPoseMuzzleFromBullet(b) {
+  if (!b || b.owner !== myId) return;
+  const ang = Math.atan2(b.vy, b.vx);
+  emitServerPoseMuzzleFromFire(b.spawnX, b.spawnY, ang, b.type || 'default');
+}
+
 function drawServerPoseGhost() {
   if ((cv('cl_server_pose') | 0) === 0) return;
   if (!serverGhost.valid || myId == null) return;
@@ -19788,11 +19836,12 @@ function drawServerPoseGhost() {
   const y = serverGhost.y;
   const angle = serverGhost.angle || 0;
   const col = SERVER_POSE_GHOST_COL;
+  const muzzleHot = performance.now() < serverPoseMuzzleUntil;
   drawCollisionRing(x, y, angle, col);
   const c = Math.cos(angle);
   const s = Math.sin(angle);
   const nose = 12 * RES_SCALE;
-  drawThickSegment(x, y, x + c * nose, y + s * nose, 2 * RES_SCALE, col, 0.75);
+  drawThickSegment(x, y, x + c * nose, y + s * nose, 2 * RES_SCALE, col, muzzleHot ? 1 : 0.75);
   // Faint body diamond so the ghost reads as a ship, not only hitboxes.
   const back = 7 * RES_SCALE;
   const wing = 5 * RES_SCALE;
@@ -19804,10 +19853,16 @@ function drawServerPoseGhost() {
   const ly = y + c * wing;
   const rx = x + s * wing;
   const ry = y - c * wing;
-  drawThickSegment(nx, ny, lx, ly, 1.2 * RES_SCALE, col, 0.55);
-  drawThickSegment(lx, ly, bx, by, 1.2 * RES_SCALE, col, 0.55);
-  drawThickSegment(bx, by, rx, ry, 1.2 * RES_SCALE, col, 0.55);
-  drawThickSegment(rx, ry, nx, ny, 1.2 * RES_SCALE, col, 0.55);
+  const edgeA = muzzleHot ? 0.85 : 0.55;
+  drawThickSegment(nx, ny, lx, ly, 1.2 * RES_SCALE, col, edgeA);
+  drawThickSegment(lx, ly, bx, by, 1.2 * RES_SCALE, col, edgeA);
+  drawThickSegment(bx, by, rx, ry, 1.2 * RES_SCALE, col, edgeA);
+  drawThickSegment(rx, ry, nx, ny, 1.2 * RES_SCALE, col, edgeA);
+  if (muzzleHot) {
+    const m = shipMuzzle(x, y, angle);
+    drawSoftOval(m.x, m.y, 0, 5 * RES_SCALE, 5 * RES_SCALE, col, 0.45, true, 0.4);
+    drawSoftOval(m.x, m.y, 0, 2.5 * RES_SCALE, 2.5 * RES_SCALE, col, 0.7, false, 0.8);
+  }
 }
 
 /** Decorative asteroids for the home / queue screen. */
@@ -20962,6 +21017,9 @@ function handleWsMessage(e) {
       if (isShotgunShellFire(row)) {
         addShotgunShellFire(row, (row[5] | 0) !== myId, true);
         const owner = row[5] | 0;
+        if (owner === myId) {
+          emitServerPoseMuzzleFromFire(row[1], row[2], row[3], 'shotgun');
+        }
         if (owner > 0 && owner !== myId && !remotes.has(owner)) {
           pushRemoteSample(owner, [
             owner, row[1], row[2], 0, 0, row[3], 100, 0, 0, 0, 0
@@ -20972,6 +21030,8 @@ function handleWsMessage(e) {
       const b = unpackBullet(row);
       // Own shots already flashed locally; remotes still get muzzle FX here.
       addBullet(b, b.owner !== myId, true);
+      // cl_server_pose: ghost muzzle when our authoritative bullet appears (reuse bf).
+      if (b.owner === myId) emitServerPoseMuzzleFromBullet(b);
       // If snaps/roster missed this owner, seed a remote so they aren't invisible.
       if (b.owner > 0 && b.owner !== myId && !remotes.has(b.owner)) {
         const p = bulletTrueAt(b);
