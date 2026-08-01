@@ -961,6 +961,11 @@ const CVARS = {
     def: 0,
     help: 'Draw collision hitboxes (0/1). Asteroids = filled poly, players = dual circles, enemies = radius circle, bullets = solid red circles.'
   },
+  cl_server_pose: {
+    value: 0,
+    def: 0,
+    help: '1 = draw your last server snap pose as a ghost (hit circles + nose). Compare vs local prediction.'
+  },
   cl_ghost_bullet: {
     value: 0,
     def: 0,
@@ -8144,6 +8149,7 @@ function drawSceneLines(dt) {
     drawShipPowerupFx(me.x + ox, me.y + oy, myId, me.angle, dt);
     if (showHit) drawCollisionRing(me.x + ox, me.y + oy, me.angle, COL.debug);
   }
+  drawServerPoseGhost();
 
   for (const r of remotes.values()) {
     const isDying = dyingId === r.id;
@@ -19767,6 +19773,41 @@ function drawCollisionRing(x, y, angle, color) {
     PLAYER_HIT_R_BACK,
     color
   );
+}
+
+/** cl_server_pose: last authoritative snap of local player (serverGhost). */
+const SERVER_POSE_GHOST_COL = [1.0, 0.2, 0.75];
+function drawServerPoseGhost() {
+  if ((cv('cl_server_pose') | 0) === 0) return;
+  if (!serverGhost.valid || myId == null) return;
+  if ((serverGhost.hp | 0) <= 0) {
+    const dying = deathSeq && deathSeq.phase === 'shake' && deathSeq.id === myId;
+    if (!dying) return;
+  }
+  const x = serverGhost.x;
+  const y = serverGhost.y;
+  const angle = serverGhost.angle || 0;
+  const col = SERVER_POSE_GHOST_COL;
+  drawCollisionRing(x, y, angle, col);
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const nose = 12 * RES_SCALE;
+  drawThickSegment(x, y, x + c * nose, y + s * nose, 2 * RES_SCALE, col, 0.75);
+  // Faint body diamond so the ghost reads as a ship, not only hitboxes.
+  const back = 7 * RES_SCALE;
+  const wing = 5 * RES_SCALE;
+  const nx = x + c * nose * 0.55;
+  const ny = y + s * nose * 0.55;
+  const bx = x - c * back;
+  const by = y - s * back;
+  const lx = x - s * wing;
+  const ly = y + c * wing;
+  const rx = x + s * wing;
+  const ry = y - c * wing;
+  drawThickSegment(nx, ny, lx, ly, 1.2 * RES_SCALE, col, 0.55);
+  drawThickSegment(lx, ly, bx, by, 1.2 * RES_SCALE, col, 0.55);
+  drawThickSegment(bx, by, rx, ry, 1.2 * RES_SCALE, col, 0.55);
+  drawThickSegment(rx, ry, nx, ny, 1.2 * RES_SCALE, col, 0.55);
 }
 
 /** Decorative asteroids for the home / queue screen. */
