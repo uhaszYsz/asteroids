@@ -10452,19 +10452,18 @@ const spriteShipFS = `
     float lum = dot(t.rgb, vec3(0.299, 0.587, 0.114));
     float emitMask = smoothstep(0.12, 0.72, lum);
     vec3 rgb = albedo + uTint * emitMask * max(0.0, uEmit);
-    // Impact flash: red center → yellow edges, soft rim, fades over uHitAge 0→1.
+    // Impact flash as emission (additive), same model as material emit:
+    // hot tint × bright-texel mask × energy; soft radial falloff; fades with uHitAge.
     if (uHitAge < 0.999) {
       float d = length(vLocal - uHitLocal);
       float rad = 0.304; // ~30% smaller again from 0.434
-      // Color: red at center, yellow toward edge.
       float tCol = smoothstep(0.0, rad * 0.92, d);
       vec3 hot = mix(vec3(1.0, 0.08, 0.02), vec3(1.0, 0.95, 0.18), tCol);
-      // Soft outer edge (feather), not a hard cut.
       float fall = 1.0 - smoothstep(rad * 0.42, rad, d);
       float fade = 1.0 - uHitAge;
-      float solid = smoothstep(0.12, 0.4, t.a);
-      float w = clamp(fall * fade * solid * 0.95, 0.0, 1.0);
-      rgb = mix(rgb, hot, w);
+      // Prefer bright albedo (Godot emitMask); dim hull still gets a soft floor.
+      float hitMask = max(emitMask, smoothstep(0.08, 0.4, t.a) * 0.4);
+      rgb += hot * hitMask * fall * fade * 1.9;
     }
     gl_FragColor = applyNightLit(rgb, t.a * uAlpha, vWorld);
   }
