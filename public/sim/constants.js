@@ -522,8 +522,8 @@ const ADMINGUN_TURRET_COOLDOWN = 1;
 const ADMINGUN_TURRET_RELOAD = TPS;
 const ADMINGUN_TURRET_DMG = 100;
 const DAMAGE_POWERUP_MULT = 1.25;
-/** Homing powerup: max turn toward enemy per sim tick (0.1°). */
-const HOMING_TURN_RAD = (0.1 * Math.PI) / 180;
+/** Homing powerup: max turn toward target per sim tick (0.2°). */
+const HOMING_TURN_RAD = (0.2 * Math.PI) / 180;
 const HOMING_BULLET_TYPES = new Set(['default', 'shotgun', 'plasma', 'rocket', 'voidcannon', 'turret']);
 const ASTEROID_HP = 50;
 /** Coins granted to the destroyer when a world asteroid is killed. */
