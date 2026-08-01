@@ -11060,6 +11060,9 @@ function effectiveLocalWeapon(name) {
     if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
   } else if (n === 'laser') {
     if (lvl >= 3) w.ammo = Math.round(base.ammo * 1.25);
+  } else if (n === 'plasma') {
+    // L2 = 7.5 dmg (server). L3 = 60 ammo.
+    if (lvl >= 3) w.ammo = 60;
   } else if (n === 'railgun') {
     if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
   }

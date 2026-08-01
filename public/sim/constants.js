@@ -173,6 +173,9 @@ function effectiveWeapon(p, name) {
     if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
   } else if (n === 'laser') {
     if (lvl >= 3) w.ammo = Math.round(base.ammo * 1.25);
+  } else if (n === 'plasma') {
+    // L2 = 7.5 dmg (effectiveBulletDmg). L3 = 60 ammo.
+    if (lvl >= 3) w.ammo = 60;
   } else if (n === 'railgun') {
     // L2 = edge bounce (handled in fireRailgun). L3 = 30% faster shot cooldown.
     if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
@@ -185,6 +188,7 @@ function effectiveBulletDmg(p, typeName) {
   const cfg = BULLET_TYPES[typeName] || BULLET_TYPES.default;
   let dmg = cfg.dmg;
   if (typeName === 'laser' && getWeaponLevel(p, 'laser') >= 2) dmg *= 1.2;
+  if (typeName === 'plasma' && getWeaponLevel(p, 'plasma') >= 2) dmg = 7.5;
   if (p && p.powerups && p.powerups.damage) dmg *= DAMAGE_POWERUP_MULT;
   return dmg;
 }
