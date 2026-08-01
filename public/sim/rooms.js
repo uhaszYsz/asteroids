@@ -740,6 +740,7 @@ function stepRoom(room) {
     updateTurrets(room);
     updatePickups(room);
     if (room.practice && !room.shopOpen) updateEnemies(room);
+    tickWorldPoseSnap(room);
   } else if (room.bullets.length) {
     // Pre-start: fly around only — clear any stray shots.
     for (const b of room.bullets) {

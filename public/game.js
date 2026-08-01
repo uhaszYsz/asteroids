@@ -18376,6 +18376,45 @@ function applyAsteroidWrap(row) {
   }
 }
 
+/** Periodic `es` live asteroid poses (packAsteroidLive rows). */
+function applyAsteroidPoseSnap(rows, st) {
+  if (!rows || !rows.length) return;
+  const snapSt = st || Date.now();
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const id = row[0];
+    let a = asteroids.get(id);
+    if (!a) {
+      addAsteroid(unpackAsteroid(row));
+      continue;
+    }
+    a.spawnX = row[1];
+    a.spawnY = row[2];
+    a.vx = row[3];
+    a.vy = row[4];
+    a.spawnAngle = row[5];
+    a.spin = row[6];
+    a.spawnSt = row[10] != null ? row[10] : snapSt;
+    if (row[13] != null) a.portal = !!(row[13] | 0);
+    if (practiceMode || a.playerShot) {
+      if (row[15] != null) a.edgeWraps = row[15] | 0;
+      if (row[16] != null) a.edgeWrapMax = row[16] | 0;
+    }
+    if (row[20] != null) a.bornAt = +row[20];
+    clearAsteroidGridIron(a);
+    const age = Math.max(0, (serverNow() - a.spawnSt) / 1000 * TPS);
+    const x = a.spawnX + a.vx * age;
+    const y = a.spawnY + a.vy * age;
+    a.entered = !asteroidOffScreenAt(a, x, y);
+  }
+}
+
+/** Periodic `es` live pickup poses (packPickupLive / bounce layout). */
+function applyPickupPoseSnap(rows) {
+  if (!rows || !rows.length) return;
+  for (let i = 0; i < rows.length; i++) applyPickupBounce(rows[i]);
+}
+
 function pruneAsteroids() {
   for (const [id, a] of asteroids) {
     const wrapSpent = a.playerShot && asteroidClientWrapsExhausted(a);
@@ -20565,8 +20604,10 @@ function handleWsMessage(e) {
       applyEnemyUpdate(msg.e);
       return;
     }
-    if (msg.t === 'es' && inGame && msg.e) {
-      applyEnemySnapList(msg.e, msg.st);
+    if (msg.t === 'es' && inGame) {
+      if (msg.e) applyEnemySnapList(msg.e, msg.st);
+      if (msg.a) applyAsteroidPoseSnap(msg.a, msg.st);
+      if (msg.u) applyPickupPoseSnap(msg.u);
       return;
     }
     if (msg.t === 'eh' && inGame) {
@@ -22823,8 +22864,10 @@ function demoReplayEvent(ev) {
     applyEnemyUpdate(ev.e);
     return;
   }
-  if (ev.t === 'es' && ev.e) {
-    applyEnemySnapList(ev.e, ev.st);
+  if (ev.t === 'es') {
+    if (ev.e) applyEnemySnapList(ev.e, ev.st);
+    if (ev.a) applyAsteroidPoseSnap(ev.a, ev.st);
+    if (ev.u) applyPickupPoseSnap(ev.u);
     return;
   }
   if (ev.t === 'eh') {

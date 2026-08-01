@@ -449,6 +449,15 @@ function packPickupSync(u) {
   return [u.id, u.spawnX, u.spawnY, u.vx, u.vy, u.spawnAngle, u.spin, u.spawnSt, u.bounces | 0];
 }
 
+/** Live pose as a fresh spawn origin (periodic es snap). Does not mutate `u`. */
+function packPickupLive(u, st) {
+  return [
+    u.id, u.x, u.y, u.vx, u.vy, u.angle, u.spin,
+    st != null ? st : Date.now(),
+    u.bounces | 0
+  ];
+}
+
 function emitPickupFire(room, u) {
   roomBroadcast(room, { t: 'pf', u: packPickup(u) });
 }

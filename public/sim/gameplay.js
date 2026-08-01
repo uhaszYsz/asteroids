@@ -565,15 +565,42 @@ function emitEnemyUpdate(room, e) {
   roomBroadcast(room, { t: 'eu', e: packEnemy(e) });
 }
 
-function emitEnemySnap(room) {
-  if (!room.enemies || !room.enemies.length) return;
-  const list = [];
-  for (const e of room.enemies) {
-    if (!enemyIsSpawned(e)) continue;
-    list.push(packEnemySnap(e));
+/**
+ * Periodic pose snap (`es`, ~2 Hz). Enemies always when present.
+ * opts.field (default true): also pack live asteroid + pickup poses.
+ * Worm aim spam uses field:false so rocks/crates aren't resent every tick.
+ */
+function emitEnemySnap(room, opts) {
+  const field = !opts || opts.field !== false;
+  const st = Date.now();
+  const msg = { t: 'es', st };
+  if (room.enemies && room.enemies.length) {
+    const list = [];
+    for (const e of room.enemies) {
+      if (!enemyIsSpawned(e)) continue;
+      list.push(packEnemySnap(e));
+    }
+    if (list.length) msg.e = list;
   }
-  if (!list.length) return;
-  roomBroadcast(room, { t: 'es', st: Date.now(), e: list });
+  if (field) {
+    if (room.asteroids && room.asteroids.length) {
+      msg.a = room.asteroids.map((a) => packAsteroidLive(a, st));
+    }
+    if (room.pickups && room.pickups.length) {
+      msg.u = room.pickups.map((u) => packPickupLive(u, st));
+    }
+  }
+  if (!msg.e && !msg.a && !msg.u) return;
+  roomBroadcast(room, msg);
+}
+
+/** Own the ~2 Hz world pose timer (enemies + asteroids + pickups). */
+function tickWorldPoseSnap(room) {
+  if (!room || !room.matchLive) return;
+  room.enemySnapLeft = (room.enemySnapLeft | 0) - 1;
+  if ((room.enemySnapLeft | 0) > 0) return;
+  room.enemySnapLeft = ENEMY_SNAP_INTERVAL;
+  emitEnemySnap(room, { field: true });
 }
 
 /** Common / UFO / worm about to fire — charge telegraph for clients. */
@@ -1594,13 +1621,9 @@ function updateEnemies(room) {
     enemyTryFire(room, e);
   }
 
-  // Periodic full pose snap (~2 Hz) so clients stay locked.
-  // Worm aim turns every tick — snap every frame while any worm is holding.
-  room.enemySnapLeft = (room.enemySnapLeft | 0) - 1;
-  if (wormHolding || (room.enemySnapLeft | 0) <= 0) {
-    room.enemySnapLeft = ENEMY_SNAP_INTERVAL;
-    emitEnemySnap(room);
-  }
+  // Worm aim turns every tick — enemy-only snap every frame while holding.
+  // Full field snap (enemies+asteroids+pickups) is tickWorldPoseSnap (~2 Hz).
+  if (wormHolding) emitEnemySnap(room, { field: false });
 }
 
 function damageEnemy(room, e, dmg) {
