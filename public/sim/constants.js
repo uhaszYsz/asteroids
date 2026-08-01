@@ -94,7 +94,7 @@ const BULLET_TYPES = {
   default: { dmg: 35, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   /** Direct dmg unused — rockets only deal ROCKET_BLAST_* circle damage on detonate. */
   rocket: { dmg: 0, col: 'circle', size: 7 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
-  laser: { dmg: 3, col: 'ray', size: 0, scaleY: 1, length: 0, width: 2 * RES_SCALE },
+  laser: { dmg: 2.5, col: 'ray', size: 0, scaleY: 1, length: 0, width: 2 * RES_SCALE },
   shotgun: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   railgun: { dmg: 80, col: 'ray', size: 0, scaleY: 1, length: 0, width: 3 * RES_SCALE },
   /** Engine exhaust hit — fired while thrusting (ex-melee). */
