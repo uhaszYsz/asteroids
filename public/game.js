@@ -9978,7 +9978,7 @@ function clearHitVibration(kind, id) {
 }
 
 /** Red→yellow impact tint on sprite ships (opaque texels only). */
-const HIT_TINT_DUR_MS = 280;
+const HIT_TINT_DUR_MS = 3000;
 const shipHitTintByKey = new Map();
 
 /** Nearest living player/enemy to a world hit (for ship-local tint). */
@@ -10452,15 +10452,18 @@ const spriteShipFS = `
     float lum = dot(t.rgb, vec3(0.299, 0.587, 0.114));
     float emitMask = smoothstep(0.12, 0.72, lum);
     vec3 rgb = albedo + uTint * emitMask * max(0.0, uEmit);
-    // Impact flash: red core → yellow rim on opaque texels only (cheap, no UV walk).
+    // Impact flash: red center → yellow edges, soft rim, fades over uHitAge 0→1.
     if (uHitAge < 0.999) {
       float d = length(vLocal - uHitLocal);
-      float rad = 0.62;
-      float fall = 1.0 - smoothstep(0.0, rad, d);
+      float rad = 0.434; // ~30% smaller than 0.62
+      // Color: red at center, yellow toward edge.
+      float tCol = smoothstep(0.0, rad * 0.92, d);
+      vec3 hot = mix(vec3(1.0, 0.08, 0.02), vec3(1.0, 0.95, 0.18), tCol);
+      // Soft outer edge (feather), not a hard cut.
+      float fall = 1.0 - smoothstep(rad * 0.42, rad, d);
       float fade = 1.0 - uHitAge;
       float solid = smoothstep(0.12, 0.4, t.a);
-      float w = clamp(fall * fade * solid * 0.92, 0.0, 1.0);
-      vec3 hot = mix(vec3(1.0, 0.1, 0.04), vec3(1.0, 0.9, 0.12), smoothstep(0.0, rad * 0.9, d));
+      float w = clamp(fall * fade * solid * 0.95, 0.0, 1.0);
       rgb = mix(rgb, hot, w);
     }
     gl_FragColor = applyNightLit(rgb, t.a * uAlpha, vWorld);
