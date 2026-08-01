@@ -4596,7 +4596,9 @@ function fireProjectile(room, p, typeName) {
   const x = pose.x + Math.cos(pose.angle) * MUZZLE;
   const y = pose.y + Math.sin(pose.angle) * MUZZLE;
   const isRocket = typeName === 'rocket';
-  const speed = isRocket ? ROCKET_LAUNCH_SPEED : w.speed;
+  const speed = isRocket
+    ? (w.launchSpeed != null ? +w.launchSpeed : ROCKET_LAUNCH_SPEED)
+    : w.speed;
   const vel = bulletVelocity(p, pose.angle, speed, !isRocket && !!w.relative);
   const b = {
     id: room.nextBulletId++,

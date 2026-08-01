@@ -11052,8 +11052,9 @@ function effectiveLocalWeapon(name) {
     // L2 = 2× bullet size (server sets b.size). L3 = +1 ammo.
     if (lvl >= 3) w.ammo += 1;
   } else if (n === 'rocket') {
-    if (lvl >= 2 && w.speed != null) w.speed *= 1.2;
-    if (lvl >= 3) w.reload = Math.max(1, Math.round(base.reload * 0.7));
+    // L2 = faster reload. L3 = launch speed 10 (server fire).
+    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.7));
+    if (lvl >= 3) w.launchSpeed = 10;
   } else if (n === 'shotgun') {
     if (lvl >= 2) w.ammo += 1;
     if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
