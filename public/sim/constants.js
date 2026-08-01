@@ -65,7 +65,7 @@ const WEAPONS = {
     charge: Math.round(0.5 * TPS)
   },
   /** Rapid plasma bolts. */
-  plasma: { ammo: 50, cooldown: 2, reload: Math.round(2 * TPS), speed: 9 * RES_SCALE * 1.7 },
+  plasma: { ammo: 30, cooldown: 2, reload: Math.round(2 * TPS), speed: 9 * RES_SCALE * 1.7 },
   /** Slow void orb — persists through hits, escalating DoT while overlapping. */
   voidcannon: { ammo: 1, cooldown: 1, reload: 60, speed: 2.1504 * RES_SCALE },
   /** Lob a little asteroid that bounces off rocks. */
@@ -99,7 +99,7 @@ const BULLET_TYPES = {
   railgun: { dmg: 80, col: 'ray', size: 0, scaleY: 1, length: 0, width: 3 * RES_SCALE },
   /** Engine exhaust hit — fired while thrusting (ex-melee). */
   thrust: { dmg: 25, col: 'ray', size: 0, scaleY: 1, length: 0, width: 3 * RES_SCALE },
-  plasma: { dmg: 7, col: 'circle', size: 5 * RES_SCALE, scaleY: 1, length: 5 * RES_SCALE, width: 2.5 * RES_SCALE },
+  plasma: { dmg: 6, col: 'circle', size: 5 * RES_SCALE, scaleY: 1, length: 5 * RES_SCALE, width: 2.5 * RES_SCALE },
   voidcannon: { dmg: 5, col: 'circle', size: 27 * RES_SCALE, scaleY: 1, length: 0, width: 0 },
   turret: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   /**
