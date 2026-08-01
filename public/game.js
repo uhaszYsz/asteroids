@@ -856,8 +856,8 @@ addEventListener('keydown', unlockSfx, { once: true });
 
 const TPS = 30;
 const TICK_MS = 1000 / TPS;
-const TURN_AV_MAX = (Math.PI * 2) / (1.2 * TPS); // 360° in 1.2s ≈ 10°/tick
-const TURN_ACCEL = TURN_AV_MAX / 12;               // reach max in 12 ticks
+const TURN_AV_MAX = 8 * Math.PI / 180;            // 8°/tick
+const TURN_ACCEL = 0.7 * Math.PI / 180;           // 0.7°/tick² (~11.4 ticks to cap)
 const TURN_AV_MAX_PRECISE = TURN_AV_MAX * 0.3;
 const TURN_ACCEL_PRECISE = TURN_ACCEL * 0.3;
 const TURN_DECEL_FRAMES = 5;                     // release → 0 in this many ticks
