@@ -46,7 +46,7 @@ const WEAPON_MAX_LEVEL = 3;
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
   rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 15 },
-  laser: { ammo: 45, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
+  laser: { ammo: 45, cooldown: 1, reload: 50, range: Math.hypot(W, H) },
   shotgun: {
     ammo: 2,
     cooldown: 1,
@@ -94,7 +94,7 @@ const BULLET_TYPES = {
   default: { dmg: 35, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   /** Direct dmg unused — rockets only deal ROCKET_BLAST_* circle damage on detonate. */
   rocket: { dmg: 0, col: 'circle', size: 7 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
-  laser: { dmg: 7, col: 'ray', size: 0, scaleY: 1, length: 0, width: 2 * RES_SCALE },
+  laser: { dmg: 3, col: 'ray', size: 0, scaleY: 1, length: 0, width: 2 * RES_SCALE },
   shotgun: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   railgun: { dmg: 80, col: 'ray', size: 0, scaleY: 1, length: 0, width: 3 * RES_SCALE },
   /** Engine exhaust hit — fired while thrusting (ex-melee). */
@@ -524,13 +524,13 @@ const ROCKET_ACCEL_BOOST_MULT = 3;
 const ROCKET_HOMING_DEFAULT = 0;
 /** How often accel/homing rockets resync pose to clients. */
 const ROCKET_NET_INTERVAL = 5;
-/** Carrier laser — keep old 30-ammo dump (player laser ammo may differ). */
+/** Carrier laser — keep old dump/dmg (player laser stats may differ). */
 const ENEMY_LASER = {
   ammo: 30,
   cooldown: WEAPONS.laser.cooldown,
-  reload: WEAPONS.laser.reload,
+  reload: 90,
   range: WEAPONS.laser.range || Math.hypot(W, H),
-  dmg: BULLET_TYPES.laser.dmg
+  dmg: 7
 };
 const ENEMY_PLASMA = {
   ammo: WEAPONS.plasma.ammo,

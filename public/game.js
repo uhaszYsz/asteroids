@@ -11468,7 +11468,7 @@ let selectedWeapon = 1; // 1 default … 8 asteroidgun
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
   rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 15 },
-  laser: { ammo: 45, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
+  laser: { ammo: 45, cooldown: 1, reload: 50, range: Math.hypot(W, H) },
   shotgun: {
     ammo: 2,
     cooldown: 1,
