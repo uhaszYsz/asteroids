@@ -46,7 +46,7 @@ const WEAPON_MAX_LEVEL = 3;
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
   rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 15 },
-  laser: { ammo: 30, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
+  laser: { ammo: 45, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
   shotgun: {
     ammo: 2,
     cooldown: 1,
@@ -524,9 +524,9 @@ const ROCKET_ACCEL_BOOST_MULT = 3;
 const ROCKET_HOMING_DEFAULT = 0;
 /** How often accel/homing rockets resync pose to clients. */
 const ROCKET_NET_INTERVAL = 5;
-/** Level-1 laser / plasma stats mirrored for carriers. */
+/** Carrier laser — keep old 30-ammo dump (player laser ammo may differ). */
 const ENEMY_LASER = {
-  ammo: WEAPONS.laser.ammo,
+  ammo: 30,
   cooldown: WEAPONS.laser.cooldown,
   reload: WEAPONS.laser.reload,
   range: WEAPONS.laser.range || Math.hypot(W, H),

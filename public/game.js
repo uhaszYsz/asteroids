@@ -11468,7 +11468,7 @@ let selectedWeapon = 1; // 1 default … 8 asteroidgun
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
   rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 15 },
-  laser: { ammo: 30, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
+  laser: { ammo: 45, cooldown: 1, reload: 90, range: Math.hypot(W, H) },
   shotgun: {
     ammo: 2,
     cooldown: 1,
@@ -11653,7 +11653,7 @@ function updateLocalShooting() {
 }
 
 // Laser visual: 100% local from ship. Duration = while localShoot.bursting (sim ticks).
-const LASER_CLIP_MS = Math.round(30 * 1 * (1000 / TPS)); // remotes fallback (= base laser ammo×cd)
+const LASER_CLIP_MS = Math.round(45 * 1 * (1000 / TPS)); // remotes fallback (= base laser ammo×cd)
 const LASER_LINGER_MS = 750; // remotes only
 const LASER_HIT_MS = Math.round(8 * (1000 / TPS));
 const LASER_RANGE = Math.hypot(W, H);
