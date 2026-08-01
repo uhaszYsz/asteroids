@@ -979,7 +979,7 @@ const CVARS = {
   cl_muzzle: {
     value: 1,
     def: 1,
-    help: '1 = all muzzle particle sprays. 0 = hide server/remote bullet muzzle only; keep local ship shoot muzzle.'
+    help: '1 = all muzzle sprays. 0 = only local ship-nose muzzle (inherited ship vel); hide per-bullet / remote / server-pose muzzles.'
   },
   cl_hitscan: {
     value: 0,
@@ -6725,12 +6725,14 @@ function mixRgb(a, b, t) {
  * (random 0%…230%), speed = default bullet speed ±50%.
  * Emits two layers: one inheriting ship/rocket vel, one with base 0 + particle speeds only.
  * `count` scales intensity; optional opts.cone widens the spray (shotgun).
- * opts.shipMuzzle: local ship shoot FX — kept even when cl_muzzle is 0.
- * Without shipMuzzle (server/remote bullet spawn), cl_muzzle 0 suppresses the spray.
+ * opts.shipMuzzle: local ship-nose shoot FX (inherited ship vel). Kept when cl_muzzle is 0;
+ *   the zero-inherit “bullet spray” layer is skipped in that mode.
+ * Without shipMuzzle (per-bullet / remote / server-pose), cl_muzzle 0 suppresses entirely.
  */
 function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
   const shipMuzzle = !!(opts && opts.shipMuzzle);
-  if ((cv('cl_muzzle') | 0) === 0 && !shipMuzzle) return;
+  const muzzleOn = (cv('cl_muzzle') | 0) !== 0;
+  if (!muzzleOn && !shipMuzzle) return;
   // Ship vel is px/tick; particle vel is px/s — same base as idle thrust.
   const shipVx = (vx || 0) * TPS;
   const shipVy = (vy || 0) * TPS;
@@ -6759,9 +6761,12 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
     fadeLife: true
   };
 
+  // Ship-nose layer: particles carry transferred ship velocity.
   emitParticles(Object.assign({}, base, { inheritVx: shipVx, inheritVy: shipVy }));
-  // Second layer: no ship vel — only particle random speed range from 0 base.
-  emitParticles(Object.assign({}, base, { inheritVx: 0, inheritVy: 0 }));
+  // Second layer: no ship vel — per-bullet style spray. Off when cl_muzzle 0.
+  if (muzzleOn) {
+    emitParticles(Object.assign({}, base, { inheritVx: 0, inheritVy: 0 }));
+  }
 }
 
 /** Instant local muzzle flash (bullets still come from the server). */
@@ -19786,6 +19791,8 @@ let serverPoseMuzzleUntil = 0;
  */
 function emitServerPoseMuzzleFromFire(spawnX, spawnY, aimAng, type) {
   if ((cv('cl_server_pose') | 0) === 0) return;
+  // Per-bullet / server-fire muzzle — hidden when cl_muzzle 0.
+  if ((cv('cl_muzzle') | 0) === 0) return;
   if (myId == null) return;
   const t = type || 'default';
   if (
@@ -19812,11 +19819,7 @@ function emitServerPoseMuzzleFromFire(spawnX, spawnY, aimAng, type) {
   if (t === 'shotgun') { cone = 1.45; count = 12; }
   else if (t === 'plasma' || t === 'voidcannon') { cone = 0.9; count = 9; }
   else if (t === 'rocket') { count = 12; }
-  // shipMuzzle: still show when cl_muzzle 0 (that cvar only hides remote bullet muzzles).
-  emitMuzzleFx(mx, my, ma, SERVER_POSE_GHOST_COL, count, svx, svy, {
-    cone,
-    shipMuzzle: true
-  });
+  emitMuzzleFx(mx, my, ma, SERVER_POSE_GHOST_COL, count, svx, svy, { cone });
 }
 
 function emitServerPoseMuzzleFromBullet(b) {
@@ -19836,7 +19839,7 @@ function drawServerPoseGhost() {
   const y = serverGhost.y;
   const angle = serverGhost.angle || 0;
   const col = SERVER_POSE_GHOST_COL;
-  const muzzleHot = performance.now() < serverPoseMuzzleUntil;
+  const muzzleHot = (cv('cl_muzzle') | 0) !== 0 && performance.now() < serverPoseMuzzleUntil;
   drawCollisionRing(x, y, angle, col);
   const c = Math.cos(angle);
   const s = Math.sin(angle);
