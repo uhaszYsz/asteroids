@@ -961,6 +961,16 @@ const CVARS = {
     def: 0,
     help: 'Draw collision hitboxes (0/1). Asteroids = filled poly, players = dual circles, enemies = radius circle, bullets = solid red circles.'
   },
+  cl_ghost_bullet: {
+    value: 0,
+    def: 0,
+    help: '1 = spawn local ghost bullets at shoot (local aim/time), alpha 0.6 red. Local collide + despawn off-screen.'
+  },
+  cl_muzzle: {
+    value: 1,
+    def: 1,
+    help: '1 = muzzle flash particles on shoot. 0 = disable muzzle FX.'
+  },
   cl_hitscan: {
     value: 0,
     def: 0,
@@ -6707,6 +6717,7 @@ function mixRgb(a, b, t) {
  * `count` scales intensity; optional opts.cone widens the spray (shotgun).
  */
 function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
+  if ((cv('cl_muzzle') | 0) === 0) return;
   // Ship vel is px/tick; particle vel is px/s — same base as idle thrust.
   const shipVx = (vx || 0) * TPS;
   const shipVy = (vy || 0) * TPS;
@@ -6748,27 +6759,31 @@ function emitLocalShootFx() {
   const ang = me.angle;
   const wpn = selectedWeapon;
 
+  spawnGhostBulletsForLocalShot();
+
   if (wpn === 3) {
     // Laser: nose spark; beam is handled separately.
-    const ivx = (me.vx || 0) * TPS;
-    const ivy = (me.vy || 0) * TPS;
-    emitParticles({
-      x: m.x, y: m.y,
-      count: 5,
-      speed: 70 * RES_SCALE,
-      speedSpread: 40 * RES_SCALE,
-      direction: ang,
-      spread: 0.45,
-      size: 2.4 * RES_SCALE,
-      scaleY: 2.2,
-      sizeWiggle: 0.3,
-      sizeWiggleSpeed: 16,
-      lifetime: 0.1,
-      color: ownerShootColor(myId),
-      drag: 5,
-      inheritVx: ivx,
-      inheritVy: ivy
-    });
+    if ((cv('cl_muzzle') | 0) !== 0) {
+      const ivx = (me.vx || 0) * TPS;
+      const ivy = (me.vy || 0) * TPS;
+      emitParticles({
+        x: m.x, y: m.y,
+        count: 5,
+        speed: 70 * RES_SCALE,
+        speedSpread: 40 * RES_SCALE,
+        direction: ang,
+        spread: 0.45,
+        size: 2.4 * RES_SCALE,
+        scaleY: 2.2,
+        sizeWiggle: 0.3,
+        sizeWiggleSpeed: 16,
+        lifetime: 0.1,
+        color: ownerShootColor(myId),
+        drag: 5,
+        inheritVx: ivx,
+        inheritVy: ivy
+      });
+    }
     return;
   }
 
@@ -6814,6 +6829,140 @@ function emitLocalShootFx() {
     playSfx(SFX.shoot, { vol: 0.9, pool: 8 });
   }
   emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 10, me.vx, me.vy);
+}
+
+/** Client-only predictive ghosts — red, α0.6; local collide; cull off-screen. */
+const GHOST_BULLET_COL = [1.0, 0.12, 0.08];
+const ghostBullets = [];
+const GHOST_BULLET_MAX = 96;
+
+function spawnGhostBullet(x, y, angle, speed, radius) {
+  if (ghostBullets.length >= GHOST_BULLET_MAX) ghostBullets.shift();
+  const spd = Math.max(0.05, +speed || 0);
+  ghostBullets.push({
+    x: +x,
+    y: +y,
+    vx: Math.cos(angle) * spd,
+    vy: Math.sin(angle) * spd,
+    r: Math.max(0.8 * RES_SCALE, +radius || 2 * RES_SCALE)
+  });
+}
+
+/** Ghost projectiles at local muzzle/aim the instant a local shot FX fires. */
+function spawnGhostBulletsForLocalShot() {
+  if ((cv('cl_ghost_bullet') | 0) === 0) return;
+  const name = currentWeaponName();
+  if (name === 'laser' || name === 'railgun' || name === 'asteroidgun') return;
+  const me = localView();
+  const m = shipMuzzle(me.x, me.y, me.angle);
+  const ang = me.angle;
+  const w = effectiveLocalWeapon(name);
+  const lvl = getLocalWeaponLevel(name);
+
+  if (name === 'shotgun') {
+    const n = Math.max(1, w.shotgun | 0);
+    const spreadRad = ((w.spread != null ? w.spread : 30) * Math.PI) / 180;
+    const speeds = w.shotgunSpeeds || [7.5 * RES_SCALE * 0.85, 10.5 * RES_SCALE * 0.85];
+    const lo = speeds[0], hi = speeds[1] != null ? speeds[1] : speeds[0];
+    for (let i = 0; i < n; i++) {
+      const t = n <= 1 ? 0.5 : i / (n - 1);
+      const a = ang - spreadRad * 0.5 + spreadRad * t;
+      spawnGhostBullet(m.x, m.y, a, lo + (hi - lo) * t, 2 * RES_SCALE);
+    }
+    return;
+  }
+  if (name === 'rocket') {
+    const spd = w.launchSpeed != null ? w.launchSpeed : (w.speed || 15);
+    spawnGhostBullet(m.x, m.y, ang, spd, 4 * RES_SCALE);
+    return;
+  }
+  if (name === 'plasma') {
+    spawnGhostBullet(m.x, m.y, ang, w.speed || (9 * RES_SCALE * 1.7), 3 * RES_SCALE);
+    return;
+  }
+  if (name === 'voidcannon') {
+    let size = 27 * RES_SCALE;
+    if (lvl >= 3) size *= 1.3;
+    spawnGhostBullet(m.x, m.y, ang, w.speed || (2.1504 * RES_SCALE), size * 0.45);
+    return;
+  }
+  // Default blaster (L2 = 2× hit size).
+  let size = 2 * RES_SCALE;
+  if (lvl >= 2) size *= 2;
+  spawnGhostBullet(m.x, m.y, ang, w.speed || 13.5, size);
+}
+
+function ghostBulletCollides(g) {
+  const cir = { x: g.x, y: g.y, r: g.r };
+  for (const a of asteroids.values()) {
+    const p = asteroidAt(a);
+    if (circleVsAsteroidPoly(cir, {
+      x: p.x, y: p.y, angle: p.angle, r: a.r, pts: a.pts, id: a.id, aid: a.aid
+    })) return true;
+  }
+  for (const e of enemies.values()) {
+    if ((e.hp | 0) <= 0) continue;
+    const p = enemyAt(e);
+    const er = enemyHitR(e);
+    const dx = g.x - p.x;
+    const dy = g.y - p.y;
+    if (dx * dx + dy * dy <= (g.r + er) * (g.r + er)) return true;
+  }
+  for (const [id, r] of remotes) {
+    if (id === myId || (r.hp | 0) <= 0) continue;
+    const v = remoteView(r);
+    const circles = playerHitCirclesAt(v.x, v.y, v.angle);
+    for (let i = 0; i < circles.length; i++) {
+      const c = circles[i];
+      const dx = g.x - c.x;
+      const dy = g.y - c.y;
+      if (dx * dx + dy * dy <= (g.r + c.r) * (g.r + c.r)) return true;
+    }
+  }
+  return false;
+}
+
+function updateGhostBullets(dtSec) {
+  if (!ghostBullets.length) return;
+  if ((cv('cl_ghost_bullet') | 0) === 0) {
+    ghostBullets.length = 0;
+    return;
+  }
+  if (matchPaused || deathSpectating) return;
+  const steps = Math.max(0, dtSec) * TPS;
+  if (!(steps > 0)) return;
+  // Sub-step when moving fast so we don't tunnel through rocks.
+  const nSub = Math.max(1, Math.min(8, Math.ceil(steps)));
+  const sub = steps / nSub;
+  for (let i = ghostBullets.length - 1; i >= 0; i--) {
+    const g = ghostBullets[i];
+    let dead = false;
+    for (let s = 0; s < nSub; s++) {
+      g.x += g.vx * sub;
+      g.y += g.vy * sub;
+      if (g.x < 0 || g.x > W || g.y < 0 || g.y > H) {
+        dead = true;
+        break;
+      }
+      if (ghostBulletCollides(g)) {
+        dead = true;
+        break;
+      }
+    }
+    if (dead) ghostBullets.splice(i, 1);
+  }
+}
+
+function renderGhostBullets() {
+  if ((cv('cl_ghost_bullet') | 0) === 0 || !ghostBullets.length) return;
+  for (let i = 0; i < ghostBullets.length; i++) {
+    const g = ghostBullets[i];
+    if (g.x < 0 || g.x > W || g.y < 0 || g.y > H) continue;
+    const coreR = Math.max(1.2 * RES_SCALE, g.r);
+    const glowR = coreR * 1.75;
+    drawSoftOval(g.x, g.y, 0, glowR, glowR, GHOST_BULLET_COL, 0.36, true, 0.55);
+    drawSoftOval(g.x, g.y, 0, coreR, coreR, GHOST_BULLET_COL, 0.6, false, 0.88);
+  }
 }
 
 function emitHitFx(x, y, color) {
@@ -19748,6 +19897,7 @@ function renderBullets() {
   if (plasmaPts.length) drawPoints(plasmaPts, COL.plasma);
   if (rainbowPts.length) drawPoints(rainbowPts, damageRainbowColor());
   drawBulletHitboxes();
+  renderGhostBullets();
 }
 
 function render() {
@@ -19774,6 +19924,7 @@ function render() {
 
   updateLaserState();
   tickDeathSequence(now);
+  updateGhostBullets(dt);
   if (!deathSpectating && !matchPaused) {
     predictAsteroidEdgeTeleports();
     predictPickupBounces();
