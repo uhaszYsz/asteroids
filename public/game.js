@@ -7103,6 +7103,7 @@ function emitHealthPickupFx(x, y) {
 /** Laser impact: asteroid chips vs player sparks vs soft miss tip.
  *  Laser weapon hits use spark-style debris (half count, laser color). */
 function emitLaserImpactFx(x, y, hitKind, withSfx, beamDir) {
+  if (hitKind === 1 || hitKind === 3) armShipHitTintAt(x, y, hitKind);
   // Laser can hit every server tick — overlap pool, never mid-clip restart.
   if (withSfx && (hitKind === 1 || hitKind === 2 || hitKind === 3)) {
     playSfxOverlap(SFX.laserImpact, {
@@ -7401,6 +7402,7 @@ function emitBulletImpactFx(x, y, type, hitKind, bvx, bvy) {
     const hitSrc = (hitKind === 1 && isRocket) ? SFX.hitPlayer : SFX.hitPlayerBullet;
     playSfxOverlap(hitSrc, { vol: isRocket && hitKind === 1 ? 0.9 : 0.75, pool: isRocket && hitKind === 1 ? 6 : 8 });
     pushFxRing(x, y, col, { r0: 3, r1: 24, life: 260 });
+    armShipHitTintAt(x, y, hitKind);
     if (isRocket && hitKind === 1) {
       emitHitFx(x, y, COL.laserHit);
       emitParticles({
@@ -9753,6 +9755,8 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   const col = tint || COL_WHITE;
   const windFwd = [0, 1, 2, 0, 2, 3];
   const windBack = [0, 2, 1, 0, 3, 2];
+  const invHL = 1 / Math.max(1e-3, halfL);
+  const invHW = 1 / Math.max(1e-3, halfW);
   let o = 0;
   for (let pass = 0; pass < 2; pass++) {
     const idx = pass === 0 ? windFwd : windBack;
@@ -9763,6 +9767,8 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
       spriteShipMesh[o++] = uvs[i][0];
       spriteShipMesh[o++] = uvs[i][1];
       spriteShipMesh[o++] = spriteWorldZToClip(depth[i]);
+      spriteShipMesh[o++] = verts[i][0] * invHL;
+      spriteShipMesh[o++] = verts[i][1] * invHW;
     }
   }
   gl.useProgram(spriteShipProg);
@@ -9770,14 +9776,17 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   gl.enableVertexAttribArray(ssAPos);
   gl.enableVertexAttribArray(ssAUV);
   gl.enableVertexAttribArray(ssADepth);
-  const flatStride = 5 * 4;
+  gl.enableVertexAttribArray(ssALocal);
+  const flatStride = 7 * 4;
   gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, flatStride, 0);
   gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, flatStride, 8);
   gl.vertexAttribPointer(ssADepth, 1, gl.FLOAT, false, flatStride, 16);
+  gl.vertexAttribPointer(ssALocal, 2, gl.FLOAT, false, flatStride, 20);
   gl.uniform2f(ssURes, W, H);
   bindSceneLightUniforms(spriteShipLightU);
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, Math.max(0, Number(cv('cl_ship_emit')) || 0));
+  if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
   bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
@@ -9816,6 +9825,7 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   bindSpriteColorRemap(null, null, 0);
   gl.disableVertexAttribArray(ssAUV);
   gl.disableVertexAttribArray(ssADepth);
+  gl.disableVertexAttribArray(ssALocal);
 }
 
 function tinyShipCols(spec, sheetW) {
@@ -9965,6 +9975,87 @@ function hitVibrationRoll(kind, id) {
 
 function clearHitVibration(kind, id) {
   hitVibByKey.delete(hitVibKey(kind, id));
+}
+
+/** Red→yellow impact tint on sprite ships (opaque texels only). */
+const HIT_TINT_DUR_MS = 280;
+const shipHitTintByKey = new Map();
+
+/** Nearest living player/enemy to a world hit (for ship-local tint). */
+function findImpactShipTarget(hx, hy, hitKind) {
+  let best = null;
+  let bestD = Infinity;
+  const consider = (kind, id, cx, cy, angle) => {
+    const dx = shortestWrapDelta(cx, hx, W);
+    const dy = shortestWrapDelta(cy, hy, H);
+    const d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      best = { kind, id, x: cx, y: cy, angle };
+    }
+  };
+  if (hitKind === 1) {
+    if (myId != null && (player.hp | 0) > 0) {
+      const me = localView();
+      consider('p', myId, me.x, me.y, me.angle);
+    }
+    for (const r of remotes.values()) {
+      if ((r.hp | 0) <= 0) continue;
+      const v = remoteView(r);
+      consider('p', r.id, v.x, v.y, v.angle);
+    }
+  } else if (hitKind === 3) {
+    for (const e of enemies.values()) {
+      if ((e.hp | 0) <= 0) continue;
+      const p = enemyAt(e);
+      consider('e', e.id, p.x, p.y, p.angle);
+    }
+  }
+  return best;
+}
+
+/** Store hit in ship-local units (+X nose, +Y left wing). */
+function triggerShipHitTint(kind, id, hx, hy, cx, cy, angle) {
+  if (id == null) return;
+  const dx = shortestWrapDelta(cx, hx, W);
+  const dy = shortestWrapDelta(cy, hy, H);
+  const ca = Math.cos(angle);
+  const sa = Math.sin(angle);
+  const lx = dx * ca + dy * sa;
+  const ly = -dx * sa + dy * ca;
+  shipHitTintByKey.set(hitVibKey(kind, id), {
+    lx,
+    ly,
+    start: performance.now()
+  });
+}
+
+function armShipHitTintAt(hx, hy, hitKind) {
+  if (hitKind !== 1 && hitKind !== 3) return;
+  if (hx == null || hy == null) return;
+  const t = findImpactShipTarget(hx, hy, hitKind);
+  if (!t) return;
+  triggerShipHitTint(t.kind, t.id, hx, hy, t.x, t.y, t.angle);
+}
+
+/** Bind hit-tint uniforms for the current sprite ship draw (fill pass). */
+function bindSpriteShipHitTint(kind, id, halfL, halfW) {
+  if (!ssUHitAge) return;
+  const e = id != null ? shipHitTintByKey.get(hitVibKey(kind, id)) : null;
+  if (!e) {
+    gl.uniform1f(ssUHitAge, 1);
+    return;
+  }
+  const age = (performance.now() - e.start) / HIT_TINT_DUR_MS;
+  if (!(age >= 0) || age >= 1) {
+    shipHitTintByKey.delete(hitVibKey(kind, id));
+    gl.uniform1f(ssUHitAge, 1);
+    return;
+  }
+  const invL = 1 / Math.max(1e-3, halfL);
+  const invW = 1 / Math.max(1e-3, halfW);
+  gl.uniform2f(ssUHitLocal, e.lx * invL, e.ly * invW);
+  gl.uniform1f(ssUHitAge, age);
 }
 
 function shipBankTarget(av) {
@@ -10295,16 +10386,19 @@ const spriteShipVS = `
   attribute vec2 aPos;
   attribute vec2 aUV;
   attribute float aDepth;
+  attribute vec2 aLocal;
   uniform vec2 uRes;
   uniform vec2 uOffset;
   varying vec2 vUV;
   varying vec2 vWorld;
+  varying vec2 vLocal;
   void main() {
     vec2 a = aPos + uOffset;
     vec2 p = floor(a + 0.5) / uRes * 2.0 - 1.0;
     gl_Position = vec4(p.x, -p.y, aDepth, 1.0);
     vUV = aUV;
     vWorld = a;
+    vLocal = aLocal;
   }
 `;
 const spriteShipFS = `
@@ -10318,8 +10412,11 @@ const spriteShipFS = `
   uniform vec3 uRemapSrc;
   uniform vec3 uRemapDst;
   uniform float uRemapRange;
+  uniform vec2 uHitLocal;
+  uniform float uHitAge;
   varying vec2 vUV;
   varying vec2 vWorld;
+  varying vec2 vLocal;
 ` + SCENE_LIGHT_GLSL + `
   bool spriteSolid(vec4 t) {
     if (t.a < 0.08) return false;
@@ -10355,6 +10452,17 @@ const spriteShipFS = `
     float lum = dot(t.rgb, vec3(0.299, 0.587, 0.114));
     float emitMask = smoothstep(0.12, 0.72, lum);
     vec3 rgb = albedo + uTint * emitMask * max(0.0, uEmit);
+    // Impact flash: red core → yellow rim on opaque texels only (cheap, no UV walk).
+    if (uHitAge < 0.999) {
+      float d = length(vLocal - uHitLocal);
+      float rad = 0.62;
+      float fall = 1.0 - smoothstep(0.0, rad, d);
+      float fade = 1.0 - uHitAge;
+      float solid = smoothstep(0.12, 0.4, t.a);
+      float w = clamp(fall * fade * solid * 0.92, 0.0, 1.0);
+      vec3 hot = mix(vec3(1.0, 0.1, 0.04), vec3(1.0, 0.9, 0.12), smoothstep(0.0, rad * 0.9, d));
+      rgb = mix(rgb, hot, w);
+    }
     gl_FragColor = applyNightLit(rgb, t.a * uAlpha, vWorld);
   }
 `;
@@ -10362,6 +10470,7 @@ const spriteShipProg = gl.createProgram();
 gl.bindAttribLocation(spriteShipProg, 0, 'aPos');
 gl.bindAttribLocation(spriteShipProg, 1, 'aUV');
 gl.bindAttribLocation(spriteShipProg, 2, 'aDepth');
+gl.bindAttribLocation(spriteShipProg, 3, 'aLocal');
 gl.attachShader(spriteShipProg, shader(gl.VERTEX_SHADER, spriteShipVS));
 gl.attachShader(spriteShipProg, shader(gl.FRAGMENT_SHADER, spriteShipFS));
 linkProgram(spriteShipProg);
@@ -10376,6 +10485,8 @@ const ssUOutline = gl.getUniformLocation(spriteShipProg, 'uOutline');
 const ssURemapSrc = gl.getUniformLocation(spriteShipProg, 'uRemapSrc');
 const ssURemapDst = gl.getUniformLocation(spriteShipProg, 'uRemapDst');
 const ssURemapRange = gl.getUniformLocation(spriteShipProg, 'uRemapRange');
+const ssUHitLocal = gl.getUniformLocation(spriteShipProg, 'uHitLocal');
+const ssUHitAge = gl.getUniformLocation(spriteShipProg, 'uHitAge');
 const spriteShipLightU = {
   night: gl.getUniformLocation(spriteShipProg, 'uFlashNight'),
   ships: gl.getUniformLocation(spriteShipProg, 'uShipLight[0]'),
@@ -10384,6 +10495,7 @@ const spriteShipLightU = {
 const ssAPos = gl.getAttribLocation(spriteShipProg, 'aPos');
 const ssAUV = gl.getAttribLocation(spriteShipProg, 'aUV');
 const ssADepth = gl.getAttribLocation(spriteShipProg, 'aDepth');
+const ssALocal = gl.getAttribLocation(spriteShipProg, 'aLocal');
 /** Hull red #A60000 — remap source for UFO turret art. */
 const SPRITE_REMAP_HULL_RED = [0xA6 / 255, 0, 0];
 /** Catch #DD3A3A / #550000 family without eating silver/grey. */
@@ -10399,8 +10511,8 @@ function bindSpriteColorRemap(src, dst, range) {
   }
 }
 const spriteShipBuf = gl.createBuffer();
-/** One roof panel, both windings: 12 verts × (xy + uv). */
-const spriteShipMesh = new Float32Array(12 * 5); // x,y,u,v,depth clip
+/** One roof panel, both windings: 12 verts × (xy + uv + depth + local). */
+const spriteShipMesh = new Float32Array(12 * 7); // x,y,u,v,depth,lx,ly
 /** Pitch of the two sprite halves (house-roof fold along nose→tail). */
 const SPRITE_ROOF_PITCH = 0.58;
 /** Screen lift so the ridge reads above the wing tips even at bank=0. */
@@ -10706,16 +10818,19 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.enableVertexAttribArray(ssAPos);
   gl.enableVertexAttribArray(ssAUV);
   gl.enableVertexAttribArray(ssADepth);
-  const ssStride = 5 * 4;
+  gl.enableVertexAttribArray(ssALocal);
+  const ssStride = 7 * 4;
   gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, ssStride, 0);
   gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, ssStride, 8);
   gl.vertexAttribPointer(ssADepth, 1, gl.FLOAT, false, ssStride, 16);
+  gl.vertexAttribPointer(ssALocal, 2, gl.FLOAT, false, ssStride, 20);
   gl.uniform2f(ssURes, W, H);
   bindSceneLightUniforms(spriteShipLightU);
   gl.uniform3f(ssUTint, tint[0], tint[1], tint[2]);
   // Keep sprite palette; emission still uses player tint on bright texels (like rocks).
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, emitPow);
+  if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
   bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, entry.tex);
@@ -10725,6 +10840,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
+  const invHalfL = 1 / Math.max(1e-3, halfL);
+  const invHalfW = 1 / Math.max(1e-3, halfW);
   const windFwdQ = [0, 1, 2, 0, 2, 3];
   const windBackQ = [0, 2, 1, 0, 3, 2];
   const windFwdT = [0, 1, 2];
@@ -10733,6 +10850,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   function fillPanelMesh(panel, oneSided) {
     const { xy, depth } = projectPanel(panel.verts);
     const uvs = panel.uvs;
+    const verts = panel.verts;
     const tri = panel.verts.length === 3;
     const fwd = tri ? windFwdT : windFwdQ;
     const back = tri ? windBackT : windBackQ;
@@ -10747,10 +10865,12 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         spriteShipMesh[o++] = uvs[i][0];
         spriteShipMesh[o++] = uvs[i][1];
         spriteShipMesh[o++] = spriteWorldZToClip(depth[i]);
+        spriteShipMesh[o++] = verts[i][0] * invHalfL;
+        spriteShipMesh[o++] = verts[i][1] * invHalfW;
       }
     }
     gl.bufferData(gl.ARRAY_BUFFER, spriteShipMesh.subarray(0, o), gl.DYNAMIC_DRAW);
-    return o / 5;
+    return o / 7;
   }
 
   // Player-color silhouette outline around sprite pixels (not roof plane edges).
@@ -10791,6 +10911,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.uniform1f(ssUOutline, 0);
   gl.uniform1f(ssUAlpha, 1);
   gl.uniform2f(ssUOffset, 0, 0);
+  bindSpriteShipHitTint(vibKind, id, halfL, halfW);
   if (tube) {
     // Intersecting 90° tube planes: hardware Z + discard (painter's cannot order them).
     gl.depthMask(true);
@@ -10804,6 +10925,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
     const nVert = fillPanelMesh(panels[p], !!tube);
     gl.drawArrays(gl.TRIANGLES, 0, nVert);
   }
+  if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
   if (tube) {
     // Charge sphere (etc.) while worm depth buffer is still valid.
     if (opts && typeof opts.onTubeDepth === 'function') {
@@ -10816,6 +10938,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.disable(gl.BLEND);
   gl.disableVertexAttribArray(ssAUV);
   gl.disableVertexAttribArray(ssADepth);
+  gl.disableVertexAttribArray(ssALocal);
 }
 
 function drawShip3D(x, y, angle, av, color, id, dt, moving) {
