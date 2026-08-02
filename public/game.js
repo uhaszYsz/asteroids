@@ -979,7 +979,7 @@ const CVARS = {
   cl_muzzle: {
     value: 1,
     def: 1,
-    help: '1 = ship muzzle + per-bullet muzzles. 0 = keep local ship muzzle (with vel transfer); hide per-bullet / remote / server-pose muzzles.'
+    help: '1 = muzzle every shot + per-bullet/remote. 0 = one ship muzzle at burst start (vel transfer); no per-bullet bursts.'
   },
   cl_hitscan: {
     value: 0,
@@ -6745,10 +6745,8 @@ function mixRgb(a, b, t) {
  * Muzzle flash: circles (scale 1×1), sized like the default gun bullet
  * (random 0%…230%), speed = default bullet speed ±50%.
  * Two sources:
- *   opts.shipMuzzle — local ship shoot FX (emitLocalShootFx). Always keeps
- *     ship-velocity transfer. Shown even when cl_muzzle is 0.
- *   otherwise — per-bullet / remote / server-pose muzzle. Fully off when
- *     cl_muzzle is 0.
+ *   opts.shipMuzzle — local ship shoot FX (vel transfer). Allowed when cl_muzzle 0.
+ *   otherwise — per-bullet / remote / server-pose. Fully off when cl_muzzle 0.
  * When cl_muzzle is 1, also adds a second zero-inherit spray layer.
  */
 function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
@@ -6784,12 +6782,24 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
     fadeLife: true
   };
 
-  // Ship muzzle (and full mode): particles inherit ship velocity.
+  // Ship muzzle: always inherits ship velocity.
   emitParticles(Object.assign({}, base, { inheritVx: shipVx, inheritVy: shipVy }));
-  // Extra zero-inherit spray — only when cl_muzzle 1 (full / per-bullet mode).
+  // Extra zero-inherit spray — only when cl_muzzle 1.
   if (muzzleOn) {
     emitParticles(Object.assign({}, base, { inheritVx: 0, inheritVy: 0 }));
   }
+}
+
+/**
+ * cl_muzzle 0: one ship flash at the start of a mag dump (not once per round).
+ * Default ammo=3 was firing emitLocalShootFx 3× — looked like per-bullet muzzles.
+ * cl_muzzle 1: every shot. Laser nose spark always (beam FX, not per-bullet).
+ */
+function shouldEmitLocalShipMuzzle() {
+  if ((cv('cl_muzzle') | 0) !== 0) return true;
+  if (selectedWeapon === 3) return true;
+  const w = effectiveLocalWeapon(currentWeaponName());
+  return (localShoot.shootAmmo | 0) >= Math.max(1, w.ammo | 0);
 }
 
 /** Instant local muzzle flash (bullets still come from the server). */
@@ -6799,11 +6809,13 @@ function emitLocalShootFx() {
   const m = shipMuzzle(me.x, me.y, me.angle);
   const ang = me.angle;
   const wpn = selectedWeapon;
+  const shipMz = shouldEmitLocalShipMuzzle();
 
   spawnGhostBulletsForLocalShot();
 
   if (wpn === 3) {
-    // Laser: nose spark; beam is handled separately (ship muzzle — always on).
+    // Laser: nose spark; beam is handled separately.
+    if (!shipMz) return;
     const ivx = (me.vx || 0) * TPS;
     const ivy = (me.vy || 0) * TPS;
     emitParticles({
@@ -6828,13 +6840,13 @@ function emitLocalShootFx() {
 
   if (wpn === 2) {
     playSfx(SFX.rocketFire, { vol: 0.9, pool: 6 });
-    emitMuzzleFx(m.x, m.y, ang, COL.rocket, 12, me.vx, me.vy, { shipMuzzle: true });
+    if (shipMz) emitMuzzleFx(m.x, m.y, ang, COL.rocket, 12, me.vx, me.vy, { shipMuzzle: true });
     return;
   }
 
   if (wpn === 4) {
     // Shotgun: SFX is one blast on Space press only (not here / not per pellet).
-    emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 14, me.vx, me.vy, { cone: 1.45, shipMuzzle: true });
+    if (shipMz) emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 14, me.vx, me.vy, { cone: 1.45, shipMuzzle: true });
     return;
   }
 
@@ -6844,14 +6856,14 @@ function emitLocalShootFx() {
     } else {
       playSfx(SFX.shoot, { vol: 0.75, pool: 8 });
     }
-    emitMuzzleFx(m.x, m.y, ang, COL.plasma, 9, me.vx, me.vy, { cone: 0.85, shipMuzzle: true });
+    if (shipMz) emitMuzzleFx(m.x, m.y, ang, COL.plasma, 9, me.vx, me.vy, { cone: 0.85, shipMuzzle: true });
     return;
   }
 
   if (wpn === 7) {
     // Void: travel loop starts when the orb bullet is added (no generic shoot sting).
     if (localShoot.sfxSkipNext) localShoot.sfxSkipNext = false;
-    emitMuzzleFx(m.x, m.y, ang, COL.voidcannon, 11, me.vx, me.vy, { cone: 1.2, shipMuzzle: true });
+    if (shipMz) emitMuzzleFx(m.x, m.y, ang, COL.voidcannon, 11, me.vx, me.vy, { cone: 1.2, shipMuzzle: true });
     return;
   }
 
@@ -6867,7 +6879,7 @@ function emitLocalShootFx() {
   } else {
     playSfx(SFX.shoot, { vol: 0.9, pool: 8 });
   }
-  emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 10, me.vx, me.vy, { shipMuzzle: true });
+  if (shipMz) emitMuzzleFx(m.x, m.y, ang, muzzleBlasterColor(myId), 10, me.vx, me.vy, { shipMuzzle: true });
 }
 
 /** Client-only predictive ghosts — red, α0.6; local collide; cull off-screen. */
@@ -21097,9 +21109,9 @@ function handleWsMessage(e) {
     if (msg.t === 'bf' && inGame) {
       const row = msg.b;
       if (isShotgunShellFire(row)) {
-        addShotgunShellFire(row, (row[5] | 0) !== myId, true);
+        addShotgunShellFire(row, (row[5] | 0) !== (myId | 0), true);
         const owner = row[5] | 0;
-        if (owner === myId) {
+        if (owner === (myId | 0)) {
           emitServerPoseMuzzleFromFire(row[1], row[2], row[3], 'shotgun');
         }
         if (owner > 0 && owner !== myId && !remotes.has(owner)) {
@@ -21111,9 +21123,10 @@ function handleWsMessage(e) {
       }
       const b = unpackBullet(row);
       // Own shots already flashed locally; remotes still get muzzle FX here.
-      addBullet(b, b.owner !== myId, true);
+      // Coerce ids — loose !== let own bf slip through as withMuzzle.
+      addBullet(b, (b.owner | 0) !== (myId | 0), true);
       // cl_server_pose: ghost muzzle when our authoritative bullet appears (reuse bf).
-      if (b.owner === myId) emitServerPoseMuzzleFromBullet(b);
+      if ((b.owner | 0) === (myId | 0)) emitServerPoseMuzzleFromBullet(b);
       // If snaps/roster missed this owner, seed a remote so they aren't invisible.
       if (b.owner > 0 && b.owner !== myId && !remotes.has(b.owner)) {
         const p = bulletTrueAt(b);
