@@ -1026,6 +1026,11 @@ const CVARS = {
     def: 0,
     help: 'Set to 1 to spawn a worm enemy (admin, solo/coop wave room). Resets to 0.'
   },
+  sv_wave: {
+    value: 0,
+    def: 0,
+    help: 'Admin debug: wipe field and start wave N now (solo/coop). e.g. sv_wave 10. Resets to 0.'
+  },
   cl_grid: {
     value: 1,
     def: 1,
@@ -1309,6 +1314,22 @@ function setCvar(name, raw) {
       ws.send(JSON.stringify({ t: 'adminSpawn', kind: 'worm' }));
       conPrint('spawn worm', 'info');
     }
+    return true;
+  }
+  if (name === 'sv_wave') {
+    const wave = n | 0;
+    c.value = 0;
+    if (wave < 1) {
+      conPrint('usage: sv_wave <n> (n >= 1)', 'err');
+      return true;
+    }
+    if (!consoleAdmin) return false;
+    if (!ws || ws.readyState !== 1 || !inGame || !practiceMode) {
+      conPrint('sv_wave needs an active solo/coop wave match', 'err');
+      return true;
+    }
+    ws.send(JSON.stringify({ t: 'adminWave', n: wave }));
+    conPrint('jump to wave ' + wave, 'info');
     return true;
   }
   if (name === 'cl_background_bake' || name === 'cl_background_bake_quality') {
@@ -20572,6 +20593,11 @@ function handleWsMessage(e) {
       }
       return;
     }
+    if (msg.t === 'adminWave') {
+      if (msg.ok) conPrint('started wave ' + (msg.wave | 0), 'info');
+      else conPrint(msg.err || 'sv_wave failed', 'err');
+      return;
+    }
     if (msg.t === 'adminPw') {
       if (msg.ok) {
         conPrint('admin password updated', 'info');
@@ -20903,6 +20929,20 @@ function handleWsMessage(e) {
       if (ssContinueBtn) {
         ssContinueBtn.textContent = 'START WAVE';
         ssContinueBtn.disabled = false;
+      }
+      // Drop leftover projectiles/pickups/ghosts (server wipes too; this covers lag/races).
+      if (practiceMode) {
+        stopAllRocketTravelSfx();
+        stopAllVoidTravelSfx();
+        bullets.clear();
+        pickups.clear();
+        ghostBullets.length = 0;
+        hitLasers.length = 0;
+        remoteLasers.clear();
+        localLaserClip = null;
+        wormLaserDbg.length = 0;
+        railBeams.length = 0;
+        thrustBeams.length = 0;
       }
       startWaveBanner(msg.n != null ? msg.n : (soloWave + 1));
       // Solo waves: always snap to world center (server does the same).
@@ -23924,6 +23964,7 @@ function runConsole(line) {
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
     conPrint('give <weapon|powerup|admingun>  — grant loadout (admin, in-game)', 'info');
     conPrint('spawn big|medium|small|huge|meteor|common|ufo|worm|spinner  — off-screen spawn (admin, in-game)', 'info');
+    conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');
     conPrint('cl_allToDefault 1  — reset all cl_ cvars to defaults', 'info');

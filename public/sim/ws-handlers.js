@@ -133,6 +133,17 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (msg.t === 'adminWave') {
+      if (!ws.isAdmin) {
+        send(ws, { t: 'adminWave', ok: 0, err: 'not admin' });
+        return;
+      }
+      if (!allowAction(ws, 'adminWave', 200)) return;
+      const result = handleAdminWave(ws, msg.n != null ? msg.n : msg.wave);
+      send(ws, Object.assign({ t: 'adminWave' }, result));
+      return;
+    }
+
     if (msg.t === 'adminStatus' || msg.t === 'status') {
       if (!allowAction(ws, 'status', 200)) return;
       send(ws, packAdminStatus(ws));

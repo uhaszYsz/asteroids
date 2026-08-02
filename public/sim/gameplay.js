@@ -1784,6 +1784,20 @@ function beginSoloWave(room, wave, opts) {
   for (const a of room.asteroids) emitAsteroidFire(room, a);
   clearSoloEnemies(room, true);
   spawnSoloWaveEnemies(room, room.wave);
+  // Clean projectiles / pickups so the new wave starts empty.
+  if (room.bullets && room.bullets.length) {
+    for (const b of room.bullets) {
+      roomBroadcast(room, { t: 'bd', id: b.id });
+    }
+    room.bullets.length = 0;
+  }
+  if (room.pickups && room.pickups.length) {
+    for (const u of room.pickups) {
+      emitPickupDead(room, u.id, null, null, { silent: 1 });
+    }
+    room.pickups.length = 0;
+  }
+  if (room.pendingRailBounces) room.pendingRailBounces.length = 0;
   placePlayersAtWaveStart(room, opts);
   broadcastSoloWave(room, opts);
   console.log(
@@ -2888,6 +2902,34 @@ function handleAdminGive(ws, itemRaw) {
   }
 
   return { ok: 0, err: 'unknown item' };
+}
+
+/**
+ * Admin `sv_wave N` — wipe field (asteroids/enemies/bullets/pickups) and begin wave N
+ * as a normal solo/coop wave start (banner, godmode, center spawn in solo).
+ */
+function handleAdminWave(ws, waveRaw) {
+  if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
+  const room = ws.room;
+  if (!room || !room.matchLive) return { ok: 0, err: 'not in a live match' };
+  if (!room.practice) return { ok: 0, err: 'waves only in solo/coop wave rooms' };
+
+  const wave = Math.max(1, Math.min(9999, waveRaw | 0));
+  if ((waveRaw | 0) < 1) return { ok: 0, err: 'usage: sv_wave <n> (n >= 1)' };
+
+  if (room.shopOpen) {
+    room.shopOpen = false;
+    room.shopWave = 0;
+    room.shopDoneIds = new Set();
+  }
+  // Cancel death cinematic so the sim can run the new wave immediately.
+  room.deathShakeLeft = 0;
+  room.deathBoomLeft = 0;
+  room.deathBoomed = false;
+  room.deathVictimId = null;
+
+  beginSoloWave(room, wave, { center: true });
+  return { ok: 1, wave: room.wave | 0 };
 }
 
 function applyTurn(p, l, r, sh) {
