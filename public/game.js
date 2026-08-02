@@ -979,7 +979,7 @@ const CVARS = {
   cl_muzzle: {
     value: 1,
     def: 1,
-    help: '1 = all muzzle sprays. 0 = only local ship-nose muzzle (inherited ship vel); hide per-bullet / remote / server-pose muzzles.'
+    help: '1 = all muzzle sprays. 0 = keep local ship-nose flash only; hide bullet-spray layer + per-bullet / remote / server-pose muzzles.'
   },
   cl_hitscan: {
     value: 0,
@@ -6723,16 +6723,17 @@ function mixRgb(a, b, t) {
 /**
  * Muzzle flash: circles (scale 1×1), sized like the default gun bullet
  * (random 0%…230%), speed = default bullet speed ±50%.
- * Emits two layers: one inheriting ship/rocket vel, one with base 0 + particle speeds only.
+ * Emits two layers: one inheriting ship/rocket vel (bullet-spray), one with
+ * base 0 + particle speeds only (ship-nose flash).
  * `count` scales intensity; optional opts.cone widens the spray (shotgun).
- * opts.shipMuzzle: local ship-nose shoot FX (inherited ship vel). Kept when cl_muzzle is 0;
- *   the zero-inherit “bullet spray” layer is skipped in that mode.
+ * opts.shipMuzzle: local ship-nose shoot FX. When cl_muzzle is 0, only the
+ *   zero-inherit nose flash is kept; the inherited-vel bullet spray is skipped.
  * Without shipMuzzle (per-bullet / remote / server-pose), cl_muzzle 0 suppresses entirely.
  */
 function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
-  const shipMuzzle = !!(opts && opts.shipMuzzle);
+  const isShipMuzzle = !!(opts && opts.shipMuzzle);
   const muzzleOn = (cv('cl_muzzle') | 0) !== 0;
-  if (!muzzleOn && !shipMuzzle) return;
+  if (!muzzleOn && !isShipMuzzle) return;
   // Ship vel is px/tick; particle vel is px/s — same base as idle thrust.
   const shipVx = (vx || 0) * TPS;
   const shipVy = (vy || 0) * TPS;
@@ -6761,10 +6762,12 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
     fadeLife: true
   };
 
-  // Ship-nose layer: particles carry transferred ship velocity.
-  emitParticles(Object.assign({}, base, { inheritVx: shipVx, inheritVy: shipVy }));
-  // Second layer: no ship vel — per-bullet style spray. Off when cl_muzzle 0.
+  // Bullet-spray layer: particles inherit ship vel (rides with shots). Off when cl_muzzle 0.
   if (muzzleOn) {
+    emitParticles(Object.assign({}, base, { inheritVx: shipVx, inheritVy: shipVy }));
+  }
+  // Ship-nose flash: no ship vel. Kept for local shipMuzzle when cl_muzzle 0.
+  if (muzzleOn || isShipMuzzle) {
     emitParticles(Object.assign({}, base, { inheritVx: 0, inheritVy: 0 }));
   }
 }
