@@ -979,7 +979,7 @@ const CVARS = {
   cl_muzzle: {
     value: 1,
     def: 1,
-    help: '1 = all muzzle sprays. 0 = keep local ship-nose flash only; hide bullet-spray layer + per-bullet / remote / server-pose muzzles.'
+    help: '1 = ship muzzle + per-bullet muzzles. 0 = keep local ship muzzle (with vel transfer); hide per-bullet / remote / server-pose muzzles.'
   },
   cl_hitscan: {
     value: 0,
@@ -6744,16 +6744,17 @@ function mixRgb(a, b, t) {
 /**
  * Muzzle flash: circles (scale 1×1), sized like the default gun bullet
  * (random 0%…230%), speed = default bullet speed ±50%.
- * Emits two layers: one inheriting ship/rocket vel (bullet-spray), one with
- * base 0 + particle speeds only (ship-nose flash).
- * `count` scales intensity; optional opts.cone widens the spray (shotgun).
- * opts.shipMuzzle: local ship-nose shoot FX. When cl_muzzle is 0, only the
- *   zero-inherit nose flash is kept; the inherited-vel bullet spray is skipped.
- * Without shipMuzzle (per-bullet / remote / server-pose), cl_muzzle 0 suppresses entirely.
+ * Two sources:
+ *   opts.shipMuzzle — local ship shoot FX (emitLocalShootFx). Always keeps
+ *     ship-velocity transfer. Shown even when cl_muzzle is 0.
+ *   otherwise — per-bullet / remote / server-pose muzzle. Fully off when
+ *     cl_muzzle is 0.
+ * When cl_muzzle is 1, also adds a second zero-inherit spray layer.
  */
 function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
   const isShipMuzzle = !!(opts && opts.shipMuzzle);
   const muzzleOn = (cv('cl_muzzle') | 0) !== 0;
+  // Per-bullet path: hard off when cl_muzzle 0.
   if (!muzzleOn && !isShipMuzzle) return;
   // Ship vel is px/tick; particle vel is px/s — same base as idle thrust.
   const shipVx = (vx || 0) * TPS;
@@ -6783,12 +6784,10 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
     fadeLife: true
   };
 
-  // Bullet-spray layer: particles inherit ship vel (rides with shots). Off when cl_muzzle 0.
+  // Ship muzzle (and full mode): particles inherit ship velocity.
+  emitParticles(Object.assign({}, base, { inheritVx: shipVx, inheritVy: shipVy }));
+  // Extra zero-inherit spray — only when cl_muzzle 1 (full / per-bullet mode).
   if (muzzleOn) {
-    emitParticles(Object.assign({}, base, { inheritVx: shipVx, inheritVy: shipVy }));
-  }
-  // Ship-nose flash: no ship vel. Kept for local shipMuzzle when cl_muzzle 0.
-  if (muzzleOn || isShipMuzzle) {
     emitParticles(Object.assign({}, base, { inheritVx: 0, inheritVy: 0 }));
   }
 }
@@ -15776,8 +15775,10 @@ function addShotgunShellFire(row, withMuzzle, liveFire) {
   const rnd = makeShotgunRng(x, y);
   if (withMuzzle) {
     pulseSpriteShipAttack(owner);
-    const sv = resolveMuzzleShipVel(owner);
-    emitMuzzleFx(x, y, aim, muzzleBlasterColor(owner), 10, sv.vx, sv.vy, { cone: 1.35 });
+    if ((cv('cl_muzzle') | 0) !== 0) {
+      const sv = resolveMuzzleShipVel(owner);
+      emitMuzzleFx(x, y, aim, muzzleBlasterColor(owner), 10, sv.vx, sv.vy, { cone: 1.35 });
+    }
     playShotgunFireSfx(owner, 0.55);
   }
   for (let i = 0; i < count; i++) {
@@ -15803,7 +15804,8 @@ function addBullet(b, withMuzzle, liveFire) {
   bullets.set(b.id, b);
   if (b.type === 'rocket' || b.type === 'enemyRocket') startRocketTravelSfx(b);
   if (b.type === 'voidcannon') startVoidTravelSfx(b);
-  if (withMuzzle) {
+  // Per-bullet muzzle only when cl_muzzle 1 (ship muzzle is emitLocalShootFx).
+  if (withMuzzle && (cv('cl_muzzle') | 0) !== 0) {
     if (b.owner != null && b.type !== 'enemy' && b.type !== 'enemySpinner' && b.type !== 'enemyRocket' && b.type !== 'turret') {
       pulseSpriteShipAttack(b.owner);
     }
