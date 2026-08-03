@@ -5185,8 +5185,7 @@ function drawShipDebris() {
 
   for (let i = 0; i < shipDebris.length; i++) {
     const d = shipDebris[i];
-    const fade = 1 - d.age / d.life;
-    const alpha = fade * fade;
+    const alpha = 0;
     if (alpha < 0.02) continue;
     const hw = hw0 * d.scale;
     const hh = hh0 * d.scale;
