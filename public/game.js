@@ -4996,6 +4996,231 @@ let pickupTexReady = false;
   img.src = 'sprites/powerups_strip9.png';
 })();
 
+/* ========== Ship/enemy wreckage debris (debris_strip9.png — 9 frames × 40×46) ========== */
+const DEBRIS_STRIP_URL = 'sprites/debris_strip9.png';
+const DEBRIS_STRIP_FRAMES = 9;
+const DEBRIS_CELL_W = 40;
+const DEBRIS_CELL_H = 46;
+const DEBRIS_MAX = 96;
+const shipDebris = [];
+
+const debrisVS = `
+  attribute vec2 aPos;
+  attribute vec2 aUV;
+  uniform vec2 uRes;
+  varying vec2 vUV;
+  varying vec2 vWorld;
+  void main() {
+    vec2 ndc = vec2(aPos.x / uRes.x * 2.0 - 1.0, 1.0 - aPos.y / uRes.y * 2.0);
+    gl_Position = vec4(ndc, 0.0, 1.0);
+    vUV = aUV;
+    vWorld = aPos;
+  }
+`;
+const debrisFS = `
+  precision mediump float;
+  uniform sampler2D uTex;
+  uniform float uAlpha;
+  varying vec2 vUV;
+  varying vec2 vWorld;
+` + SCENE_LIGHT_GLSL + `
+  void main() {
+    vec4 c = texture2D(uTex, vUV);
+    if (c.a < 0.06 && max(c.r, max(c.g, c.b)) < 0.05) discard;
+    gl_FragColor = applyNightLit(c.rgb, c.a * uAlpha, vWorld);
+  }
+`;
+const debrisProg = gl.createProgram();
+gl.bindAttribLocation(debrisProg, 0, 'aPos');
+gl.bindAttribLocation(debrisProg, 1, 'aUV');
+gl.attachShader(debrisProg, shader(gl.VERTEX_SHADER, debrisVS));
+gl.attachShader(debrisProg, shader(gl.FRAGMENT_SHADER, debrisFS));
+linkProgram(debrisProg);
+const dbURes = gl.getUniformLocation(debrisProg, 'uRes');
+const dbUTex = gl.getUniformLocation(debrisProg, 'uTex');
+const dbUAlpha = gl.getUniformLocation(debrisProg, 'uAlpha');
+const debrisLightU = {
+  night: gl.getUniformLocation(debrisProg, 'uFlashNight'),
+  ships: gl.getUniformLocation(debrisProg, 'uShipLight[0]'),
+  wrap: gl.getUniformLocation(debrisProg, 'uLightWrap')
+};
+const dbAPos = gl.getAttribLocation(debrisProg, 'aPos');
+const dbAUV = gl.getAttribLocation(debrisProg, 'aUV');
+const debrisBuf = gl.createBuffer();
+const debrisMesh = new Float32Array(6 * 4);
+
+const debrisTex = gl.createTexture();
+let debrisTexReady = false;
+(function loadDebrisStrip() {
+  const img = new Image();
+  img.onload = () => {
+    gl.bindTexture(gl.TEXTURE_2D, debrisTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    debrisTexReady = true;
+  };
+  img.onerror = () => console.error('Failed to load debris sprite strip');
+  img.src = DEBRIS_STRIP_URL;
+})();
+
+function clearShipDebris() {
+  shipDebris.length = 0;
+}
+
+function debrisRandInt(lo, hi) {
+  return lo + ((Math.random() * (hi - lo + 1)) | 0);
+}
+
+/** Random point inside enemy hit shape (circle or oriented rect). */
+function randomEnemyHitboxPoint(e, cx, cy) {
+  const ang = e.angle || 0;
+  if (enemyUsesRectHit(e)) {
+    const d = enemyRectDims(e);
+    const lx = (Math.random() * 2 - 1) * d.len * 0.45;
+    const ly = (Math.random() * 2 - 1) * d.wid * 0.45;
+    const c = Math.cos(ang);
+    const s = Math.sin(ang);
+    return { x: cx + lx * c - ly * s, y: cy + lx * s + ly * c };
+  }
+  const r = enemyHitR(e) * (0.15 + Math.random() * 0.75);
+  const a = Math.random() * Math.PI * 2;
+  return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
+}
+
+function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy) {
+  while (shipDebris.length >= DEBRIS_MAX) shipDebris.shift();
+  const dx = x - cx;
+  const dy = y - cy;
+  const outward = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.9;
+  const kick = (55 + Math.random() * 110) * RES_SCALE;
+  const inherit = 0.55;
+  shipDebris.push({
+    x, y,
+    vx: Math.cos(outward) * kick + (eVx || 0) * TPS * inherit,
+    vy: Math.sin(outward) * kick + (eVy || 0) * TPS * inherit,
+    angle: Math.random() * Math.PI * 2,
+    spin: (Math.random() - 0.5) * 4.5,
+    frame: frame | 0,
+    life: 1.8 + Math.random() * 1.6,
+    age: 0,
+    scale: 0.85 + Math.random() * 0.45
+  });
+}
+
+/**
+ * Wreckage sprites on enemy death.
+ * common → 3–4× frame 0
+ * spinner / ufo / worm → 4–5× frame 0 + 4–5× random frames 1–8
+ * Positions: random inside hitbox (circle or oriented rect).
+ */
+function spawnEnemyDebris(e, x, y) {
+  if (!e) return;
+  const kind = e.kind || 'common';
+  const cx = x;
+  const cy = y;
+  const evx = e.vx || 0;
+  const evy = e.vy || 0;
+
+  let nCore = 0;
+  let nExtra = 0;
+  if (kind === 'common') {
+    nCore = debrisRandInt(3, 4);
+  } else if (kind === 'spinner' || kind === 'ufo' || kind === 'worm' || kind === 'carrier') {
+    nCore = debrisRandInt(4, 5);
+    nExtra = debrisRandInt(4, 5);
+  } else {
+    nCore = debrisRandInt(3, 4);
+  }
+
+  for (let i = 0; i < nCore; i++) {
+    const p = randomEnemyHitboxPoint(e, cx, cy);
+    pushShipDebrisPiece(p.x, p.y, 0, evx, evy, cx, cy);
+  }
+  for (let i = 0; i < nExtra; i++) {
+    const p = randomEnemyHitboxPoint(e, cx, cy);
+    const frame = 1 + ((Math.random() * (DEBRIS_STRIP_FRAMES - 1)) | 0);
+    pushShipDebrisPiece(p.x, p.y, frame, evx, evy, cx, cy);
+  }
+}
+
+function updateShipDebris(dt) {
+  if (!shipDebris.length) return;
+  const step = Math.min(0.05, dt || 0.016);
+  for (let i = shipDebris.length - 1; i >= 0; i--) {
+    const d = shipDebris[i];
+    d.age += step;
+    if (d.age >= d.life) {
+      shipDebris.splice(i, 1);
+      continue;
+    }
+    d.x += d.vx * step;
+    d.y += d.vy * step;
+    d.vx *= Math.max(0, 1 - 1.15 * step);
+    d.vy *= Math.max(0, 1 - 1.15 * step);
+    d.angle += d.spin * step;
+  }
+}
+
+function drawShipDebris() {
+  if (!debrisTexReady || !shipDebris.length) return;
+  const hw0 = (DEBRIS_CELL_W * 0.5) * RES_SCALE * 0.55;
+  const hh0 = (DEBRIS_CELL_H * 0.5) * RES_SCALE * 0.55;
+  const fu = 1 / DEBRIS_STRIP_FRAMES;
+
+  gl.useProgram(debrisProg);
+  gl.enableVertexAttribArray(dbAPos);
+  gl.enableVertexAttribArray(dbAUV);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, debrisTex);
+  gl.uniform1i(dbUTex, 0);
+  gl.uniform2f(dbURes, W, H);
+  bindSceneLightUniforms(debrisLightU);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.bindBuffer(gl.ARRAY_BUFFER, debrisBuf);
+
+  for (let i = 0; i < shipDebris.length; i++) {
+    const d = shipDebris[i];
+    const fade = 1 - d.age / d.life;
+    const alpha = fade * fade;
+    if (alpha < 0.02) continue;
+    const hw = hw0 * d.scale;
+    const hh = hh0 * d.scale;
+    const c = Math.cos(d.angle);
+    const s = Math.sin(d.angle);
+    // Local corners TL TR BR BL
+    const corners = [
+      [-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]
+    ];
+    const frame = Math.max(0, Math.min(DEBRIS_STRIP_FRAMES - 1, d.frame | 0));
+    const u0 = frame * fu;
+    const u1 = u0 + fu;
+    const uvs = [[u0, 0], [u1, 0], [u1, 1], [u0, 1]];
+    const tris = [0, 1, 2, 0, 2, 3];
+    for (let t = 0; t < 6; t++) {
+      const vi = tris[t];
+      const lx = corners[vi][0];
+      const ly = corners[vi][1];
+      debrisMesh[t * 4] = d.x + lx * c - ly * s;
+      debrisMesh[t * 4 + 1] = d.y + lx * s + ly * c;
+      debrisMesh[t * 4 + 2] = uvs[vi][0];
+      debrisMesh[t * 4 + 3] = uvs[vi][1];
+    }
+    gl.bufferData(gl.ARRAY_BUFFER, debrisMesh, gl.DYNAMIC_DRAW);
+    gl.vertexAttribPointer(dbAPos, 2, gl.FLOAT, false, 16, 0);
+    gl.vertexAttribPointer(dbAUV, 2, gl.FLOAT, false, 16, 8);
+    gl.uniform1f(dbUAlpha, alpha);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  gl.disable(gl.BLEND);
+  gl.disableVertexAttribArray(dbAUV);
+}
+
 function pickupFrameIndex(u) {
   if (u.kind === 'health') return PICKUP_FRAME.health;
   const w = u.weapon || 'default';
@@ -8176,6 +8401,7 @@ function drawSceneLines(dt) {
 
   // Gold ores sit under ships / asteroids / enemies / bullets.
   drawCoins();
+  drawShipDebris();
 
   // Local ship (alive, or shaking corpse before boom)
   const drawMe = (player.hp > 0 || dyingId === myId) &&
@@ -15400,6 +15626,7 @@ function resetMatchState() {
   enemies.clear();
   clearAllEnemyCharges();
   clearCoins();
+  clearShipDebris();
   localCoins = 0;
   localScore = 0;
   soloLives = 3;
@@ -16876,6 +17103,7 @@ function removeEnemy(id, x, y, silent) {
     const py = y != null ? y : pose.y;
     const r = enemyHitR(e);
     const size = e.kind === 'carrier' ? 'medium' : 'small';
+    spawnEnemyDebris(e, px, py);
     emitAsteroidBurst(px, py, r, size, {
       sfx: SFX.enemyExplosion,
       vol: 0.8,
@@ -20148,6 +20376,7 @@ function render() {
   }
   pruneAsteroids();
   updateAttractedCoins(dt);
+  updateShipDebris(dt);
   const me = localView();
   if (!deathSpectating && !matchPaused && !soloShopOpen && player.hp > 0 && godmodeBlinkVisible(player.godLeft)) {
     const thrusting = thrustUp();
@@ -20292,6 +20521,7 @@ function enterGameFromWelcome(msg) {
   enemies.clear();
   clearAllEnemyCharges();
   clearCoins();
+  clearShipDebris();
   localCoins = 0;
   localScore = 0;
   asteroidGhosts = [];
