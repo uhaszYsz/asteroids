@@ -5091,19 +5091,41 @@ function randomEnemyHitboxPoint(e, cx, cy) {
   return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
 }
 
-function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) {
+function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, opts) {
+  opts = opts || {};
+  const tier = opts.tier === 'big' ? 'big' : 'small';
   while (shipDebris.length >= DEBRIS_MAX) shipDebris.shift();
   const dx = x - cx;
   const dy = y - cy;
   const outward = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.9;
+
   // Speeds in px/tick; spins in deg/tick — convert to /s for the dt integrator.
-  const spdTick = 1.875 + Math.random() * (6 - 1.875);
+  // Big: slow kick/spin, longer life. Small: punchy kick, quick settle, die sooner.
+  let spdTick;
+  let spinDegTick;
+  let life;
+  let decelTick;
+  let s0;
+  let s1;
+  if (tier === 'big') {
+    spdTick = 0.5 + Math.random() * 1.0;       // 0.5–1.5 px/tick
+    spinDegTick = 0.8 + Math.random() * 1.7;   // 0.8–2.5 °/tick
+    life = 2.0 + Math.random() * 1.0;          // 2–3 s
+    decelTick = 0.035;
+    s0 = opts.scaleMin != null ? +opts.scaleMin : 0.95;
+    s1 = opts.scaleMax != null ? +opts.scaleMax : 1.35;
+  } else {
+    spdTick = 3.0 + Math.random() * 3.0;       // 3–6 px/tick punch
+    spinDegTick = 4 + Math.random() * 6;       // 4–10 °/tick
+    life = 0.55 + Math.random() * 0.45;        // 0.55–1.0 s
+    decelTick = 0.14;                          // settles in ~0.2–0.4 s
+    s0 = opts.scaleMin != null ? +opts.scaleMin : 0.4;
+    s1 = opts.scaleMax != null ? +opts.scaleMax : 0.65;
+  }
+
   const kick = spdTick * TPS;
-  const spinDegTick = 3 + Math.random() * (7 - 3);
   const spin = (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS;
-  const inherit = 0.18;
-  const s0 = scaleMin != null ? +scaleMin : 0.6375;
-  const s1 = scaleMax != null ? +scaleMax : 0.975;
+  const inherit = 0.4 + Math.random() * 0.3; // 40–70% ship velocity
   const sLo = Math.min(s0, s1);
   const sHi = Math.max(s0, s1);
   shipDebris.push({
@@ -5113,17 +5135,18 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
     angle: Math.random() * Math.PI * 2,
     spin,
     frame: frame | 0,
-    life: 1.8 + Math.random() * 1.6,
+    life,
     age: 0,
-    scale: sLo + Math.random() * (sHi - sLo)
+    scale: sLo + Math.random() * (sHi - sLo),
+    decelTick
   });
 }
 
 /**
  * Wreckage sprites on enemy death.
  * common → none
- * spinner → always 8× frames 7–9 only (1-based; indices 6–8)
- * ufo / worm / carrier → 4–8× frame 0 + 4–8× random frames 1–8
+ * spinner / ufo / worm / carrier → 1–2 big + 3–4 small scraps
+ * spinner frames: 7–9 only (indices 6–8)
  * Positions: random inside hitbox (circle or oriented rect).
  */
 function spawnEnemyDebris(e, x, y) {
@@ -5136,27 +5159,30 @@ function spawnEnemyDebris(e, x, y) {
   const cy = y;
   const evx = e.vx || 0;
   const evy = e.vy || 0;
+  const spinner = kind === 'spinner';
+  const nBig = debrisRandInt(1, 2);
+  const nSmall = debrisRandInt(3, 4);
 
-  if (kind === 'spinner') {
-    for (let i = 0; i < 8; i++) {
-      const p = randomEnemyHitboxPoint(e, cx, cy);
-      const frame = 6 + debrisRandInt(0, 2); // frames 7,8,9
-      pushShipDebrisPiece(p.x, p.y, frame, evx, evy, cx, cy, 0.3825, 0.585);
-    }
-    return;
-  }
+  const pickFrame = (big) => {
+    if (spinner) return 6 + debrisRandInt(0, 2);
+    if (big) return Math.random() < 0.55 ? 0 : 1 + ((Math.random() * (DEBRIS_STRIP_FRAMES - 1)) | 0);
+    return 1 + ((Math.random() * (DEBRIS_STRIP_FRAMES - 1)) | 0);
+  };
 
-  const nCore = debrisRandInt(4, 8);
-  const nExtra = debrisRandInt(4, 8);
+  const bigOpts = spinner
+    ? { tier: 'big', scaleMin: 0.55, scaleMax: 0.85 }
+    : { tier: 'big' };
+  const smallOpts = spinner
+    ? { tier: 'small', scaleMin: 0.28, scaleMax: 0.45 }
+    : { tier: 'small' };
 
-  for (let i = 0; i < nCore; i++) {
+  for (let i = 0; i < nBig; i++) {
     const p = randomEnemyHitboxPoint(e, cx, cy);
-    pushShipDebrisPiece(p.x, p.y, 0, evx, evy, cx, cy);
+    pushShipDebrisPiece(p.x, p.y, pickFrame(true), evx, evy, cx, cy, bigOpts);
   }
-  for (let i = 0; i < nExtra; i++) {
+  for (let i = 0; i < nSmall; i++) {
     const p = randomEnemyHitboxPoint(e, cx, cy);
-    const frame = 1 + ((Math.random() * (DEBRIS_STRIP_FRAMES - 1)) | 0);
-    pushShipDebrisPiece(p.x, p.y, frame, evx, evy, cx, cy);
+    pushShipDebrisPiece(p.x, p.y, pickFrame(false), evx, evy, cx, cy, smallOpts);
   }
 }
 
@@ -5173,11 +5199,12 @@ function updateShipDebris(dt) {
     }
     d.x += d.vx * step;
     d.y += d.vy * step;
-    // Flat decel: 0.05 px/tick each sim tick.
+    // Flat decel in px/tick (per-piece; small scraps settle faster after the punch).
+    const decel = d.decelTick != null ? d.decelTick : 0.05;
     const spd = Math.hypot(d.vx, d.vy); // px/s
     if (spd > 1e-6) {
       const spdTick = spd / TPS;
-      const nextTick = Math.max(0, spdTick - 0.05 * ticks);
+      const nextTick = Math.max(0, spdTick - decel * ticks);
       const s = nextTick / spdTick;
       d.vx *= s;
       d.vy *= s;
