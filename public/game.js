@@ -23008,29 +23008,24 @@ if (gridPanelEl) {
   });
 }
 
-/** F1 middle-click: spawn random powerup at cursor with random velocity. */
-function requestDebugPowerupSpawn(clientX, clientY) {
-  if (!gridPanelOpen || !inGame || !ws || ws.readyState !== 1) return;
+/** F1 middle-click: preview enemy death explosion particles at cursor. */
+function requestDebugEnemyExplosion(clientX, clientY) {
+  if (!gridPanelOpen) return;
   const p = canvasToWorld(clientX, clientY);
-  const ang = Math.random() * Math.PI * 2;
-  const spd = (0.4 + Math.random() * 4.2) * RES_SCALE;
-  const powerup = POWERUP_TYPES[Math.random() * POWERUP_TYPES.length | 0];
-  ws.send(JSON.stringify({
-    t: 'dbgPwr',
-    x: p.x,
-    y: p.y,
-    vx: Math.cos(ang) * spd,
-    vy: Math.sin(ang) * spd,
-    powerup
-  }));
+  const r = ENEMY_R.common;
+  emitAsteroidBurst(p.x, p.y, r, 'small', {
+    sfx: SFX.enemyExplosion,
+    vol: 0.8,
+    ambient: false
+  });
 }
 
 canvas.addEventListener('pointerdown', (e) => {
   if (!gridPanelOpen) return;
-  // Middle mouse: spawn random powerup (F1 debug).
+  // Middle mouse: enemy explosion particle preview (F1 debug).
   if (e.button === 1) {
     e.preventDefault();
-    requestDebugPowerupSpawn(e.clientX, e.clientY);
+    requestDebugEnemyExplosion(e.clientX, e.clientY);
     return;
   }
   // Left = implosion, right = explosion.
