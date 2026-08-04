@@ -5121,29 +5121,22 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
 
 /**
  * Wreckage sprites on enemy death.
- * common → 8× small frame 0 (scale 0.4–0.7)
- * spinner / ufo / worm → 8–10× frame 0 + 8–10× random frames 1–8
+ * common → none
+ * spinner / ufo / worm / carrier → 8–10× frame 0 + 8–10× random frames 1–8
  * Positions: random inside hitbox (circle or oriented rect).
  */
 function spawnEnemyDebris(e, x, y) {
   if (!e) return;
   const kind = e.kind || 'common';
+  if (kind === 'common') return;
+  if (kind !== 'spinner' && kind !== 'ufo' && kind !== 'worm' && kind !== 'carrier') return;
+
   const cx = x;
   const cy = y;
   const evx = e.vx || 0;
   const evy = e.vy || 0;
-
-  let nCore = 0;
-  let nExtra = 0;
-  let nSmall = 0;
-  if (kind === 'common') {
-    nSmall = 8;
-  } else if (kind === 'spinner' || kind === 'ufo' || kind === 'worm' || kind === 'carrier') {
-    nCore = debrisRandInt(8, 10);
-    nExtra = debrisRandInt(8, 10);
-  } else {
-    return;
-  }
+  const nCore = debrisRandInt(8, 10);
+  const nExtra = debrisRandInt(8, 10);
 
   for (let i = 0; i < nCore; i++) {
     const p = randomEnemyHitboxPoint(e, cx, cy);
@@ -5153,10 +5146,6 @@ function spawnEnemyDebris(e, x, y) {
     const p = randomEnemyHitboxPoint(e, cx, cy);
     const frame = 1 + ((Math.random() * (DEBRIS_STRIP_FRAMES - 1)) | 0);
     pushShipDebrisPiece(p.x, p.y, frame, evx, evy, cx, cy);
-  }
-  for (let i = 0; i < nSmall; i++) {
-    const p = randomEnemyHitboxPoint(e, cx, cy);
-    pushShipDebrisPiece(p.x, p.y, 0, evx, evy, cx, cy, 0.4, 0.7);
   }
 }
 
