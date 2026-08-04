@@ -5091,7 +5091,7 @@ function randomEnemyHitboxPoint(e, cx, cy) {
   return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
 }
 
-function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy) {
+function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) {
   while (shipDebris.length >= DEBRIS_MAX) shipDebris.shift();
   const dx = x - cx;
   const dy = y - cy;
@@ -5102,6 +5102,10 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy) {
   const spinDegTick = 3 + Math.random() * (7 - 3);
   const spin = (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS;
   const inherit = 0.18;
+  const s0 = scaleMin != null ? +scaleMin : 0.85;
+  const s1 = scaleMax != null ? +scaleMax : 1.3;
+  const sLo = Math.min(s0, s1);
+  const sHi = Math.max(s0, s1);
   shipDebris.push({
     x, y,
     vx: Math.cos(outward) * kick + (eVx || 0) * TPS * inherit,
@@ -5111,13 +5115,13 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy) {
     frame: frame | 0,
     life: (1.8 + Math.random() * 1.6) * 2,
     age: 0,
-    scale: 0.85 + Math.random() * 0.45
+    scale: sLo + Math.random() * (sHi - sLo)
   });
 }
 
 /**
  * Wreckage sprites on enemy death.
- * common → 3–4× frame 0
+ * common → 3–4× frame 0 + 4× small frame 0 (scale 0.4–0.7)
  * spinner / ufo / worm → 4–5× frame 0 + 4–5× random frames 1–8
  * Positions: random inside hitbox (circle or oriented rect).
  */
@@ -5131,8 +5135,10 @@ function spawnEnemyDebris(e, x, y) {
 
   let nCore = 0;
   let nExtra = 0;
+  let nSmall = 0;
   if (kind === 'common') {
     nCore = debrisRandInt(3, 4);
+    nSmall = 4;
   } else if (kind === 'spinner' || kind === 'ufo' || kind === 'worm' || kind === 'carrier') {
     nCore = debrisRandInt(4, 5);
     nExtra = debrisRandInt(4, 5);
@@ -5148,6 +5154,10 @@ function spawnEnemyDebris(e, x, y) {
     const p = randomEnemyHitboxPoint(e, cx, cy);
     const frame = 1 + ((Math.random() * (DEBRIS_STRIP_FRAMES - 1)) | 0);
     pushShipDebrisPiece(p.x, p.y, frame, evx, evy, cx, cy);
+  }
+  for (let i = 0; i < nSmall; i++) {
+    const p = randomEnemyHitboxPoint(e, cx, cy);
+    pushShipDebrisPiece(p.x, p.y, 0, evx, evy, cx, cy, 0.4, 0.7);
   }
 }
 
