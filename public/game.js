@@ -1112,8 +1112,8 @@ const CVARS = {
     help: '1 = bake lines to a texture + coarse mesh warp (no per-line physics). 0 = live spring lines.'
   },
   cl_background_bake_quality: {
-    value: 8,
-    def: 8,
+    value: 10,
+    def: 10,
     help: 'Bake warp mesh density 5–14 (higher = more faces / finer distortion). Only used when bake=1.'
   },
   cl_bg_layer: {
@@ -1230,7 +1230,7 @@ try {
 function syncSettingsBakeQualityUi() {
   const el = document.getElementById('settings-bake-quality');
   if (!el) return;
-  el.value = String(Math.max(5, Math.min(14, cv('cl_background_bake_quality') | 0 || 8)));
+  el.value = String(Math.max(5, Math.min(14, cv('cl_background_bake_quality') | 0 || 10)));
 }
 
 function cv(name) {
@@ -1759,7 +1759,7 @@ const GRID_SLEEP_D2 = 0.8;
 const GRID_N_SOFT_CAP = 200000; // refuse tiny sizes that would melt the CPU (allows ~2px cells)
 /** Bake warp step from cl_background_bake_quality (5=coarse … 14=fine). */
 function bakeWarpStepFromQuality() {
-  const q = Math.max(5, Math.min(14, cv('cl_background_bake_quality') | 0 || 8));
+  const q = Math.max(5, Math.min(14, cv('cl_background_bake_quality') | 0 || 10));
   // q=5 → ~26px cells, q=8 → ~15px, q=14 → 6px (floor)
   return Math.max(6, Math.round(44 - q * 3.6));
 }
