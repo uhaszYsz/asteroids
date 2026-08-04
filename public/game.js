@@ -5173,8 +5173,8 @@ function updateShipDebris(dt) {
     }
     d.x += d.vx * step;
     d.y += d.vy * step;
-    // Drag 0.25 per tick (lose 25% speed each sim tick).
-    const keep = Math.max(0, 1 - 0.25 * TPS * step);
+    // Keep factor per tick (was ~0.96; user wants 0.25).
+    const keep = Math.pow(0.25, step * TPS);
     d.vx *= keep;
     d.vy *= keep;
     d.angle += d.spin * step;
