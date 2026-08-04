@@ -19748,6 +19748,23 @@ function rememberFrame(frame) {
   if (frameHistory.length > 120) frameHistory.shift();
 }
 
+/** Drop oldest unacked cmds when client history is too deep (mirror server trim). */
+function shedPendingInputHistory() {
+  const cap = Math.max(12, (maxUnackedInputs() | 0) + 4);
+  while (pendingInputs.length > cap) {
+    let dropAt = 0;
+    if ((pendingInputs[0].sp | 0) === 1) {
+      for (let i = 1; i < pendingInputs.length; i++) {
+        if ((pendingInputs[i].sp | 0) === 0) {
+          dropAt = i;
+          break;
+        }
+      }
+    }
+    pendingInputs.splice(dropAt, 1);
+  }
+}
+
 function frameBySeq(seq) {
   for (let i = frameHistory.length - 1; i >= 0; i--) {
     if (frameHistory[i].seq === seq) return frameHistory[i];
@@ -19772,7 +19789,7 @@ function predictTick(forceShoot) {
     // Keep seq advancing so we don't desync, but don't move/shoot locally.
     const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sh: 0 };
     pendingInputs.push(frame);
-    if (pendingInputs.length > 90) pendingInputs.shift();
+    shedPendingInputHistory();
     rememberFrame(frame);
     sendPendingInputs();
     const applyUntil = releasedSeq();
@@ -19789,7 +19806,7 @@ function predictTick(forceShoot) {
   if (!matchLive || (preRoundCd | 0) > 0 || (soloShopOpen && pvpShopMode)) {
     const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sh: 0 };
     pendingInputs.push(frame);
-    if (pendingInputs.length > 90) pendingInputs.shift();
+    shedPendingInputHistory();
     rememberFrame(frame);
     sendPendingInputs();
     const applyUntil = releasedSeq();
@@ -19814,7 +19831,7 @@ function predictTick(forceShoot) {
     if (forceShoot) inp.sp = 1;
     const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh };
     pendingInputs.push(frame);
-    if (pendingInputs.length > 90) pendingInputs.shift();
+    shedPendingInputHistory();
     rememberFrame(frame);
     sendPendingInputs();
     // Local shoot FX only; do not advance lastAppliedSeq (snaps own that).
@@ -19840,7 +19857,7 @@ function predictTick(forceShoot) {
   if (forceShoot) inp.sp = 1;
   const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh };
   pendingInputs.push(frame);
-  if (pendingInputs.length > 90) pendingInputs.shift();
+  shedPendingInputHistory();
   rememberFrame(frame);
   sendPendingInputs();
 

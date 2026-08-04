@@ -145,8 +145,8 @@ function trimInputQueue(pl, maxLen) {
   const cap = Math.max(1, maxLen | 0);
   if (!pl || !pl.inputQueue || pl.inputQueue.length <= cap) return;
   const q = pl.inputQueue;
-  // Drop from the front, but skip over a shoot pulse when a later idle frame
-  // can be discarded instead (keeps the shot, sheds backlog).
+  // Drop from the front (oldest), but skip over a shoot pulse when a later idle
+  // frame can be discarded instead (keeps the shot, sheds backlog → fresher input).
   while (q.length > cap) {
     let dropAt = 0;
     if ((q[0].sp | 0) === 1) {
@@ -180,12 +180,9 @@ function enqueuePlayerInputs(ws, pl, frames) {
 
   let accepted = 0;
   for (let i = 0; i < slice.length && accepted < budget; i++) {
+    // Source-style: if backlog is deep, drop oldest before accepting newer cmds.
     if (pl.inputQueue.length >= MAX_INPUT_QUEUE) {
-      if (ws && ws.__local) {
-        // Local: keep growing rather than dropping; client unacked cap is the brake.
-      } else {
-        trimInputQueue(pl, MAX_INPUT_QUEUE - 1);
-      }
+      trimInputQueue(pl, MAX_INPUT_QUEUE - 1);
     }
     const cleaned = sanitizeInputFrame(slice[i], pl.lastSeq | 0, maxQueuedSeq);
     if (!cleaned) {
@@ -209,11 +206,9 @@ function enqueuePlayerInputs(ws, pl, frames) {
   }
   if (accepted) {
     pl.inputQueue.sort((a, b) => a.seq - b.seq);
-    // Remote only: shed backlog. Local host must not drop shoot pulses.
-    if (!(ws && ws.__local)) {
-      trimInputQueue(pl, SOFT_INPUT_QUEUE);
-      trimInputQueue(pl, MAX_INPUT_QUEUE);
-    }
+    // Always shed backlog (local + remote). Deep FIFO without trim = sticky input delay.
+    trimInputQueue(pl, SOFT_INPUT_QUEUE);
+    trimInputQueue(pl, MAX_INPUT_QUEUE);
   }
 }
 
