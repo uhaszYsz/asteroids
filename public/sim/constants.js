@@ -12,13 +12,13 @@ const RATE_MSG_BURST = 40;
 const RATE_INPUT_FRAMES_PER_SEC = TPS * 2;
 const RATE_INPUT_FRAMES_BURST = TPS;
 /**
- * Hard cap on per-player input backlog. Server applies 1 frame/tick; a deep
- * queue is sticky shoot/move lag until refresh. Keep this small so overflow
- * self-heals by dropping oldest frames (prefer fresh input over delayed shots).
+ * Max cmds buffered between ticks. takePlayerInput always collapses to the
+ * newest (Source-style catch-up); this is only a safety cap on enqueue.
+ * Keep tiny — a mid-depth FIFO that never drains is sticky input lag.
  */
-const MAX_INPUT_QUEUE = 8;
-/** Shed mild overproduce before hitting the hard cap (~200ms at 30Hz). */
-const SOFT_INPUT_QUEUE = 6;
+const MAX_INPUT_QUEUE = 2;
+/** Prefer at most one waiting cmd after enqueue. */
+const SOFT_INPUT_QUEUE = 1;
 const MAX_FRAMES_PER_MSG = 24;
 /** Reject seq that jumps more than this ahead of last applied/queued. */
 const MAX_SEQ_JUMP = TPS * 3;

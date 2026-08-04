@@ -140,25 +140,30 @@ function sanitizeInputFrame(frame, lastSeq, maxQueuedSeq) {
   return { seq, l, r, u, sp, sh };
 }
 
-/** Drop oldest queued frames so latency cannot stick. Prefer keeping shoot pulses. */
+/**
+ * Drop older cmds and keep the newest `keep` samples.
+ * Shoot pulses from dropped cmds are merged onto the oldest kept frame so taps
+ * aren't lost when catching up after a hitch.
+ */
 function trimInputQueue(pl, maxLen) {
   const cap = Math.max(1, maxLen | 0);
   if (!pl || !pl.inputQueue || pl.inputQueue.length <= cap) return;
   const q = pl.inputQueue;
-  // Drop from the front (oldest), but skip over a shoot pulse when a later idle
-  // frame can be discarded instead (keeps the shot, sheds backlog → fresher input).
+  let gotShoot = 0;
   while (q.length > cap) {
-    let dropAt = 0;
-    if ((q[0].sp | 0) === 1) {
-      for (let i = 1; i < q.length; i++) {
-        if ((q[i].sp | 0) === 0) {
-          dropAt = i;
-          break;
-        }
-      }
-    }
-    q.splice(dropAt, 1);
+    const dropped = q.shift();
+    if ((dropped.sp | 0) === 1) gotShoot = 1;
   }
+  if (gotShoot && q.length) q[0].sp = 1;
+}
+
+/**
+ * Each sim tick: play the newest cmd only. Mid-depth FIFO never drains on its
+ * own (add 1 / play 1) — collapsing here is what kills sticky input delay.
+ */
+function collapseInputQueueToLatest(pl) {
+  if (!pl || !pl.inputQueue || pl.inputQueue.length <= 1) return;
+  trimInputQueue(pl, 1);
 }
 
 function enqueuePlayerInputs(ws, pl, frames) {
@@ -180,7 +185,6 @@ function enqueuePlayerInputs(ws, pl, frames) {
 
   let accepted = 0;
   for (let i = 0; i < slice.length && accepted < budget; i++) {
-    // Source-style: if backlog is deep, drop oldest before accepting newer cmds.
     if (pl.inputQueue.length >= MAX_INPUT_QUEUE) {
       trimInputQueue(pl, MAX_INPUT_QUEUE - 1);
     }
@@ -206,7 +210,6 @@ function enqueuePlayerInputs(ws, pl, frames) {
   }
   if (accepted) {
     pl.inputQueue.sort((a, b) => a.seq - b.seq);
-    // Always shed backlog (local + remote). Deep FIFO without trim = sticky input delay.
     trimInputQueue(pl, SOFT_INPUT_QUEUE);
     trimInputQueue(pl, MAX_INPUT_QUEUE);
   }

@@ -1,6 +1,8 @@
 /** @file server/rooms.js — loaded into shared server scope (do not require() alone). */
 function takePlayerInput(p) {
   if (p.inputQueue.length) {
+    // Play newest only — never walk a sticky mid-depth FIFO (add1/play1 forever).
+    collapseInputQueueToLatest(p);
     const next = p.inputQueue.shift();
     p.inp.l = next.l;
     p.inp.r = next.r;

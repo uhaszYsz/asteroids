@@ -14850,19 +14850,15 @@ function clientPredictsMotion() {
 
 /**
  * How many unacked input seqs we may have in flight / on the server queue.
- * Must cover RTT (+ jitter) so we don't starve, but stay tight enough that a
- * hitch/catchup/clock drift cannot build a sticky multi-second shoot delay.
+ * Keep tiny: server collapses to latest each tick, so a deep client backlog
+ * only wastes bandwidth and lies about "in flight" delay.
  */
 function maxUnackedInputs() {
-  // Local host applies 1 frame/tick in-process. Staying tight prevents a sticky
-  // inputQueue (laggy shots) and stops soft-trim/rate-limit from eating `sp`.
-  // Offline (no lag-sim): allow a few inputs in flight so a 100ms hitch doesn't stall the host queue.
-  if (isOfflineLocalPlay() && !offlineLagSimActive()) return 8;
+  // Local host: 1 waiting + 1 applying is enough.
+  if (isOfflineLocalPlay() && !offlineLagSimActive()) return 2;
   const rttTicks = Math.ceil(Math.max(0, pingMs) / TICK_MS);
-  const jitterTicks = Math.ceil(Math.max(0, pingJitter) / TICK_MS);
-  const dly = adaptiveInputDelay();
-  // cmdDelay is local-only; still reserve room so release buffer stays valid.
-  return Math.min(12, Math.max(dly + 2, rttTicks + jitterTicks + 2, 3));
+  // Cover one-way-ish in flight, but never enough to feel like sticky lag.
+  return Math.min(4, Math.max(2, rttTicks + 1));
 }
 
 function unackedInputCount() {
@@ -19750,18 +19746,10 @@ function rememberFrame(frame) {
 
 /** Drop oldest unacked cmds when client history is too deep (mirror server trim). */
 function shedPendingInputHistory() {
-  const cap = Math.max(12, (maxUnackedInputs() | 0) + 4);
+  const cap = Math.max(2, (maxUnackedInputs() | 0) + 1);
   while (pendingInputs.length > cap) {
-    let dropAt = 0;
-    if ((pendingInputs[0].sp | 0) === 1) {
-      for (let i = 1; i < pendingInputs.length; i++) {
-        if ((pendingInputs[i].sp | 0) === 0) {
-          dropAt = i;
-          break;
-        }
-      }
-    }
-    pendingInputs.splice(dropAt, 1);
+    const dropped = pendingInputs.shift();
+    if ((dropped.sp | 0) === 1 && pendingInputs.length) pendingInputs[0].sp = 1;
   }
 }
 
