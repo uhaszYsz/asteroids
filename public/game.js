@@ -5096,14 +5096,18 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy) {
   const dx = x - cx;
   const dy = y - cy;
   const outward = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.9;
-  const kick = (55 + Math.random() * 110) * RES_SCALE / 3;
-  const inherit = 0.55 / 3;
+  // Speeds in px/tick; spins in deg/tick — convert to /s for the dt integrator.
+  const spdTick = 1.25 + Math.random() * (4 - 1.25);
+  const kick = spdTick * TPS;
+  const spinDegTick = 1.5 + Math.random() * (3.5 - 1.5);
+  const spin = (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS;
+  const inherit = 0.18;
   shipDebris.push({
     x, y,
     vx: Math.cos(outward) * kick + (eVx || 0) * TPS * inherit,
     vy: Math.sin(outward) * kick + (eVy || 0) * TPS * inherit,
     angle: Math.random() * Math.PI * 2,
-    spin: (Math.random() - 0.5) * 4.5 / 3,
+    spin,
     frame: frame | 0,
     life: 1.8 + Math.random() * 1.6,
     age: 0,
