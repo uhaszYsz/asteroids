@@ -5174,11 +5174,11 @@ function updateShipDebris(dt) {
     }
     d.x += d.vx * step;
     d.y += d.vy * step;
-    // Flat decel: 0.25 px/tick each sim tick (not a keep multiplier).
+    // Flat decel: 0.05 px/tick each sim tick.
     const spd = Math.hypot(d.vx, d.vy); // px/s
     if (spd > 1e-6) {
       const spdTick = spd / TPS;
-      const nextTick = Math.max(0, spdTick - 0.25 * ticks);
+      const nextTick = Math.max(0, spdTick - 0.05 * ticks);
       const s = nextTick / spdTick;
       d.vx *= s;
       d.vy *= s;
