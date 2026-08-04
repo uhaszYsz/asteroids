@@ -902,10 +902,6 @@ const LOCAL_RECON_DEADZONE_PX = 12;
 const LOCAL_RECON_DEADZONE_ANG = 0.025;
 /** After an RTT spike, skip pose reconcile briefly so the local ship keeps predicting smoothly. */
 const RTT_SPIKE_HOLD_MS = 180;
-/** Ignore wall-clock pongs this long after a main-thread hitch (FPS stall). */
-const HITCH_PING_IGNORE_MS = 500;
-/** Frame gap (ms) treated as a main-thread hitch. */
-const HITCH_FRAME_GAP_MS = 80;
 /**
  * If local tick cursor falls this far behind (tab background), skip synthesizing
  * a flood of predict ticks and resync from the last server ghost with a soft blend.
@@ -14714,10 +14710,6 @@ let lastRttMs = 0;
 let roomSimPingMs = 0;
 /** performance.now() — while active, skip local pose reconcile (status/ack still apply). */
 let rttSpikeUntil = 0;
-/** performance.now() — while active, hitch-inflated NTP samples must not raise cmd delay. */
-let mainThreadHitchUntil = 0;
-/** How long prediction has been paused by the unacked cap (raf frames). */
-let inputStallFrames = 0;
 let syncTick = 0;
 let syncSt = 0;
 /** performance.now() when syncTick was last set — solo tick estimate (matches local hrtime). */
@@ -14735,8 +14727,6 @@ function resetClockSync() {
   lastRttMs = 0;
   roomSimPingMs = 0;
   rttSpikeUntil = 0;
-  mainThreadHitchUntil = 0;
-  inputStallFrames = 0;
   syncStPerf = 0;
 }
 
@@ -14762,13 +14752,7 @@ function applyNtp(ct, st, serverTick) {
   lastRttMs = rtt;
   if (roomSimPingMs > 0) {
     pingMs = roomSimPingMs;
-    // Hitch RTT is local-thread noise — don't ratchet jitter up from it.
-    if (!(performance.now() < mainThreadHitchUntil) && rtt < roomSimPingMs + 120) {
-      const diff = Math.abs(rtt - roomSimPingMs);
-      pingJitter = pingJitter ? pingJitter * 0.8 + diff * 0.2 : diff * 0.2;
-    } else {
-      pingJitter *= 0.85;
-    }
+    pingJitter = Math.max(pingJitter * 0.9, Math.abs(rtt - roomSimPingMs) * 0.1);
     // Keep NTP clock so estimatedServerTick leads delayed snaps by ~one-way
     // (same as online). Do not use receive-time syncStPerf for the tick cursor.
     const offset = st - (ct + t3) * 0.5;
@@ -14791,29 +14775,17 @@ function applyNtp(ct, st, serverTick) {
   }
   // Ignore one-off delayed pongs for ping AND clock (tab timers, GC, spikes).
   const baseline = pingMs > 0 ? pingMs : 30;
-  const nowPerf = performance.now();
-  // Main-thread FPS stalls inflate Date.now() RTT. Feeding those into the EMA
-  // permanently raises adaptiveInputDelay / unacked budget after the hitch.
-  const hitchSample = (nowPerf < mainThreadHitchUntil)
-    || (pingMs > 0 && rtt > baseline + 45 && rtt > baseline * 1.35)
-    || rtt > 280;
-  const saneRtt = !hitchSample && rtt < baseline * 4 + 80;
+  const saneRtt = rtt < baseline * 4 + 80;
   const offset = st - (ct + t3) * 0.5;
 
   // Spike vs smoothed ping: hold local pose reconcile so the ship doesn't soft-correct.
-  if (pingMs > 0 && (hitchSample || (rtt > pingMs + 18 && rtt > pingMs * 1.25))) {
-    rttSpikeUntil = Math.max(rttSpikeUntil, nowPerf + RTT_SPIKE_HOLD_MS);
+  if (pingMs > 0 && rtt > pingMs + 18 && rtt > pingMs * 1.25) {
+    rttSpikeUntil = Math.max(rttSpikeUntil, performance.now() + RTT_SPIKE_HOLD_MS);
   }
 
   if (saneRtt) {
     const diff = pingMs ? Math.abs(rtt - pingMs) : 0;
-    if (pingJitter) {
-      // Stable samples: bleed hitch-inflated jitter out quickly.
-      if (diff < 12) pingJitter = pingJitter * 0.5 + diff * 0.15;
-      else pingJitter = pingJitter * 0.8 + diff * 0.2;
-    } else {
-      pingJitter = diff;
-    }
+    pingJitter = pingJitter ? pingJitter * 0.85 + diff * 0.15 : diff;
     pingMs = pingMs ? pingMs * 0.8 + rtt * 0.2 : rtt;
 
     if (!clockOffsetReady) {
@@ -14831,9 +14803,6 @@ function applyNtp(ct, st, serverTick) {
       if (step < -maxStep) step = -maxStep;
       clockOffset += step * 0.35;
     }
-  } else if (hitchSample && pingJitter > 0) {
-    // Don't let a stall leave jitter (and cmd delay) stuck high.
-    pingJitter *= 0.75;
   }
   // While playing, binary snaps own the tick timeline. Pong must not rewrite
   // syncTick/syncSt — that was rewinding estimatedServerTick every ~2s and
@@ -14852,15 +14821,11 @@ function adaptiveInputDelay() {
   const oneWay = pingMs * 0.5;
   let d = Math.max(0, cv('cl_cmddelay') | 0);
   const dMax = Math.max(d, cv('cl_cmddelay_max') | 0);
-  // During/after a FPS hitch, wall-clock jitter is fake — don't raise cmd delay on it.
-  const jitter = (performance.now() < mainThreadHitchUntil)
-    ? Math.min(pingJitter, 12)
-    : pingJitter;
   // Very low RTT: min cmd delay fights prediction and looks like ship lag.
-  if (oneWay < 15 && jitter < 18) d = 0;
+  if (oneWay < 15 && pingJitter < 18) d = 0;
   else {
-    if (oneWay > TICK_MS * 1.25 || jitter > 20) d = Math.max(d, Math.min(2, dMax));
-    if (oneWay > TICK_MS * 2.5 || jitter > 45) d = Math.max(d, Math.min(3, dMax));
+    if (oneWay > TICK_MS * 1.25 || pingJitter > 20) d = Math.max(d, Math.min(2, dMax));
+    if (oneWay > TICK_MS * 2.5 || pingJitter > 45) d = Math.max(d, Math.min(3, dMax));
   }
   return Math.min(dMax, d);
 }
@@ -15213,7 +15178,6 @@ function syncSimTicks() {
 
   // Never flood the dedicated-server input queue. Local host is exempt.
   if (!canProduceInputFrame()) {
-    inputStallFrames++;
     // Clock estimate ran ahead (or queue already deep): skip ticking until acks
     // drain unacked depth. Snap cursor so we don't bank a huge catchup burst.
     // Offline (no lag-sim): host may keep thrusting while we pause — stick to ghost.
@@ -15232,23 +15196,8 @@ function syncSimTicks() {
       lastAppliedSeq = Math.max(lastAppliedSeq | 0, ackedSeq | 0);
     }
     if (behind > maxUnackedInputs()) clientTickCursor = target;
-    // Hitch left unacked depth stuck: hard-resync so prediction can resume.
-    // (unacked = inputSeq−ackedSeq; shedding pending alone cannot unblock.)
-    if (inputStallFrames >= 45 && serverGhost.valid) {
-      adoptServerGhostVisual();
-      inputSeq = ackedSeq | 0;
-      lastSentSeq = ackedSeq | 0;
-      lastAppliedSeq = ackedSeq | 0;
-      pendingInputs = pendingInputs.filter(f => (f.seq | 0) > (ackedSeq | 0));
-      clientTickCursor = target;
-      inputStallFrames = 0;
-      if (pingJitter > 18) pingJitter = 18;
-    } else {
-      sendPendingInputs();
-    }
     return;
   }
-  inputStallFrames = 0;
 
   let steps = 0;
   const maxCatchup = Math.max(1, cv('cl_catchup') | 0);
@@ -24492,16 +24441,7 @@ function frame(now) {
   requestAnimationFrame(frame);
   if (now == null) now = performance.now();
   if (!fpsPrevMs) fpsPrevMs = now;
-  const frameGap = now - fpsPrevMs;
-  // Raw rAF gap detects main-thread stalls that inflate Date.now() ping samples.
-  if (frameGap > HITCH_FRAME_GAP_MS) {
-    mainThreadHitchUntil = Math.max(mainThreadHitchUntil, now + HITCH_PING_IGNORE_MS);
-    if (pingJitter > 20) pingJitter = Math.min(pingJitter, 20);
-  } else if (now >= mainThreadHitchUntil && pingJitter > 14) {
-    // Bleed leftover hitch jitter so cmd delay returns after FPS recovers.
-    pingJitter *= 0.92;
-  }
-  fpsAccumMs += frameGap;
+  fpsAccumMs += now - fpsPrevMs;
   fpsPrevMs = now;
   // Don't spiral if a tab was backgrounded.
   if (fpsAccumMs > LOCK_FRAME_MS * 2) fpsAccumMs = LOCK_FRAME_MS;
