@@ -14849,16 +14849,14 @@ function clientPredictsMotion() {
 }
 
 /**
- * How many unacked input seqs we may have in flight / on the server queue.
- * Keep tiny: server collapses to latest each tick, so a deep client backlog
- * only wastes bandwidth and lies about "in flight" delay.
+ * How many unacked input seqs we may have in flight.
+ * Server burns the queue in-order each tick, so this only covers hitch bursts
+ * between ticks — not a sticky delay budget.
  */
 function maxUnackedInputs() {
-  // Local host: 1 waiting + 1 applying is enough.
-  if (isOfflineLocalPlay() && !offlineLagSimActive()) return 2;
+  if (isOfflineLocalPlay() && !offlineLagSimActive()) return 12;
   const rttTicks = Math.ceil(Math.max(0, pingMs) / TICK_MS);
-  // Cover one-way-ish in flight, but never enough to feel like sticky lag.
-  return Math.min(4, Math.max(2, rttTicks + 1));
+  return Math.min(24, Math.max(4, rttTicks + 2));
 }
 
 function unackedInputCount() {
@@ -19744,9 +19742,9 @@ function rememberFrame(frame) {
   if (frameHistory.length > 120) frameHistory.shift();
 }
 
-/** Drop oldest unacked cmds when client history is too deep (mirror server trim). */
+/** Drop oldest unacked cmds when client history is too deep. */
 function shedPendingInputHistory() {
-  const cap = Math.max(2, (maxUnackedInputs() | 0) + 1);
+  const cap = Math.max(8, (maxUnackedInputs() | 0) + 2);
   while (pendingInputs.length > cap) {
     const dropped = pendingInputs.shift();
     if ((dropped.sp | 0) === 1 && pendingInputs.length) pendingInputs[0].sp = 1;

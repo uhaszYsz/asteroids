@@ -1,8 +1,6 @@
 /** @file server/rooms.js — loaded into shared server scope (do not require() alone). */
 function takePlayerInput(p) {
   if (p.inputQueue.length) {
-    // Play newest only — never walk a sticky mid-depth FIFO (add1/play1 forever).
-    collapseInputQueueToLatest(p);
     const next = p.inputQueue.shift();
     p.inp.l = next.l;
     p.inp.r = next.r;
@@ -14,6 +12,60 @@ function takePlayerInput(p) {
     // Hold last movement/turn under jitter — never invent shoot pulses.
     p.inp.sp = 0;
   }
+}
+
+/** Drain queued cmds for ack/seq only (pause / death / frozen) — no movement. */
+function drainPlayerInputQueue(p) {
+  while (p.inputQueue.length) {
+    takePlayerInput(p);
+    p.inp.sp = 0;
+  }
+  p.inp.sp = 0;
+}
+
+/**
+ * Quake/HL-style: run all pending cmds in order this tick (catch-up burn).
+ * One cmd → one ship step. Empty queue → one held step. No skip-to-latest.
+ */
+function stepPlayerInputs(room, p) {
+  const frozen = !!(room.shopOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice));
+  const live = !!(room.matchLive && !roomPreRoundFrozen(room));
+  const maxBurn = MAX_INPUT_QUEUE;
+
+  if (frozen) {
+    drainPlayerInputQueue(p);
+    p.vx = 0;
+    p.vy = 0;
+    p.av = 0;
+    p.inp.u = 0;
+    p.inp.l = 0;
+    p.inp.r = 0;
+    p.inp.sp = 0;
+    p.bursting = false;
+    p.railChargeLeft = 0;
+    p.prevX = p.x;
+    p.prevY = p.y;
+    return;
+  }
+
+  let steps = 0;
+  const burn = p.inputQueue.length > 0;
+  do {
+    takePlayerInput(p);
+    demoRecorder.recordInput(room, p);
+    if (live && p.inp.sp) tryStartBurst(p);
+    applyInput(p);
+    if (live && p.hp > 0 && p.inp.u) fireThrustRay(room, p);
+    if (live) updateShooting(room, p);
+    p.prevX = p.x;
+    p.prevY = p.y;
+    p.x += p.vx;
+    p.y += p.vy;
+    wrap(p);
+    clearGodmodeIfLeftSpawn(room, p);
+    p.inp.sp = 0;
+    steps++;
+  } while (burn && p.inputQueue.length && steps < maxBurn);
 }
 
 function createInitialAsteroids() {
@@ -474,7 +526,7 @@ function stepRoom(room) {
   if (room.paused) {
     for (const p of room.players.values()) {
       if (!p.bot) {
-        takePlayerInput(p);
+        drainPlayerInputQueue(p);
         demoRecorder.recordInput(room, p);
       }
       p.vx = 0;
@@ -496,7 +548,7 @@ function stepRoom(room) {
   // Death cam: full freeze. Shake beat → boom event → wait → respawn.
   if ((room.deathShakeLeft | 0) > 0 || (room.deathBoomLeft | 0) > 0 || room.deathBoomed) {
     for (const p of room.players.values()) {
-      if (!p.bot) takePlayerInput(p);
+      if (!p.bot) drainPlayerInputQueue(p);
       p.vx = 0;
       p.vy = 0;
       p.av = 0;
@@ -536,40 +588,37 @@ function stepRoom(room) {
       if (room.perfTest) updatePerfBotInput(room, p);
       else updateBotInput(p);
       if (room.matchLive && !roomPreRoundFrozen(room) && p.inp.sp) tryStartBurst(p);
-    } else {
-      takePlayerInput(p);
-      demoRecorder.recordInput(room, p);
-      if (room.matchLive && !roomPreRoundFrozen(room) && p.inp.sp) {
-        tryStartBurst(p);
+      if (room.shopOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice)) {
+        p.vx = 0;
+        p.vy = 0;
+        p.av = 0;
+        p.inp.u = 0;
+        p.inp.l = 0;
+        p.inp.r = 0;
+        p.inp.sp = 0;
+        p.bursting = false;
+        p.railChargeLeft = 0;
+        p.prevX = p.x;
+        p.prevY = p.y;
+        p.inp.sp = 0;
+        continue;
       }
-    }
-    if (room.shopOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice)) {
-      p.vx = 0;
-      p.vy = 0;
-      p.av = 0;
-      p.inp.u = 0;
-      p.inp.l = 0;
-      p.inp.r = 0;
-      p.inp.sp = 0;
-      p.bursting = false;
-      p.railChargeLeft = 0;
+      applyInput(p);
+      if (room.matchLive && room.perfTest && p.hp > 0 && p.inp.u) {
+        fireThrustRay(room, p);
+      }
+      if (room.matchLive && room.perfTest) updateShooting(room, p);
       p.prevX = p.x;
       p.prevY = p.y;
+      p.x += p.vx;
+      p.y += p.vy;
+      wrap(p);
+      clearGodmodeIfLeftSpawn(room, p);
       p.inp.sp = 0;
       continue;
     }
-    applyInput(p);
-    if (room.matchLive && (!p.bot || room.perfTest) && p.hp > 0 && p.inp.u) {
-      fireThrustRay(room, p);
-    }
-    if (room.matchLive && (!p.bot || room.perfTest)) updateShooting(room, p);
-    p.prevX = p.x;
-    p.prevY = p.y;
-    p.x += p.vx;
-    p.y += p.vy;
-    wrap(p);
-    clearGodmodeIfLeftSpawn(room, p);
-    p.inp.sp = 0;
+    // Humans: Quake/HL burn — run every queued cmd in order this tick.
+    stepPlayerInputs(room, p);
   }
   if (room.matchLive && !roomPreRoundFrozen(room)) processPendingRailBounces(room);
   // Move asteroids first, rebuild spatial hash once, then bullets + collisions

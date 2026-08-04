@@ -12,13 +12,12 @@ const RATE_MSG_BURST = 40;
 const RATE_INPUT_FRAMES_PER_SEC = TPS * 2;
 const RATE_INPUT_FRAMES_BURST = TPS;
 /**
- * Max cmds buffered between ticks. takePlayerInput always collapses to the
- * newest (Source-style catch-up); this is only a safety cap on enqueue.
- * Keep tiny — a mid-depth FIFO that never drains is sticky input lag.
+ * Safety cap only — backlog is burned in-order each tick (Quake/HL style).
+ * Must be >= MAX_FRAMES_PER_MSG so one client packet can enqueue fully.
  */
-const MAX_INPUT_QUEUE = 2;
-/** Prefer at most one waiting cmd after enqueue. */
-const SOFT_INPUT_QUEUE = 1;
+const MAX_INPUT_QUEUE = 24;
+/** Soft shed target after enqueue (still above one packet). */
+const SOFT_INPUT_QUEUE = 16;
 const MAX_FRAMES_PER_MSG = 24;
 /** Reject seq that jumps more than this ahead of last applied/queued. */
 const MAX_SEQ_JUMP = TPS * 3;

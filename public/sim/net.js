@@ -141,9 +141,8 @@ function sanitizeInputFrame(frame, lastSeq, maxQueuedSeq) {
 }
 
 /**
- * Drop older cmds and keep the newest `keep` samples.
- * Shoot pulses from dropped cmds are merged onto the oldest kept frame so taps
- * aren't lost when catching up after a hitch.
+ * Safety-only drop when over cap. Shoot pulses merge onto next kept cmd.
+ * Catch-up is burn-in-order in stepRoom (Quake/HL), not collapse-to-latest.
  */
 function trimInputQueue(pl, maxLen) {
   const cap = Math.max(1, maxLen | 0);
@@ -155,15 +154,6 @@ function trimInputQueue(pl, maxLen) {
     if ((dropped.sp | 0) === 1) gotShoot = 1;
   }
   if (gotShoot && q.length) q[0].sp = 1;
-}
-
-/**
- * Each sim tick: play the newest cmd only. Mid-depth FIFO never drains on its
- * own (add 1 / play 1) — collapsing here is what kills sticky input delay.
- */
-function collapseInputQueueToLatest(pl) {
-  if (!pl || !pl.inputQueue || pl.inputQueue.length <= 1) return;
-  trimInputQueue(pl, 1);
 }
 
 function enqueuePlayerInputs(ws, pl, frames) {
