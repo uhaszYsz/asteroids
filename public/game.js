@@ -5164,6 +5164,7 @@ function spawnEnemyDebris(e, x, y) {
 function updateShipDebris(dt) {
   if (!shipDebris.length) return;
   const step = Math.min(0.05, dt || 0.016);
+  const ticks = step * TPS;
   for (let i = shipDebris.length - 1; i >= 0; i--) {
     const d = shipDebris[i];
     d.age += step;
@@ -5173,10 +5174,18 @@ function updateShipDebris(dt) {
     }
     d.x += d.vx * step;
     d.y += d.vy * step;
-    // Keep factor per tick (was ~0.96; user wants 0.25).
-    const keep = Math.pow(0.25, step * TPS);
-    d.vx *= keep;
-    d.vy *= keep;
+    // Flat decel: 0.25 px/tick each sim tick (not a keep multiplier).
+    const spd = Math.hypot(d.vx, d.vy); // px/s
+    if (spd > 1e-6) {
+      const spdTick = spd / TPS;
+      const nextTick = Math.max(0, spdTick - 0.25 * ticks);
+      const s = nextTick / spdTick;
+      d.vx *= s;
+      d.vy *= s;
+    } else {
+      d.vx = 0;
+      d.vy = 0;
+    }
     d.angle += d.spin * step;
   }
 }
