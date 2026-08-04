@@ -5099,7 +5099,7 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy) {
   // Speeds in px/tick; spins in deg/tick — convert to /s for the dt integrator.
   const spdTick = 1.25 + Math.random() * (4 - 1.25);
   const kick = spdTick * TPS;
-  const spinDegTick = 1.5 + Math.random() * (3.5 - 1.5);
+  const spinDegTick = 1.5 + Math.random() * (5 - 1.5);
   const spin = (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS;
   const inherit = 0.18;
   shipDebris.push({
@@ -5109,7 +5109,7 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy) {
     angle: Math.random() * Math.PI * 2,
     spin,
     frame: frame | 0,
-    life: 1.8 + Math.random() * 1.6,
+    life: (1.8 + Math.random() * 1.6) * 2,
     age: 0,
     scale: 0.85 + Math.random() * 0.45
   });
@@ -5189,7 +5189,9 @@ function drawShipDebris() {
 
   for (let i = 0; i < shipDebris.length; i++) {
     const d = shipDebris[i];
-    const alpha = 1;
+    // Opaque until last 10% of life, then linear fade to 0.
+    const u = d.age / d.life;
+    const alpha = u < 0.9 ? 1 : 1 - (u - 0.9) / 0.1;
     if (alpha < 0.02) continue;
     const hw = hw0 * d.scale;
     const hh = hh0 * d.scale;
