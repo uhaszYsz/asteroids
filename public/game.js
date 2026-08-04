@@ -8067,12 +8067,9 @@ function emitAsteroidBurst(x, y, r, size, opts) {
   if (size === 'big') boomR *= 0.5;
   else if (size === 'medium') boomR *= 0.8;
   pushBoomLight(x, y, boomR);
-  // Chunk debris: base speed ± old spread, then widen (min −25, max +50).
-  // Enemy/asteroid burst: half kick, 2× count, circular (scaleY 1).
-  const baseSpd = (50 * RES_SCALE + r * 0.6 * RES_SCALE) * 0.5;
-  const oldHalf = 20 * RES_SCALE * 0.5;
-  const minSpd = baseSpd - oldHalf - 25 * RES_SCALE * 0.5;
-  const maxSpd = baseSpd + oldHalf + 50 * RES_SCALE * 0.5;
+  // Chunk debris: fixed kick 3–7 px/tick (converted to px/s for the particle dt integrator).
+  const minSpd = 3 * TPS;
+  const maxSpd = 7 * TPS;
   const n = Math.max(15, Math.min(30, 8 + ((r / RES_SCALE) | 0))) * 2;
   emitParticles({
     x, y,
