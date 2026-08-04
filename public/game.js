@@ -5173,8 +5173,10 @@ function updateShipDebris(dt) {
     }
     d.x += d.vx * step;
     d.y += d.vy * step;
-    d.vx *= Math.max(0, 1 - 1.15 * step);
-    d.vy *= Math.max(0, 1 - 1.15 * step);
+    // Drag 0.25 per tick (lose 25% speed each sim tick).
+    const keep = Math.max(0, 1 - 0.25 * TPS * step);
+    d.vx *= keep;
+    d.vy *= keep;
     d.angle += d.spin * step;
   }
 }
