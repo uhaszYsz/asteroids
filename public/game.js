@@ -5121,8 +5121,8 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
 
 /**
  * Wreckage sprites on enemy death.
- * common → 4× small frame 0 (scale 0.4–0.7)
- * spinner / ufo / worm → 4–5× frame 0 + 4–5× random frames 1–8
+ * common → 8× small frame 0 (scale 0.4–0.7)
+ * spinner / ufo / worm → 8–10× frame 0 + 8–10× random frames 1–8
  * Positions: random inside hitbox (circle or oriented rect).
  */
 function spawnEnemyDebris(e, x, y) {
