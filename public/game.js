@@ -5102,8 +5102,8 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
   const spinDegTick = 3 + Math.random() * (7 - 3);
   const spin = (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS;
   const inherit = 0.18;
-  const s0 = scaleMin != null ? +scaleMin : 0.85;
-  const s1 = scaleMax != null ? +scaleMax : 1.3;
+  const s0 = scaleMin != null ? +scaleMin : 0.6375;
+  const s1 = scaleMax != null ? +scaleMax : 0.975;
   const sLo = Math.min(s0, s1);
   const sHi = Math.max(s0, s1);
   shipDebris.push({
@@ -5122,7 +5122,8 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
 /**
  * Wreckage sprites on enemy death.
  * common → none
- * spinner / ufo / worm / carrier → 4–8× frame 0 + 4–8× random frames 1–8
+ * spinner → always 4× frame 0 + 4× random frames 1–8
+ * ufo / worm / carrier → 4–8× frame 0 + 4–8× random frames 1–8
  * Positions: random inside hitbox (circle or oriented rect).
  */
 function spawnEnemyDebris(e, x, y) {
@@ -5135,8 +5136,8 @@ function spawnEnemyDebris(e, x, y) {
   const cy = y;
   const evx = e.vx || 0;
   const evy = e.vy || 0;
-  const nCore = debrisRandInt(4, 8);
-  const nExtra = debrisRandInt(4, 8);
+  const nCore = kind === 'spinner' ? 4 : debrisRandInt(4, 8);
+  const nExtra = kind === 'spinner' ? 4 : debrisRandInt(4, 8);
 
   for (let i = 0; i < nCore; i++) {
     const p = randomEnemyHitboxPoint(e, cx, cy);
