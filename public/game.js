@@ -5097,7 +5097,7 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
   const dy = y - cy;
   const outward = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.9;
   // Speeds in px/tick; spins in deg/tick — convert to /s for the dt integrator.
-  const spdTick = 0.625 + Math.random() * (2 - 0.625);
+  const spdTick = 1.875 + Math.random() * (6 - 1.875);
   const kick = spdTick * TPS;
   const spinDegTick = 3 + Math.random() * (7 - 3);
   const spin = (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS;
@@ -5122,7 +5122,7 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
 /**
  * Wreckage sprites on enemy death.
  * common → none
- * spinner / ufo / worm / carrier → 8–10× frame 0 + 8–10× random frames 1–8
+ * spinner / ufo / worm / carrier → 4–8× frame 0 + 4–8× random frames 1–8
  * Positions: random inside hitbox (circle or oriented rect).
  */
 function spawnEnemyDebris(e, x, y) {
@@ -5135,8 +5135,8 @@ function spawnEnemyDebris(e, x, y) {
   const cy = y;
   const evx = e.vx || 0;
   const evy = e.vy || 0;
-  const nCore = debrisRandInt(8, 10);
-  const nExtra = debrisRandInt(8, 10);
+  const nCore = debrisRandInt(4, 8);
+  const nExtra = debrisRandInt(4, 8);
 
   for (let i = 0; i < nCore; i++) {
     const p = randomEnemyHitboxPoint(e, cx, cy);
