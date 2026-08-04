@@ -4558,7 +4558,8 @@ const particleVS = `
   varying vec4 vCol;
   varying vec2 vWorld;
   void main() {
-    vec2 p = floor(aPos + 0.5) / uRes * 2.0 - 1.0;
+    // Sub-pixel positions — floor() collapsed small discs into blocky squares.
+    vec2 p = aPos / uRes * 2.0 - 1.0;
     gl_Position = vec4(p.x, -p.y, 0.0, 1.0);
     vUV = aUV;
     vCol = aCol;
@@ -4572,8 +4573,9 @@ const particleFS = `
   varying vec2 vWorld;
 ` + SCENE_LIGHT_GLSL + `
   void main() {
-    // Hard-edged axis-aligned quad in particle local UV (−1..1).
-    if (abs(vUV.x) > 1.0 || abs(vUV.y) > 1.0) discard;
+    // Circular disc in particle local UV (−1..1). Corners of the quad are discarded.
+    float d = length(vUV);
+    if (d > 1.0) discard;
     float a = vCol.a;
     gl_FragColor = applyNightLitPremul(vCol.rgb, a, vWorld);
   }
