@@ -5185,7 +5185,7 @@ function drawShipDebris() {
 
   for (let i = 0; i < shipDebris.length; i++) {
     const d = shipDebris[i];
-    const alpha = 0;
+    const alpha = 1;
     if (alpha < 0.02) continue;
     const hw = hw0 * d.scale;
     const hh = hh0 * d.scale;
