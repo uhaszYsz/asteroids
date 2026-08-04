@@ -5069,6 +5069,85 @@ let debrisTexReady = false;
 
 function clearShipDebris() {
   shipDebris.length = 0;
+  enemyCorpses.length = 0;
+}
+
+/** Dead common-enemy hull sprites (no strip debris). */
+const enemyCorpses = [];
+const ENEMY_CORPSE_MAX = 24;
+const ENEMY_CORPSE_VALUE = 0.7; // HSV V after grayscale
+
+function spawnCommonEnemyCorpse(e, x, y, bank) {
+  if (!e) return;
+  while (enemyCorpses.length >= ENEMY_CORPSE_MAX) enemyCorpses.shift();
+  const pose = enemyAt(e);
+  const px = x != null ? x : pose.x;
+  const py = y != null ? y : pose.y;
+  const ang = pose.angle || e.angle || 0;
+  const eVx = pose.vx || e.vx || 0; // px/tick
+  const eVy = pose.vy || e.vy || 0;
+  const inherit = 0.4 + Math.random() * 0.3;
+  const spdTick = 0.35 + Math.random() * 0.65; // soft drift like big debris
+  const spinDegTick = 0.4 + Math.random() * 0.9;
+  const a = Math.random() * Math.PI * 2;
+  const kick = spdTick * TPS;
+  enemyCorpses.push({
+    x: px,
+    y: py,
+    vx: Math.cos(a) * kick + eVx * TPS * inherit,
+    vy: Math.sin(a) * kick + eVy * TPS * inherit,
+    angle: ang,
+    spin: (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS,
+    bank: bank || 0,
+    life: 2.0 + Math.random() * 1.0,
+    age: 0,
+    decelTick: 0.035
+  });
+}
+
+function updateEnemyCorpses(dt) {
+  if (!enemyCorpses.length) return;
+  const step = Math.min(0.05, dt || 0.016);
+  const ticks = step * TPS;
+  for (let i = enemyCorpses.length - 1; i >= 0; i--) {
+    const c = enemyCorpses[i];
+    c.age += step;
+    if (c.age >= c.life) {
+      enemyCorpses.splice(i, 1);
+      continue;
+    }
+    c.x += c.vx * step;
+    c.y += c.vy * step;
+    const decel = c.decelTick != null ? c.decelTick : 0.035;
+    const spd = Math.hypot(c.vx, c.vy);
+    if (spd > 1e-6) {
+      const spdTick = spd / TPS;
+      const nextTick = Math.max(0, spdTick - decel * ticks);
+      const s = nextTick / spdTick;
+      c.vx *= s;
+      c.vy *= s;
+    } else {
+      c.vx = 0;
+      c.vy = 0;
+    }
+    c.angle += c.spin * step;
+  }
+}
+
+function drawEnemyCorpses(dt) {
+  if (!enemyCorpses.length) return;
+  const opt = getShipOptionById(ENEMY_COMMON_SPRITE_ID);
+  if (!opt || opt.kind !== 'sprite') return;
+  for (let i = 0; i < enemyCorpses.length; i++) {
+    const c = enemyCorpses[i];
+    const t = c.age / Math.max(1e-3, c.life);
+    const alpha = t > 0.75 ? Math.max(0, 1 - (t - 0.75) / 0.25) : 1;
+    drawSpriteShipPlane(
+      c.x, c.y, c.angle, 0, -1 - i, dt, opt, false, COL.enemy,
+      c.bank, ENEMY_COMMON_SPRITE_SCALE, null,
+      { noOutline: true, gray: true, valueMul: ENEMY_CORPSE_VALUE, alpha }
+    );
+  }
 }
 
 function debrisRandInt(lo, hi) {
@@ -8452,6 +8531,7 @@ function drawSceneLines(dt) {
   // Gold ores sit under ships / asteroids / enemies / bullets.
   drawCoins();
   drawShipDebris();
+  drawEnemyCorpses(dt);
 
   // Local ship (alive, or shaking corpse before boom)
   const drawMe = (player.hp > 0 || dyingId === myId) &&
@@ -10274,6 +10354,7 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   bindSceneLightUniforms(spriteShipLightU);
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, Math.max(0, Number(cv('cl_ship_emit')) || 0));
+  bindSpriteDeadLook(false, 1);
   if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
   bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
@@ -10925,6 +11006,8 @@ const spriteShipFS = `
   uniform float uEmit;
   uniform float uAlpha;
   uniform float uOutline;
+  uniform float uGray;
+  uniform float uValueMul;
   uniform vec3 uRemapSrc;
   uniform vec3 uRemapDst;
   uniform float uRemapRange;
@@ -10962,6 +11045,11 @@ const spriteShipFS = `
       return;
     }
     t.rgb = remapSourceColor(t.rgb);
+    if (uGray > 0.5) {
+      float g = dot(t.rgb, vec3(0.299, 0.587, 0.114));
+      t.rgb = vec3(g);
+    }
+    t.rgb *= clamp(uValueMul, 0.0, 2.0);
     // Same Godot-style emission as asteroid faces: tint × bright albedo × energy.
     vec3 tint = mix(vec3(1.0), uTint, clamp(uTintPow, 0.0, 1.0));
     vec3 albedo = t.rgb * tint;
@@ -11000,6 +11088,8 @@ const ssUTintPow = gl.getUniformLocation(spriteShipProg, 'uTintPow');
 const ssUEmit = gl.getUniformLocation(spriteShipProg, 'uEmit');
 const ssUAlpha = gl.getUniformLocation(spriteShipProg, 'uAlpha');
 const ssUOutline = gl.getUniformLocation(spriteShipProg, 'uOutline');
+const ssUGray = gl.getUniformLocation(spriteShipProg, 'uGray');
+const ssUValueMul = gl.getUniformLocation(spriteShipProg, 'uValueMul');
 const ssURemapSrc = gl.getUniformLocation(spriteShipProg, 'uRemapSrc');
 const ssURemapDst = gl.getUniformLocation(spriteShipProg, 'uRemapDst');
 const ssURemapRange = gl.getUniformLocation(spriteShipProg, 'uRemapRange');
@@ -11010,6 +11100,11 @@ const spriteShipLightU = {
   ships: gl.getUniformLocation(spriteShipProg, 'uShipLight[0]'),
   wrap: gl.getUniformLocation(spriteShipProg, 'uLightWrap')
 };
+/** Gray + HSV V scale for dead sprites (1 = normal color). */
+function bindSpriteDeadLook(gray, valueMul) {
+  if (ssUGray) gl.uniform1f(ssUGray, gray ? 1 : 0);
+  if (ssUValueMul) gl.uniform1f(ssUValueMul, valueMul != null ? valueMul : 1);
+}
 const ssAPos = gl.getAttribLocation(spriteShipProg, 'aPos');
 const ssAUV = gl.getAttribLocation(spriteShipProg, 'aUV');
 const ssADepth = gl.getAttribLocation(spriteShipProg, 'aDepth');
@@ -11303,8 +11398,12 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
 
   const tint = color || COL.self || [0.35, 0.85, 1];
   const outlineTint = outlineColor || tint;
-  const emitPow = Math.max(0, Number(cv('cl_ship_emit')) || 0);
-  const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
+  const deadGray = !!(opts && opts.gray);
+  const valueMul = opts && opts.valueMul != null && Number.isFinite(+opts.valueMul) ? +opts.valueMul : 1;
+  const fillAlpha = opts && opts.alpha != null && Number.isFinite(+opts.alpha) ? Math.max(0, Math.min(1, +opts.alpha)) : 1;
+  const skipOutline = !!(opts && opts.noOutline);
+  const emitPow = deadGray ? 0 : Math.max(0, Number(cv('cl_ship_emit')) || 0);
+  const outlineA = skipOutline ? 0 : Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
   const outlineW = spriteShipOutlineWidth(id);
   const showPlanes = (cv('cl_ships_plane') | 0) !== 0;
 
@@ -11348,6 +11447,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   // Keep sprite palette; emission still uses player tint on bright texels (like rocks).
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, emitPow);
+  bindSpriteDeadLook(deadGray, valueMul);
   if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
   bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
@@ -11427,9 +11527,13 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   // Fill sprite on top (full opacity — planes are drawn separately when cl_ships_plane).
   gl.uniform3f(ssUTint, tint[0], tint[1], tint[2]);
   gl.uniform1f(ssUOutline, 0);
-  gl.uniform1f(ssUAlpha, 1);
+  gl.uniform1f(ssUAlpha, fillAlpha);
   gl.uniform2f(ssUOffset, 0, 0);
-  bindSpriteShipHitTint(vibKind, id, halfL, halfW);
+  if (deadGray) {
+    if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
+  } else {
+    bindSpriteShipHitTint(vibKind, id, halfL, halfW);
+  }
   if (tube) {
     // Intersecting 90° tube planes: hardware Z + discard (painter's cannot order them).
     gl.depthMask(true);
@@ -17136,6 +17240,7 @@ function removeEnemy(id, x, y, silent) {
   clearEnemyCharge(id);
   clearEnemyBank(id);
   clearHitVibration('e', id);
+  const deathBank = enemyDrawBank.get(id | 0) || 0;
   enemyDrawBank.delete(id | 0);
   wormSpinState.delete(id | 0);
   shipSmokeLeaks.delete(enemySmokeLeakId(id));
@@ -17147,6 +17252,7 @@ function removeEnemy(id, x, y, silent) {
     const py = y != null ? y : pose.y;
     const r = enemyHitR(e);
     const size = e.kind === 'carrier' ? 'medium' : 'small';
+    if ((e.kind || 'common') === 'common') spawnCommonEnemyCorpse(e, px, py, deathBank);
     spawnEnemyDebris(e, px, py);
     emitAsteroidBurst(px, py, r, size, {
       sfx: SFX.enemyExplosion,
@@ -20430,6 +20536,7 @@ function render() {
   pruneAsteroids();
   updateAttractedCoins(dt);
   updateShipDebris(dt);
+  updateEnemyCorpses(dt);
   const me = localView();
   if (!deathSpectating && !matchPaused && !soloShopOpen && player.hp > 0 && godmodeBlinkVisible(player.godLeft)) {
     const thrusting = thrustUp();
