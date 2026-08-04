@@ -5141,7 +5141,7 @@ function spawnEnemyDebris(e, x, y) {
     for (let i = 0; i < 8; i++) {
       const p = randomEnemyHitboxPoint(e, cx, cy);
       const frame = 6 + debrisRandInt(0, 2); // frames 7,8,9
-      pushShipDebrisPiece(p.x, p.y, frame, evx, evy, cx, cy);
+      pushShipDebrisPiece(p.x, p.y, frame, evx, evy, cx, cy, 0.3825, 0.585);
     }
     return;
   }
