@@ -5097,7 +5097,7 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
   const dy = y - cy;
   const outward = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.9;
   // Speeds in px/tick; spins in deg/tick — convert to /s for the dt integrator.
-  const spdTick = 1.25 + Math.random() * (4 - 1.25);
+  const spdTick = 0.625 + Math.random() * (2 - 0.625);
   const kick = spdTick * TPS;
   const spinDegTick = 3 + Math.random() * (7 - 3);
   const spin = (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS;
@@ -5113,7 +5113,7 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, scaleMin, scaleMax) 
     angle: Math.random() * Math.PI * 2,
     spin,
     frame: frame | 0,
-    life: (1.8 + Math.random() * 1.6) * 2,
+    life: 1.8 + Math.random() * 1.6,
     age: 0,
     scale: sLo + Math.random() * (sHi - sLo)
   });
@@ -5137,10 +5137,10 @@ function spawnEnemyDebris(e, x, y) {
   let nExtra = 0;
   let nSmall = 0;
   if (kind === 'common') {
-    nSmall = 4;
+    nSmall = 8;
   } else if (kind === 'spinner' || kind === 'ufo' || kind === 'worm' || kind === 'carrier') {
-    nCore = debrisRandInt(4, 5);
-    nExtra = debrisRandInt(4, 5);
+    nCore = debrisRandInt(8, 10);
+    nExtra = debrisRandInt(8, 10);
   } else {
     return;
   }
