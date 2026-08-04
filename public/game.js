@@ -5099,7 +5099,7 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy) {
   // Speeds in px/tick; spins in deg/tick — convert to /s for the dt integrator.
   const spdTick = 1.25 + Math.random() * (4 - 1.25);
   const kick = spdTick * TPS;
-  const spinDegTick = 1.5 + Math.random() * (5 - 1.5);
+  const spinDegTick = 3 + Math.random() * (7 - 3);
   const spin = (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS;
   const inherit = 0.18;
   shipDebris.push({
