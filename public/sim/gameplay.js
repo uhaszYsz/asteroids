@@ -759,17 +759,17 @@ function makeEnemy(kind, wave, weapon) {
 /**
  * Even waves = enemy waves (commons). Every 2nd enemy wave (4, 8, 12…) is special:
  * one UFO/spinner + half the commons. Wave 10 is always worm boss (no commons/specials).
- * At most MAX_COMMON_ON_FIELD commons live at once; extras wait in queue.
+ * Commons scale with wave but hard-cap at MAX_COMMON_ON_FIELD (never more per wave / on field).
  * When all asteroids are gone, remaining commons (and queue) are purged so the wave can end.
  */
-const MAX_COMMON_ON_FIELD = 5;
+const MAX_COMMON_ON_FIELD = 6;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
 
 function soloEnemyCounts(wave) {
   const n = Math.max(1, wave | 0);
   if (n === 10) return { common: 0, ufo: 0, carrier: 0 };
   return {
-    common: n % 2 === 0 ? n : 0,
+    common: n % 2 === 0 ? Math.min(MAX_COMMON_ON_FIELD, n) : 0,
     ufo: 0,
     carrier: 0
   };
