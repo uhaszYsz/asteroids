@@ -5076,6 +5076,9 @@ function clearShipDebris() {
 const enemyCorpses = [];
 const ENEMY_CORPSE_MAX = 24;
 const ENEMY_CORPSE_VALUE = 0.7; // HSV V after grayscale
+/** Approx half-extents of common sprite (enemy_4 is 36×36). */
+const ENEMY_CORPSE_HALF_L = 18;
+const ENEMY_CORPSE_HALF_W = 18;
 
 function spawnCommonEnemyCorpse(e, x, y, bank) {
   if (!e) return;
@@ -5086,7 +5089,7 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
   const ang = pose.angle || e.angle || 0;
   const eVx = pose.vx || e.vx || 0; // px/tick at death
   const eVy = pose.vy || e.vy || 0;
-  const spinDegTick = 2 + Math.random() * 2; // 2–4 °/tick
+  const spinDegTick = 4 + Math.random() * 3; // 4–7 °/tick
   enemyCorpses.push({
     x: px,
     y: py,
@@ -5097,8 +5100,69 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
     bank: bank || 0,
     life: 2.0 + Math.random() * 1.0,
     age: 0,
-    decelTick: 0.07
+    decelTick: 0.05
   });
+}
+
+/** Fire + smoke across the wreck hull while it drifts. */
+function emitCorpseBurn(c, intensity) {
+  const t = Math.max(0, Math.min(1, intensity));
+  if (t < 0.02) return;
+  const ang = c.angle || 0;
+  const ca = Math.cos(ang);
+  const sa = Math.sin(ang);
+  const hl = ENEMY_CORPSE_HALF_L * ENEMY_COMMON_SPRITE_SCALE;
+  const hw = ENEMY_CORPSE_HALF_W * ENEMY_COMMON_SPRITE_SCALE;
+  const n = 2 + ((Math.random() * (1 + t * 3)) | 0); // 2–5 sites
+  for (let i = 0; i < n; i++) {
+    const lx = (Math.random() * 2 - 1) * hl * 0.85;
+    const ly = (Math.random() * 2 - 1) * hw * 0.85;
+    const px = c.x + lx * ca - ly * sa;
+    const py = c.y + lx * sa + ly * ca;
+    const hot = Math.random() > 0.4;
+    emitParticles({
+      x: px,
+      y: py,
+      count: 1 + (Math.random() > 0.5 ? 1 : 0),
+      speed: (22 + Math.random() * 36) * RES_SCALE,
+      speedSpread: 16 * RES_SCALE,
+      direction: -Math.PI / 2 + (Math.random() - 0.5) * 0.7, // burn upward
+      spread: 0.65,
+      size: (0.9 + Math.random() * 0.85) * 2,
+      sizeSpread: 0.5 * 2,
+      scaleY: 1.4,
+      sizeWiggle: 0.45,
+      sizeWiggleSpeed: 18,
+      lifetime: 0.12 + Math.random() * 0.18,
+      lifetimeSpread: 0.05,
+      color: hot ? COL_FIRE_HOT : COL_FIRE,
+      drag: 2.6,
+      inheritVx: c.vx * 0.55,
+      inheritVy: c.vy * 0.55
+    });
+    if (Math.random() < 0.35 + t * 0.4) {
+      emitParticles({
+        x: px,
+        y: py,
+        count: 1,
+        speed: (8 + t * 18) * RES_SCALE,
+        speedSpread: 10 * RES_SCALE,
+        direction: -Math.PI / 2 + (Math.random() - 0.5) * 0.5,
+        spread: 0.4,
+        size: 1.1 + t * 0.9,
+        sizeSpread: 0.5,
+        scaleY: 1,
+        sizeWiggle: 0.2,
+        sizeWiggleSpeed: 6,
+        lifetime: 0.3 + t * 0.35,
+        lifetimeSpread: 0.15,
+        color: COL_SMOKE,
+        drag: 1.2,
+        inheritVx: c.vx * 0.45,
+        inheritVy: c.vy * 0.45
+      });
+    }
+  }
 }
 
 function updateEnemyCorpses(dt) {
@@ -5114,7 +5178,7 @@ function updateEnemyCorpses(dt) {
     }
     c.x += c.vx * step;
     c.y += c.vy * step;
-    const decel = c.decelTick != null ? c.decelTick : 0.07;
+    const decel = c.decelTick != null ? c.decelTick : 0.05;
     const spd = Math.hypot(c.vx, c.vy);
     if (spd > 1e-6) {
       const spdTick = spd / TPS;
@@ -5127,6 +5191,9 @@ function updateEnemyCorpses(dt) {
       c.vy = 0;
     }
     c.angle += c.spin * step;
+    const lifeT = c.age / Math.max(1e-3, c.life);
+    const burn = lifeT > 0.75 ? Math.max(0, 1 - (lifeT - 0.75) / 0.25) : 1;
+    emitCorpseBurn(c, burn);
   }
 }
 
@@ -5138,10 +5205,13 @@ function drawEnemyCorpses(dt) {
     const c = enemyCorpses[i];
     const t = c.age / Math.max(1e-3, c.life);
     const alpha = t > 0.75 ? Math.max(0, 1 - (t - 0.75) / 0.25) : 1;
+    const flicker = 0.85 + Math.sin(performance.now() * 0.028 + i * 1.7) * 0.35
+      + (Math.random() - 0.5) * 0.25;
+    const emit = Math.max(0, (1.4 + flicker) * alpha);
     drawSpriteShipPlane(
-      c.x, c.y, c.angle, 0, -1 - i, dt, opt, false, COL.enemy,
+      c.x, c.y, c.angle, 0, -1 - i, dt, opt, false, COL_FIRE,
       c.bank, ENEMY_COMMON_SPRITE_SCALE, null,
-      { noOutline: true, gray: true, valueMul: ENEMY_CORPSE_VALUE, alpha }
+      { noOutline: true, gray: true, valueMul: ENEMY_CORPSE_VALUE, alpha, emit }
     );
   }
 }
@@ -11398,7 +11468,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const valueMul = opts && opts.valueMul != null && Number.isFinite(+opts.valueMul) ? +opts.valueMul : 1;
   const fillAlpha = opts && opts.alpha != null && Number.isFinite(+opts.alpha) ? Math.max(0, Math.min(1, +opts.alpha)) : 1;
   const skipOutline = !!(opts && opts.noOutline);
-  const emitPow = deadGray ? 0 : Math.max(0, Number(cv('cl_ship_emit')) || 0);
+  const emitPow = opts && opts.emit != null && Number.isFinite(+opts.emit)
+    ? Math.max(0, +opts.emit)
+    : (deadGray ? 0 : Math.max(0, Number(cv('cl_ship_emit')) || 0));
   const outlineA = skipOutline ? 0 : Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
   const outlineW = spriteShipOutlineWidth(id);
   const showPlanes = (cv('cl_ships_plane') | 0) !== 0;
