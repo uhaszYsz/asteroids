@@ -760,7 +760,7 @@ function makeEnemy(kind, wave, weapon) {
  * Even waves = enemy waves (commons). Every 2nd enemy wave (4, 8, 12…) is special:
  * one UFO/spinner + half the commons. Wave 10 is always worm boss (no commons/specials).
  * Commons scale with wave but hard-cap at MAX_COMMON_ON_FIELD (never more per wave / on field).
- * When all asteroids are gone, remaining commons (and queue) are purged so the wave can end.
+ * Wave ends only when asteroids and enemies (commons / specials / worm) are all cleared.
  */
 const MAX_COMMON_ON_FIELD = 6;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
@@ -1939,10 +1939,6 @@ function tickSoloWaves(room) {
     }
     return;
   }
-
-  // Rocks cleared → dump remaining commons/queue so they don't hold the wave.
-  // Specials / worm still must be killed.
-  if (!soloWaveHasAsteroidThreats(room)) clearSoloCommons(room);
 
   if (soloWaveHasFieldThreats(room)) return;
   if (room.pendingBigSpawns && room.pendingBigSpawns.length) {
