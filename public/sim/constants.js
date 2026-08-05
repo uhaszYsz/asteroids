@@ -463,8 +463,8 @@ const ENEMY_WORM_ROCKET = {
   hp: ENEMY_ROCKET_HP,
   dmg: 30
 };
-/** common1 move speed: worm-rocket maxSpeed −20%, then −10% (±10% rolled per ship). */
-const ENEMY_COMMON1_SPEED = ENEMY_WORM_ROCKET.maxSpeed * 0.8 * 0.9;
+/** common1 move speed: worm-rocket maxSpeed −20%, then −10%, then −15% (±10% rolled per ship). */
+const ENEMY_COMMON1_SPEED = ENEMY_WORM_ROCKET.maxSpeed * 0.8 * 0.9 * 0.85;
 const ENEMY_COMMON1_SPEED_JITTER = 0.1;
 /** common1 turn: worm-rocket homing +30% (°/tick). */
 const ENEMY_COMMON1_HOMING = ENEMY_WORM_ROCKET.homing * 1.3;

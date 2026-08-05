@@ -726,7 +726,7 @@ function makeEnemy(kind, wave, weapon) {
     railChargeLeft: 0,
     lastLaserAng: null,
     enteredPlay: false,
-    // common1: worm-rocket maxSpeed −20% then −10%, ±10% per ship; others roll wander band.
+    // common1: worm-rocket maxSpeed −20%/−10%/−15%, ±10% per ship; others roll wander band.
     speed: k === 'common1'
       ? ENEMY_COMMON1_SPEED * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
       : randomEnemyWanderSpeed(),
