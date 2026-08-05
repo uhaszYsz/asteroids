@@ -865,8 +865,8 @@ const TURN_DECEL_FRAMES = 5;                     // release → 0 in this many t
 const TURN_DECEL_REVERSE_FRAMES = Math.max(1, (TURN_DECEL_FRAMES / 2) | 0);
 const THRUST = 0.09 * RES_SCALE * 1.15 * 1.2 * 1.2 * 0.85;  // prior buffs, then −15%
 const MAX_SPEED = 8 * RES_SCALE * 0.8 * 0.75 * 0.75;   // −25%, then −25% again
-/** Above MAX_SPEED: shed this much speed per second (no hard clip). */
-const OVERSPEED_DECEL = 4;
+/** Above MAX_SPEED: shed this much speed per tick (no hard clip). */
+const OVERSPEED_DECEL = 0.230;
 const STUN_MAX_SPEED = 9;
 const ASTEROID_COLLIDE_DMG_MIN = 10;
 /** Collision shape is this fraction of visual radius / polygon (visual unchanged). */
@@ -19445,7 +19445,7 @@ function limitPlayerSpeed(o) {
     return;
   }
   if (s <= MAX_SPEED) return;
-  const next = Math.max(MAX_SPEED, s - OVERSPEED_DECEL / TPS);
+  const next = Math.max(MAX_SPEED, s - OVERSPEED_DECEL);
   const scale = next / s;
   o.vx *= scale;
   o.vy *= scale;

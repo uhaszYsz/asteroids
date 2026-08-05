@@ -279,8 +279,8 @@ function resetTurretState(p) {
 
 const THRUST = 0.09 * RES_SCALE * 1.15 * 1.2 * 1.2 * 0.85;  // prior buffs, then −15%
 const MAX_SPEED = 8 * RES_SCALE * 0.8 * 0.75 * 0.75;   // −25%, then −25% again
-/** Above MAX_SPEED: shed this much speed per second (no hard clip). */
-const OVERSPEED_DECEL = 4;
+/** Above MAX_SPEED: shed this much speed per tick (no hard clip). */
+const OVERSPEED_DECEL = 0.230;
 const STUN_MAX_SPEED = 9;
 const ASTEROID_COLLIDE_DMG_MIN = 10;
 const TURN_AV_MAX = 8 * Math.PI / 180;            // 8°/tick

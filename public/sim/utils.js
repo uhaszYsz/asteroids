@@ -25,7 +25,7 @@ function limitPlayerSpeed(o) {
     return;
   }
   if (s <= MAX_SPEED) return;
-  const next = Math.max(MAX_SPEED, s - OVERSPEED_DECEL / TPS);
+  const next = Math.max(MAX_SPEED, s - OVERSPEED_DECEL);
   const scale = next / s;
   o.vx *= scale;
   o.vy *= scale;
