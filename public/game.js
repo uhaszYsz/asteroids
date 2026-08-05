@@ -13430,7 +13430,7 @@ function renderSoloShop() {
       upBtn.textContent = 'MAX';
       upBtn.disabled = true;
     } else {
-      upBtn.textContent = 'UP ' + shopCreditPrice(upgradeCost);
+      upBtn.textContent = 'UPGRADE ' + shopCreditPrice(upgradeCost);
       upBtn.disabled = st.coins < upgradeCost;
       upBtn.addEventListener('click', () => sendShopBuy('weapon', cur));
     }
