@@ -13317,8 +13317,8 @@ function attachShopPreview(row, kind, name, seedId, opts) {
 
 function attachShopChipPreview(chip, name, seedId) {
   const c = document.createElement('canvas');
-  c.width = 28;
-  c.height = 28;
+  c.width = 64;
+  c.height = 64;
   const ctx = c.getContext('2d');
   chip.appendChild(c);
   shopPreviewSlots.push({ canvas: c, ctx, kind: 'powerup', name, id: seedId | 0 });
@@ -13450,10 +13450,8 @@ function renderSoloShop() {
       any = true;
       const chip = document.createElement('span');
       chip.className = 'ss-owned-chip';
+      chip.title = shopItemLabel(name);
       attachShopChipPreview(chip, name, 2100 + i);
-      const txt = document.createElement('span');
-      txt.textContent = shopItemLabel(name);
-      chip.appendChild(txt);
       ssOwnedPowerupsEl.appendChild(chip);
     }
     if (!any) {
