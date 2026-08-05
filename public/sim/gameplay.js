@@ -398,15 +398,15 @@ function mediumAsteroidCap(room) {
  *   always 3 smalls
  *   bigs grow only on odd (no-enemy) waves: 1,1,2,2,3,3…
  *   mediums = half of bigs (cap 8)
- *   even enemy waves: half bigs/mediums (except worm boss wave 10)
+ *   even enemy / boss waves: half bigs/mediums (incl. worm wave 10)
  */
 function soloWaveCounts(wave) {
   const n = Math.max(1, wave | 0);
   // Odd waves add +1 big; even waves keep the previous odd count.
   let big = (n + 1) >> 1;
   let medium = Math.min(SOLO_MEDIUM_CAP, big >> 1);
-  // Ease asteroid pressure on even enemy waves — not on worm boss wave 10.
-  if (n % 2 === 0 && n !== 10) {
+  // Ease asteroid pressure on even enemy waves and worm boss.
+  if (n % 2 === 0) {
     big = (big / 2) | 0;
     medium = (medium / 2) | 0;
   }
@@ -808,7 +808,7 @@ function spawnSoloWaveEnemies(room, wave) {
   let commonN = c.common | 0;
   const n = Math.max(1, wave | 0);
 
-  // Wave 10: always worm boss — no commons / specials. Full asteroid field.
+  // Wave 10: always worm boss — no commons / specials (asteroids halved like other even waves).
   if (n === 10) {
     const worm = makeEnemy('worm', wave);
     worm.id = room.nextEnemyId++;
