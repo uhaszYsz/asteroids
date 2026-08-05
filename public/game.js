@@ -13396,6 +13396,7 @@ function renderSoloShop() {
     ssPowerupsEl.innerHTML = '';
     for (let i = 0; i < POWERUP_TYPES.length; i++) {
       const name = POWERUP_TYPES[i];
+      if (name === 'shield') continue; // sold under Vitals
       const owned = !!(st.powerups && st.powerups[name]);
       const row = document.createElement('div');
       row.className = 'ss-row' + (owned ? ' ss-owned' : '');
@@ -13455,6 +13456,26 @@ function renderSoloShop() {
     lifeRow.appendChild(lifeLeft);
     lifeRow.appendChild(lifeBtn);
     ssVitalEl.appendChild(lifeRow);
+
+    const shieldOwned = !!(st.powerups && st.powerups.shield);
+    const shieldRow = document.createElement('div');
+    shieldRow.className = 'ss-row' + (shieldOwned ? ' ss-owned' : '');
+    attachShopPreview(shieldRow, 'powerup', 'shield', 3303);
+    const shieldLeft = document.createElement('div');
+    shieldLeft.innerHTML = '<div class="ss-name">' + shopItemLabel('shield') + '</div>';
+    const shieldBtn = document.createElement('button');
+    shieldBtn.type = 'button';
+    if (shieldOwned) {
+      shieldBtn.textContent = 'GOT IT';
+      shieldBtn.disabled = true;
+    } else {
+      shieldBtn.textContent = shopCreditPrice(1000);
+      shieldBtn.disabled = st.coins < 1000;
+      shieldBtn.addEventListener('click', () => sendShopBuy('powerup', 'shield'));
+    }
+    shieldRow.appendChild(shieldLeft);
+    shieldRow.appendChild(shieldBtn);
+    ssVitalEl.appendChild(shieldRow);
   }
 }
 
