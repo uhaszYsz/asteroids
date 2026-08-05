@@ -736,7 +736,8 @@ function makeEnemy(kind, wave, weapon) {
     wormAimLeft: 0,
     wormAtk: 0,
     spinAng: 0,
-    astCheckLeft: 0
+    astCheckLeft: 0,
+    lastHitBy: 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -1662,18 +1663,33 @@ function updateEnemies(room) {
   if (wormHolding || common1Chase) emitEnemySnap(room, { field: false });
 }
 
-function damageEnemy(room, e, dmg) {
+function damageEnemy(room, e, dmg, ownerId) {
   if (!e || e.hp <= 0) return;
+  const oid = ownerId | 0;
+  if (oid > 0) e.lastHitBy = oid;
   e.hp -= dmg;
   if (e.hp > 0) {
     emitEnemyHp(room, e);
     return;
   }
   const wasCommon = isCommonKind(e.kind);
+  const deathX = e.x;
+  const deathY = e.y;
+  const kind = e.kind;
+  const killerId = e.lastHitBy | 0;
   emitEnemyDead(room, e, false);
   const idx = room.enemies.indexOf(e);
   if (idx >= 0) room.enemies.splice(idx, 1);
   if (wasCommon) tryPromoteQueuedCommons(room);
+
+  if ((kind === 'ufo' || kind === 'spinner') && killerId > 0) {
+    const killer = room.players.get(killerId);
+    if (killer && !killer.bot) {
+      grantCoins(killer, ENEMY_ELITE_COIN_GRANT);
+      notifyPlayerCoins(room, killer);
+      emitGoldAsteroidCoins(room, deathX, deathY, ENEMY_ELITE_COIN_VISUAL, killerId);
+    }
+  }
 }
 
 function enemyUsesRectHit(e) {
@@ -4159,7 +4175,7 @@ function resolvePlayerShotEnemyHits(room) {
       if (!hit) continue;
       // Damage only — leave velocities alone (no push / stun).
       shot.enemyHitCd = 6;
-      damageEnemy(room, e, PLAYER_SHOT_ENEMY_DMG);
+      damageEnemy(room, e, PLAYER_SHOT_ENEMY_DMG, shot.ownerId | 0);
       break;
     }
   }
@@ -4542,7 +4558,7 @@ function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
       if (skipEnemyId && (e.id | 0) === skipEnemyId) continue;
       const dist = distToEnemyHit(x, y, e);
       const dmg = rocketBlastDamageAt(dist, R, maxDmg);
-      if (dmg > 0) damageEnemy(room, e, dmg);
+      if (dmg > 0) damageEnemy(room, e, dmg, ownerId | 0);
     }
   }
 }
@@ -4785,7 +4801,7 @@ function fireLaser(room, p, weaponName) {
   } else if (hit.kind === 'asteroid') {
     damageAsteroid(room, hit.target, dmg, p.id);
   } else if (hit.kind === 'enemy') {
-    damageEnemy(room, hit.target, dmg);
+    damageEnemy(room, hit.target, dmg, p.id);
   } else if (hit.kind === 'rocket') {
     damageRocket(room, hit.target, dmg);
   }
@@ -4826,7 +4842,7 @@ function fireThrustRay(room, p) {
   } else if (hit.kind === 'asteroid') {
     damageAsteroid(room, hit.target, dmg, p.id);
   } else if (hit.kind === 'enemy') {
-    damageEnemy(room, hit.target, dmg);
+    damageEnemy(room, hit.target, dmg, p.id);
   } else if (hit.kind === 'rocket') {
     damageRocket(room, hit.target, dmg);
   }
@@ -5006,7 +5022,7 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
     if (h.kind === 'player') {
       dealDamageToPlayer(room, h.target, pdmg, p.id);
     } else if (h.kind === 'enemy') {
-      damageEnemy(room, h.target, pdmg);
+      damageEnemy(room, h.target, pdmg, p.id);
     }
   }
 
@@ -5793,7 +5809,7 @@ function updateBullets(room) {
             let d = dmg;
             const owner = players.get(b.owner);
             if (owner && playerHasPowerup(owner, 'damage')) d *= DAMAGE_POWERUP_MULT;
-            damageEnemy(room, e, d);
+            damageEnemy(room, e, d, b.owner | 0);
             roomBroadcast(room, { t: 'vd', k: 'e', id: e.id | 0, x: e.x, y: e.y });
           });
         }
@@ -5868,10 +5884,10 @@ function updateBullets(room) {
         if (!enemyIsSpawned(e)) continue;
         if (!hitBulletEnemy(b, e)) continue;
         if (b.type === 'rocket') {
-          if (b.noBlast) damageEnemy(room, e, b.dmg || 30);
+          if (b.noBlast) damageEnemy(room, e, b.dmg || 30, b.owner | 0);
           detonateRocket(room, b, 3);
         } else {
-          damageEnemy(room, e, b.dmg);
+          damageEnemy(room, e, b.dmg, b.owner | 0);
           roomBroadcast(room, { t: 'bd', id: b.id, hit: 3, x: b.x, y: b.y });
         }
         bullets.splice(i, 1);
