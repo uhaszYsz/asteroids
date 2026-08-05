@@ -13267,6 +13267,8 @@ let shopPreviewSlots = [];
 const SHOP_PREV_LOGIC = 112;
 /** Half of previous shop mesh scale so previews fit inside square cells. */
 const SHOP_PREV_SCALE = 2.6;
+/** Equipped loadout preview — larger mesh fill than catalog cells. */
+const SHOP_EQUIPPED_PREV_SCALE = SHOP_PREV_SCALE * 1.55;
 
 const soloShopEl = document.getElementById('solo-shop');
 const ssWaveEl = document.getElementById('ss-wave');
@@ -13300,14 +13302,15 @@ function shopWeaponCostClient(unlocked, levels, name, current) {
   return 800 + 200 * (lvl + 1);
 }
 
-function attachShopPreview(row, kind, name, seedId) {
+function attachShopPreview(row, kind, name, seedId, opts) {
+  const big = !!(opts && opts.big);
   const c = document.createElement('canvas');
   c.className = 'ss-preview';
-  c.width = 96;
-  c.height = 96;
+  c.width = big ? 160 : 96;
+  c.height = big ? 160 : 96;
   const ctx = c.getContext('2d');
   row.appendChild(c);
-  shopPreviewSlots.push({ canvas: c, ctx, kind, name, id: seedId | 0 });
+  shopPreviewSlots.push({ canvas: c, ctx, kind, name, id: seedId | 0, big });
   return c;
 }
 
@@ -13350,7 +13353,7 @@ function updateShopPreviews() {
       const slot = shopPreviewSlots[i];
       const fb = clearShopPreviewRegion();
       // Always render at full shop mesh scale; CSS shrinks the canvas (keeps it sharp).
-      _shopVisScale = SHOP_PREV_SCALE;
+      _shopVisScale = slot.big ? SHOP_EQUIPPED_PREV_SCALE : SHOP_PREV_SCALE;
       if (slot.kind === 'powerup') {
         drawPowerupPickup({ powerup: slot.name, id: slot.id }, cx, cy, 0, 1);
       } else {
@@ -13411,7 +13414,7 @@ function renderSoloShop() {
 
   if (ssEquippedEl) {
     ssEquippedEl.innerHTML = '';
-    attachShopPreview(ssEquippedEl, 'weapon', cur, 1001);
+    attachShopPreview(ssEquippedEl, 'weapon', cur, 1001, { big: true });
     const info = document.createElement('div');
     info.className = 'ss-equipped-info';
     info.innerHTML = '<div class="ss-equipped-label">LOADOUT</div>'
