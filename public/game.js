@@ -5084,24 +5084,20 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
   const px = x != null ? x : pose.x;
   const py = y != null ? y : pose.y;
   const ang = pose.angle || e.angle || 0;
-  const eVx = pose.vx || e.vx || 0; // px/tick
+  const eVx = pose.vx || e.vx || 0; // px/tick at death
   const eVy = pose.vy || e.vy || 0;
-  const inherit = 0.4 + Math.random() * 0.3;
-  const spdTick = 0.35 + Math.random() * 0.65; // soft drift like big debris
-  const spinDegTick = 0.4 + Math.random() * 0.9;
-  const a = Math.random() * Math.PI * 2;
-  const kick = spdTick * TPS;
+  const spinDegTick = 2 + Math.random() * 2; // 2–4 °/tick
   enemyCorpses.push({
     x: px,
     y: py,
-    vx: Math.cos(a) * kick + eVx * TPS * inherit,
-    vy: Math.sin(a) * kick + eVy * TPS * inherit,
+    vx: eVx * TPS, // keep death velocity (px/s for dt integrator)
+    vy: eVy * TPS,
     angle: ang,
     spin: (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS,
     bank: bank || 0,
     life: 2.0 + Math.random() * 1.0,
     age: 0,
-    decelTick: 0.035
+    decelTick: 0.07
   });
 }
 
@@ -5118,7 +5114,7 @@ function updateEnemyCorpses(dt) {
     }
     c.x += c.vx * step;
     c.y += c.vy * step;
-    const decel = c.decelTick != null ? c.decelTick : 0.035;
+    const decel = c.decelTick != null ? c.decelTick : 0.07;
     const spd = Math.hypot(c.vx, c.vy);
     if (spd > 1e-6) {
       const spdTick = spd / TPS;
