@@ -14,6 +14,39 @@ function takePlayerInput(p) {
   }
 }
 
+/**
+ * Jitter bursts pile cmds into one room tick. Continuous keys (u/l/r/sh) must
+ * not stack N× thrust/turn — collapse to one cmd with max(OR) hold bits.
+ * Shoot pulses merge onto that single cmd so they are not lost.
+ */
+function coalescePlayerInputQueue(p) {
+  const q = p.inputQueue;
+  if (!q || q.length <= 1) return;
+  let u = 0, l = 0, r = 0, sh = 0, sp = 0;
+  let last = null;
+  while (q.length) {
+    last = q.shift();
+    if (last.u) u = 1;
+    if (last.l) l = 1;
+    if (last.r) r = 1;
+    if (last.sh) sh = 1;
+    if (last.sp) sp = 1;
+  }
+  // Both turn dirs across the burst → keep the newest frame's exclusive pick.
+  if (l && r) {
+    l = last.l ? 1 : 0;
+    r = last.r ? 1 : 0;
+  }
+  q.push({
+    seq: last.seq,
+    l,
+    r,
+    u,
+    sp,
+    sh
+  });
+}
+
 /** Drain queued cmds for ack/seq only (pause / death / frozen) — no movement. */
 function drainPlayerInputQueue(p) {
   while (p.inputQueue.length) {
@@ -24,13 +57,12 @@ function drainPlayerInputQueue(p) {
 }
 
 /**
- * Quake/HL-style: run all pending cmds in order this tick (catch-up burn).
- * One cmd → one ship step. Empty queue → one held step. No skip-to-latest.
+ * One ship step per room tick. Backlog is coalesced so thrust/turn apply at
+ * most once (max hold bits); empty queue → one held step.
  */
 function stepPlayerInputs(room, p) {
   const frozen = !!(room.shopOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice));
   const live = !!(room.matchLive && !roomPreRoundFrozen(room));
-  const maxBurn = MAX_INPUT_QUEUE;
 
   if (frozen) {
     drainPlayerInputQueue(p);
@@ -48,24 +80,20 @@ function stepPlayerInputs(room, p) {
     return;
   }
 
-  let steps = 0;
-  const burn = p.inputQueue.length > 0;
-  do {
-    takePlayerInput(p);
-    demoRecorder.recordInput(room, p);
-    if (live && p.inp.sp) tryStartBurst(p);
-    applyInput(p);
-    if (live && p.hp > 0 && p.inp.u) fireThrustRay(room, p);
-    if (live) updateShooting(room, p);
-    p.prevX = p.x;
-    p.prevY = p.y;
-    p.x += p.vx;
-    p.y += p.vy;
-    wrap(p);
-    clearGodmodeIfLeftSpawn(room, p);
-    p.inp.sp = 0;
-    steps++;
-  } while (burn && p.inputQueue.length && steps < maxBurn);
+  coalescePlayerInputQueue(p);
+  takePlayerInput(p);
+  demoRecorder.recordInput(room, p);
+  if (live && p.inp.sp) tryStartBurst(p);
+  applyInput(p);
+  if (live && p.hp > 0 && p.inp.u) fireThrustRay(room, p);
+  if (live) updateShooting(room, p);
+  p.prevX = p.x;
+  p.prevY = p.y;
+  p.x += p.vx;
+  p.y += p.vy;
+  wrap(p);
+  clearGodmodeIfLeftSpawn(room, p);
+  p.inp.sp = 0;
 }
 
 function createInitialAsteroids() {
@@ -617,7 +645,7 @@ function stepRoom(room) {
       p.inp.sp = 0;
       continue;
     }
-    // Humans: Quake/HL burn — run every queued cmd in order this tick.
+    // Humans: one step/tick; backlog continuous keys coalesced (no thrust stack).
     stepPlayerInputs(room, p);
   }
   if (room.matchLive && !roomPreRoundFrozen(room)) processPendingRailBounces(room);

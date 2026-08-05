@@ -142,7 +142,7 @@ function sanitizeInputFrame(frame, lastSeq, maxQueuedSeq) {
 
 /**
  * Safety-only drop when over cap. Shoot pulses merge onto next kept cmd.
- * Catch-up is burn-in-order in stepRoom (Quake/HL), not collapse-to-latest.
+ * Room tick coalesces backlog continuous keys (u/l/r) to one step — see rooms.js.
  */
 function trimInputQueue(pl, maxLen) {
   const cap = Math.max(1, maxLen | 0);
