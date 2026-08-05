@@ -1530,6 +1530,7 @@ const COL = {
   powerTurret: [0.95, 0.85, 0.3],
   powerShield: [0.4, 0.85, 1.0],
   powerReload: [0.45, 1.0, 0.4],
+  powerDrone: [0.35, 1.0, 0.72],
   enemy: [1.0, 0.55, 0.25],
   enemyUfo: [0.55, 1.0, 0.65],
   enemyCarrier: [0.85, 0.7, 1.0],
@@ -5975,6 +5976,7 @@ function powerupLetter(name) {
     case 'turret': return 'T';
     case 'shield': return 'S';
     case 'reload': return 'R';
+    case 'drone': return 'F';
     default: return '?';
   }
 }
@@ -5991,7 +5993,9 @@ const POWERUP_ORBIT = {
   // 8 corner mounts — cube cage
   shield: { text: 'S', pattern: 'cube8', orbit: 'cube', textScale: 0.82, orbitR: 1.08 },
   // 10 = ring8 + poles — hex cage
-  reload: { text: 'R', pattern: 'ring8poles', orbit: 'hex', textScale: 0.8, orbitR: 1.08 }
+  reload: { text: 'R', pattern: 'ring8poles', orbit: 'hex', textScale: 0.8, orbitR: 1.08 },
+  // 8 equatorial ring — flat ring cage
+  drone: { text: 'FIX', pattern: 'ring8', orbit: 'ring', textScale: 0.42, orbitR: 1.12 }
 };
 
 function powerupOrbitStyle(name) {
@@ -6259,6 +6263,17 @@ function buildCubeMesh() {
   return finalizePowerupMesh(verts, faces);
 }
 
+/** Tetrahedron — fixing drone pickup. */
+function buildTetrahedronMesh() {
+  const verts = [
+    [1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]
+  ];
+  const faces = [
+    [0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]
+  ];
+  return finalizePowerupMesh(verts, faces);
+}
+
 /** Hexagonal bipyramid (8 verts) — reload. */
 function buildHexBipyramidMesh() {
   const verts = [[0, 0, 1.15], [0, 0, -1.15]];
@@ -6286,7 +6301,8 @@ const POWERUP_SHAPE_MESH = {
   damage: buildOctahedronMesh(),
   turret: null, // sphere LODs
   shield: buildCubeMesh(),
-  reload: buildHexBipyramidMesh()
+  reload: buildHexBipyramidMesh(),
+  drone: buildTetrahedronMesh()
 };
 
 /** Flat octagon wire used as "ring" letter cage. */
@@ -12219,13 +12235,13 @@ addEventListener('keyup', e => {
 const player = {
   x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, hp: 100, av: 0,
   turnDecelStep: 0, turnDecelLeft: 0, turnDecelRev: 0, stunned: false, collideCd: 0, godLeft: 0,
-  powerups: { damage: false, turret: false, shield: false, reload: false }
+  powerups: { damage: false, turret: false, shield: false, reload: false, drone: false }
 };
 const serverGhost = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, av: 0, hp: 100, valid: false };
 /** performance.now() deadline — skip tight drift-snap so tab-resume can soft-blend. */
 let resumeBlendUntil = 0;
 
-const POWERUP_TYPES = ['damage', 'turret', 'shield', 'reload'];
+const POWERUP_TYPES = ['damage', 'turret', 'shield', 'reload', 'drone'];
 const PICKUP_CODE_POWERUP_BASE = 100;
 /** Match server: weapon/powerup crates bounce this many times, then drift off. */
 const PICKUP_BOUNCE_MAX = 3;
@@ -12235,7 +12251,8 @@ function freshPowerups() {
     damage: false,
     turret: false,
     shield: false,
-    reload: false
+    reload: false,
+    drone: false
   };
 }
 function powerupColor(name) {
@@ -12243,6 +12260,7 @@ function powerupColor(name) {
   if (name === 'turret') return COL.powerTurret;
   if (name === 'shield') return COL.powerShield;
   if (name === 'reload') return COL.powerReload;
+  if (name === 'drone') return COL.powerDrone;
   return COL.pickup;
 }
 function applyPowerupsState(id, powerups) {
@@ -12494,6 +12512,86 @@ function drawTurret3D(x, y, aimAng, color) {
     );
   }
 }
+
+/** Craft 136 repair drones — appear below 90% HP, orbit + fix beam (not laser shots). */
+const FIXDRONE_SPRITE_ID = 'enemy_136';
+const FIXDRONE_COUNT = 2;
+const FIXDRONE_SCALE = 1 / 3;
+const FIXDRONE_ORBIT_R = 32 * RES_SCALE;
+const FIXDRONE_HP_FRAC = 0.9;
+const FIXDRONE_ORBIT_RAD_PER_SEC = 1.35;
+/** ownerId → { ang, fade } */
+const fixdroneFx = new Map();
+
+function ownerCurrentHp(ownerId) {
+  if (ownerId === myId) return player.hp | 0;
+  const r = remotes.get(ownerId);
+  return r ? (r.hp | 0) : 0;
+}
+
+function drawFixBeamSeg(x0, y0, x1, y1, alpha) {
+  const a = Math.max(0, Math.min(1, alpha));
+  if (a < 0.02) return;
+  const col = COL.powerDrone;
+  const w = Math.max(1, Math.round(2.2 * RES_SCALE));
+  drawThickSegment(x0, y0, x1, y1, w, col, 0.55 * a, false);
+  drawThickSegment(x0, y0, x1, y1, Math.max(1, w - 1), col, 0.85 * a, true);
+  // Soft tip sparkle on the hull end.
+  const mx = x1;
+  const my = y1;
+  drawThickSegment(mx - 1, my, mx + 1, my, 2, col, 0.7 * a, true);
+}
+
+function drawFixDrones(x, y, ownerId, dt) {
+  if (!ownerHasPowerup(ownerId, 'drone')) {
+    fixdroneFx.delete(ownerId);
+    return;
+  }
+  const hp = ownerCurrentHp(ownerId);
+  const want = hp > 0 && hp < MAX_HP * FIXDRONE_HP_FRAC;
+  let st = fixdroneFx.get(ownerId);
+  if (!st) {
+    st = { ang: (ownerId | 0) * 1.7, fade: 0 };
+    fixdroneFx.set(ownerId, st);
+  }
+  const fadeRate = want ? 3.2 : 4.5;
+  st.fade = Math.max(0, Math.min(1, st.fade + (want ? 1 : -1) * fadeRate * Math.max(0.001, dt)));
+  if (st.fade < 0.01) {
+    if (!want) fixdroneFx.delete(ownerId);
+    return;
+  }
+  st.ang += FIXDRONE_ORBIT_RAD_PER_SEC * Math.max(0.001, dt);
+
+  const opt = getShipOptionById(FIXDRONE_SPRITE_ID);
+  if (!opt || opt.kind !== 'sprite') return;
+  const fade = st.fade;
+
+  for (let i = 0; i < FIXDRONE_COUNT; i++) {
+    const ang = st.ang + (i * Math.PI * 2) / FIXDRONE_COUNT;
+    // Slight radial bob so they don't look locked to a perfect circle.
+    const bob = 1 + 0.06 * Math.sin(st.ang * 2.1 + i * 2.4);
+    const dx = Math.cos(ang) * FIXDRONE_ORBIT_R * bob;
+    const dy = Math.sin(ang) * FIXDRONE_ORBIT_R * bob;
+    const dxPos = x + dx;
+    const dyPos = y + dy;
+    // Nose toward ship while beaming (repair, not shooting out).
+    const face = Math.atan2(y - dyPos, x - dxPos);
+    const droneId = 910000 + ((ownerId | 0) * 8 + i);
+    drawSpriteShipPlane(
+      dxPos, dyPos, face, 0, droneId, dt, opt, true, COL.powerDrone,
+      0.15, FIXDRONE_SCALE, COL.powerDrone,
+      { flat: false }
+    );
+    if (want || fade > 0.2) {
+      // Beam from drone toward hull — green fix beam instead of laser shot.
+      const inset = 6 * RES_SCALE;
+      const bx = x + Math.cos(face + Math.PI) * inset;
+      const by = y + Math.sin(face + Math.PI) * inset;
+      drawFixBeamSeg(dxPos, dyPos, bx, by, fade);
+    }
+  }
+}
+
 function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
   if (ownerHasPowerup(ownerId, 'shield')) drawShieldFx(x, y, shipAngle);
   if (ownerHasPowerup(ownerId, 'turret')) {
@@ -12502,6 +12600,7 @@ function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
     const yaw = turretYawSmoothed(ownerId, target, dt);
     drawTurret3D(x, y, yaw, COL.powerTurret);
   }
+  drawFixDrones(x, y, ownerId, dt);
 }
 
 /** Bullet speed (px/tick) for the weapon currently held. */
@@ -13177,6 +13276,7 @@ function shopItemLabel(name) {
   if (!name) return '';
   if (name === 'voidcannon') return 'Void Cannon';
   if (name === 'asteroidgun') return 'Meteor Gun';
+  if (name === 'drone') return 'Fixing Drone';
   return String(name).replace(/_/g, ' ');
 }
 
@@ -24466,7 +24566,7 @@ function runConsole(line) {
       conPrint('usage: give <item>  (or admin keys 1–8 in-game)', 'err');
       conPrint('weapons: default rocket laser shotgun rail plasma void meteor', 'info');
       conPrint('keys: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
-      conPrint('powerups: damage turret shield reload', 'info');
+      conPrint('powerups: damage turret shield reload drone', 'info');
       conPrint('admingun — turret + buff (100 ammo, 1 cooldown, 1s reload, 100 dmg)', 'info');
       return;
     }

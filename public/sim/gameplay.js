@@ -2824,7 +2824,8 @@ function resolveAdminGiveItem(raw) {
     damage: 'damage', dmg: 'damage',
     turret: 'turret',
     shield: 'shield',
-    reload: 'reload'
+    reload: 'reload',
+    drone: 'drone', fixing: 'drone', fixdrone: 'drone', repair: 'drone'
   };
   if (powerAlias[s]) return { kind: 'powerup', name: powerAlias[s] };
   if (POWERUP_TYPES.indexOf(s) >= 0) return { kind: 'powerup', name: s };
@@ -2891,7 +2892,7 @@ function handleAdminGive(ws, itemRaw) {
   if (!item) {
     return {
       ok: 0,
-      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield reload | admingun'
+      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield reload drone | admingun'
     };
   }
 
@@ -5525,6 +5526,35 @@ function fireTurretBullet(room, p, ang) {
   };
   room.bullets.push(b);
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
+}
+
+/** Fixing-drone powerup: heal 1 HP / 1.25s while below 90% max HP. */
+function updateFixDrones(room) {
+  for (const p of room.players.values()) {
+    if (p.hp <= 0 || !playerHasPowerup(p, 'drone')) {
+      p.fixdroneActive = false;
+      p.fixdroneCd = 0;
+      continue;
+    }
+    const cap = room.practice ? SOLO_MAX_HP : MAX_HP;
+    const thresh = Math.ceil(cap * FIXDRONE_HP_FRAC);
+    if ((p.hp | 0) >= thresh) {
+      p.fixdroneActive = false;
+      p.fixdroneCd = 0;
+      continue;
+    }
+    if (!p.fixdroneActive) {
+      p.fixdroneActive = true;
+      p.fixdroneCd = FIXDRONE_HEAL_TICKS;
+      continue;
+    }
+    if ((p.fixdroneCd | 0) > 0) {
+      p.fixdroneCd--;
+      if ((p.fixdroneCd | 0) > 0) continue;
+    }
+    p.hp = Math.min(cap, (p.hp | 0) + 1);
+    p.fixdroneCd = FIXDRONE_HEAL_TICKS;
+  }
 }
 
 function updateTurrets(room) {
