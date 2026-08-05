@@ -5099,7 +5099,7 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
     angle: ang,
     spin: (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS,
     bank: bank || 0,
-    life: 4.0 + Math.random() * 2.0, // 4–6 s (2× prior)
+    life: 2.4 + Math.random() * 1.2, // 2.4–3.6 s (40% shorter than 4–6)
     age: 0,
     decelTick: 0.025
   });
