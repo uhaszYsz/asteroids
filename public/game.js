@@ -5972,34 +5972,24 @@ function drawFxLabels(now) {
 const powerupLabelCache = Object.create(null);
 function powerupLetter(name) {
   switch (name) {
-    case 'damage': return 'D';
-    case 'turret': return 'T';
     case 'shield': return 'S';
-    case 'reload': return 'R';
     case 'drone': return 'F';
     default: return '?';
   }
 }
 
 /**
- * Per-powerup text orbit: unique glyph/name, count, mount pattern, and cage shape.
- * Counts are 6 / 8 / 10. Some use full names instead of single letters.
+ * Per-vital text orbit: unique glyph/name, count, mount pattern, and cage shape.
  */
 const POWERUP_ORBIT = {
-  // Full name on 6 axes (cross + poles) — octa cage
-  damage: { text: 'DAMAGE', pattern: 'cube6', orbit: 'octa', textScale: 0.36, orbitR: 1.18 },
-  // Classic 6 face letters — sphere cage
-  turret: { text: 'T', pattern: 'cube6', orbit: 'sphere', textScale: 0.95, orbitR: 1 },
   // 8 corner mounts — cube cage
   shield: { text: 'S', pattern: 'cube8', orbit: 'cube', textScale: 0.82, orbitR: 1.08 },
-  // 10 = ring8 + poles — hex cage
-  reload: { text: 'R', pattern: 'ring8poles', orbit: 'hex', textScale: 0.8, orbitR: 1.08 },
   // 8 equatorial ring — flat ring cage
   drone: { text: 'FIX', pattern: 'ring8', orbit: 'ring', textScale: 0.42, orbitR: 1.12 }
 };
 
 function powerupOrbitStyle(name) {
-  return POWERUP_ORBIT[name] || POWERUP_ORBIT.turret;
+  return POWERUP_ORBIT[name] || POWERUP_ORBIT.shield;
 }
 
 function getPowerupLabelBake(name) {
@@ -11934,7 +11924,6 @@ function updateLocalShooting() {
       syncLaserSfx(false);
     }
     let reload = w.reload;
-    if (player.powerups && player.powerups.reload) reload = Math.max(1, Math.round(reload * 0.5));
     localShoot.reloadLeft = reload;
   }
 }
@@ -12235,31 +12224,25 @@ addEventListener('keyup', e => {
 const player = {
   x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, hp: 100, av: 0,
   turnDecelStep: 0, turnDecelLeft: 0, turnDecelRev: 0, stunned: false, collideCd: 0, godLeft: 0,
-  powerups: { damage: false, turret: false, shield: false, reload: false, drone: false }
+  powerups: { shield: false, drone: false }
 };
 const serverGhost = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, av: 0, hp: 100, valid: false };
 /** performance.now() deadline — skip tight drift-snap so tab-resume can soft-blend. */
 let resumeBlendUntil = 0;
 
-const POWERUP_TYPES = ['damage', 'turret', 'shield', 'reload', 'drone'];
+const POWERUP_TYPES = ['shield', 'drone'];
 const PICKUP_CODE_POWERUP_BASE = 100;
 /** Match server: weapon/powerup crates bounce this many times, then drift off. */
 const PICKUP_BOUNCE_MAX = 3;
 const PICKUP_R = 7 * RES_SCALE;
 function freshPowerups() {
   return {
-    damage: false,
-    turret: false,
     shield: false,
-    reload: false,
     drone: false
   };
 }
 function powerupColor(name) {
-  if (name === 'damage') return COL.powerDamage;
-  if (name === 'turret') return COL.powerTurret;
   if (name === 'shield') return COL.powerShield;
-  if (name === 'reload') return COL.powerReload;
   if (name === 'drone') return COL.powerDrone;
   return COL.pickup;
 }
@@ -12270,9 +12253,7 @@ function applyPowerupsState(id, powerups) {
   if (r) r.powerups = pu;
 }
 function ownerHasDamagePowerup(ownerId) {
-  if (ownerId === myId) return !!(player.powerups && player.powerups.damage);
-  const r = remotes.get(ownerId);
-  return !!(r && r.powerups && r.powerups.damage);
+  return false;
 }
 
 /** Default / shotgun muzzle flash: white, or red with damage boost. */
@@ -12604,12 +12585,6 @@ function drawFixDrones(x, y, ownerId, dt) {
 
 function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
   if (ownerHasPowerup(ownerId, 'shield')) drawShieldFx(x, y, shipAngle);
-  if (ownerHasPowerup(ownerId, 'turret')) {
-    const aim = turretAimAngle(ownerId, x, y);
-    const target = aim != null ? aim : shipAngle;
-    const yaw = turretYawSmoothed(ownerId, target, dt);
-    drawTurret3D(x, y, yaw, COL.powerTurret);
-  }
   drawFixDrones(x, y, ownerId, dt);
 }
 
@@ -13489,29 +13464,7 @@ function renderSoloShop() {
 
   if (ssPowerupsEl) {
     ssPowerupsEl.innerHTML = '';
-    for (let i = 0; i < POWERUP_TYPES.length; i++) {
-      const name = POWERUP_TYPES[i];
-      if (name === 'shield') continue; // sold under Vitals
-      const owned = !!(st.powerups && st.powerups[name]);
-      const row = document.createElement('div');
-      row.className = 'ss-row' + (owned ? ' ss-owned' : '');
-      attachShopPreview(row, 'powerup', name, 2200 + i);
-      const left = document.createElement('div');
-      left.innerHTML = '<div class="ss-name">' + shopItemLabel(name) + '</div>';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      if (owned) {
-        btn.textContent = 'GOT IT';
-        btn.disabled = true;
-      } else {
-        btn.textContent = shopCreditPrice(1000);
-        btn.disabled = st.coins < 1000;
-        btn.addEventListener('click', () => sendShopBuy('powerup', name));
-      }
-      row.appendChild(left);
-      row.appendChild(btn);
-      ssPowerupsEl.appendChild(row);
-    }
+    // Damage / turret / reload removed — vitals hold shield + drone.
   }
 
   if (ssVitalEl) {
@@ -13552,25 +13505,29 @@ function renderSoloShop() {
     lifeRow.appendChild(lifeBtn);
     ssVitalEl.appendChild(lifeRow);
 
-    const shieldOwned = !!(st.powerups && st.powerups.shield);
-    const shieldRow = document.createElement('div');
-    shieldRow.className = 'ss-row' + (shieldOwned ? ' ss-owned' : '');
-    attachShopPreview(shieldRow, 'powerup', 'shield', 3303);
-    const shieldLeft = document.createElement('div');
-    shieldLeft.innerHTML = '<div class="ss-name">' + shopItemLabel('shield') + '</div>';
-    const shieldBtn = document.createElement('button');
-    shieldBtn.type = 'button';
-    if (shieldOwned) {
-      shieldBtn.textContent = 'GOT IT';
-      shieldBtn.disabled = true;
-    } else {
-      shieldBtn.textContent = shopCreditPrice(1000);
-      shieldBtn.disabled = st.coins < 1000;
-      shieldBtn.addEventListener('click', () => sendShopBuy('powerup', 'shield'));
+    const vitalPowerups = ['shield', 'drone'];
+    for (let i = 0; i < vitalPowerups.length; i++) {
+      const name = vitalPowerups[i];
+      const owned = !!(st.powerups && st.powerups[name]);
+      const row = document.createElement('div');
+      row.className = 'ss-row' + (owned ? ' ss-owned' : '');
+      attachShopPreview(row, 'powerup', name, 3303 + i);
+      const left = document.createElement('div');
+      left.innerHTML = '<div class="ss-name">' + shopItemLabel(name) + '</div>';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      if (owned) {
+        btn.textContent = 'GOT IT';
+        btn.disabled = true;
+      } else {
+        btn.textContent = shopCreditPrice(1000);
+        btn.disabled = st.coins < 1000;
+        btn.addEventListener('click', () => sendShopBuy('powerup', name));
+      }
+      row.appendChild(left);
+      row.appendChild(btn);
+      ssVitalEl.appendChild(row);
     }
-    shieldRow.appendChild(shieldLeft);
-    shieldRow.appendChild(shieldBtn);
-    ssVitalEl.appendChild(shieldRow);
   }
 }
 
@@ -21271,9 +21228,7 @@ function handleWsMessage(e) {
     if (msg.t === 'adminGive') {
       if (msg.ok) {
         const label = msg.item || 'item';
-        if (msg.kind === 'admingun') {
-          conPrint('gave admingun (turret buffed: 100 ammo / 1 cooldown / 1s reload / 100 dmg)', 'info');
-        } else if (msg.kind === 'lives') {
+        if (msg.kind === 'lives') {
           conPrint('gave ' + ((msg.n | 0) || 99) + ' lives', 'info');
         } else if (msg.kind === 'weapon' && msg.lvl != null) {
           conPrint('gave ' + label + ' L' + (msg.lvl | 0), 'info');
@@ -22151,16 +22106,10 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'pwr' && inGame) {
       const id = msg.id | 0;
-      const hadReload = id === myId && !!(player.powerups && player.powerups.reload);
       const hadShield = id === myId && !!(player.powerups && player.powerups.shield);
       applyPowerupsState(id, msg.powerups);
       if (id === myId && hadShield && !(player.powerups && player.powerups.shield)) {
         playSfx(SFX.shieldOff, { vol: 0.85, pool: 2 });
-      }
-      if (id === myId && !hadReload && player.powerups && player.powerups.reload) {
-        if (localShoot.reloadLeft > 0) {
-          localShoot.reloadLeft = Math.max(1, Math.round(localShoot.reloadLeft * 0.5));
-        }
       }
       updateHud();
       return;
@@ -24586,9 +24535,8 @@ function runConsole(line) {
       conPrint('usage: give <item>  (or admin keys 1–8 in-game)', 'err');
       conPrint('weapons: default rocket laser shotgun rail plasma void meteor', 'info');
       conPrint('keys: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
-      conPrint('powerups: damage turret shield reload drone', 'info');
+      conPrint('vitals: shield drone', 'info');
       conPrint('live — set lives to 99 (solo/coop)', 'info');
-      conPrint('admingun — turret + buff (100 ammo, 1 cooldown, 1s reload, 100 dmg)', 'info');
       return;
     }
     if (!ws || ws.readyState !== 1) {
@@ -24624,7 +24572,7 @@ function runConsole(line) {
     conPrint('record <name> | stop | play <name> | demos | demolish <name>', 'info');
     conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
-    conPrint('give <weapon|powerup|admingun|live>  — grant loadout / 99 lives (admin, in-game)', 'info');
+    conPrint('give <weapon|shield|drone|live>  — grant loadout / vitals / 99 lives (admin, in-game)', 'info');
     conPrint('spawn big|medium|small|huge|meteor|common|ufo|worm|spinner  — off-screen spawn (admin, in-game)', 'info');
     conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');

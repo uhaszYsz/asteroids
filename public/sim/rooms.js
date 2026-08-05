@@ -786,7 +786,6 @@ function stepRoom(room) {
   rebuildAsteroidSpatialHash(room);
   if (room.matchLive) {
     updateBullets(room);
-    updateTurrets(room);
     updateFixDrones(room);
     updatePickups(room);
     if (room.practice && !room.shopOpen) updateEnemies(room);

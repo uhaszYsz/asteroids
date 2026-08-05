@@ -104,7 +104,6 @@ const BULLET_TYPES = {
   thrust: { dmg: 25, col: 'ray', size: 0, scaleY: 1, length: 0, width: 3 * RES_SCALE },
   plasma: { dmg: 6, col: 'circle', size: 5 * RES_SCALE, scaleY: 1, length: 5 * RES_SCALE, width: 2.5 * RES_SCALE },
   voidcannon: { dmg: 5, col: 'circle', size: 27 * RES_SCALE, scaleY: 1, length: 0, width: 0 },
-  turret: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   /**
    * NPC glowing shots — circle hit = white core radius (see enemyShotCoreRadius).
    * Visual glow is larger; length/width kept only as size tags for worm scale.
@@ -193,47 +192,27 @@ function effectiveWeapon(p, name) {
 }
 
 function effectiveBulletDmg(p, typeName) {
-  if (typeName === 'turret' && p && p.admingun) return ADMINGUN_TURRET_DMG;
   const cfg = BULLET_TYPES[typeName] || BULLET_TYPES.default;
   let dmg = cfg.dmg;
   if (typeName === 'laser' && getWeaponLevel(p, 'laser') >= 2) dmg *= 1.2;
   if (typeName === 'plasma' && getWeaponLevel(p, 'plasma') >= 2) dmg = 7.5;
-  if (p && p.powerups && p.powerups.damage) dmg *= DAMAGE_POWERUP_MULT;
   return dmg;
 }
 
 function freshPowerups() {
   return {
-    damage: false,
-    turret: false,
     shield: false,
-    reload: false,
     drone: false
   };
 }
 
-/** Magazine / turret reload ticks; reload powerup = 50% shorter. */
+/** Magazine reload ticks. */
 function effectiveReloadTicks(p, baseReload) {
-  let r = Math.max(1, baseReload | 0);
-  if (playerHasPowerup(p, 'reload')) r = Math.max(1, Math.round(r * 0.5));
-  return r;
+  return Math.max(1, baseReload | 0);
 }
 
 function playerHasPowerup(p, name) {
   return !!(p && p.powerups && p.powerups[name]);
-}
-
-function turretMaxAmmo(p) {
-  return (p && p.admingun) ? ADMINGUN_TURRET_AMMO : TURRET_AMMO;
-}
-
-function turretCooldownFor(p) {
-  return (p && p.admingun) ? ADMINGUN_TURRET_COOLDOWN : TURRET_COOLDOWN;
-}
-
-function turretReloadTicksFor(p) {
-  if (p && p.admingun) return ADMINGUN_TURRET_RELOAD;
-  return effectiveReloadTicks(p, TURRET_RELOAD);
 }
 
 function notifyPowerups(room, p) {
@@ -268,13 +247,6 @@ function dealDamageToPlayer(room, p, dmg, attackerId) {
   p.hp -= dmg;
   if (p.hp <= 0) handlePlayerDeath(room, p);
   return true;
-}
-
-function resetTurretState(p) {
-  p.turretAmmo = turretMaxAmmo(p);
-  p.turretCd = 0;
-  p.turretReload = 0;
-  p.turretRetry = 0;
 }
 
 const THRUST = 0.09 * RES_SCALE * 1.15 * 1.2 * 1.2 * 0.85;  // prior buffs, then −15%
@@ -529,25 +501,12 @@ const PICKUP_DROP_CHANCE = 0.2;
 const PICKUP_BOUNCE_MAX = 3;
 /** Heal amount from health pickups (HP capped at MAX_HP). */
 const HEALTH_PICKUP_HEAL = 30;
-/** Pickup type codes in network packs: 1+ weapons by slot, 99 health, 100+ powerups.
- *  Pickups = collectible items (weapon or health). Powerups are slotted buffs (one each). */
+/** Pickup type codes in network packs: 1+ weapons by slot, 99 health, 100+ vitals/powerups.
+ *  Remaining collectible buffs: shield + fixing drone (sold under shop Vitals). */
 const PICKUP_CODE_HEALTH = 99;
-const POWERUP_TYPES = ['damage', 'turret', 'shield', 'reload', 'drone'];
+const POWERUP_TYPES = ['shield', 'drone'];
 const PICKUP_CODE_POWERUP_BASE = 100;
-/** Turret auto-gun (mounted powerup). */
-const TURRET_AMMO = 3;
-const TURRET_COOLDOWN = 2;
-const TURRET_RELOAD = 60;
-const TURRET_RETRY = 10;
-const TURRET_SPEED = 8 * RES_SCALE;
-const TURRET_MUZZLE = 12 * RES_SCALE;
-/** Admin `give admingun` — buffed turret (100 ammo, 1 tick cooldown, 1s reload, 100 dmg). */
-const ADMINGUN_TURRET_AMMO = 100;
-const ADMINGUN_TURRET_COOLDOWN = 1;
-const ADMINGUN_TURRET_RELOAD = TPS;
-const ADMINGUN_TURRET_DMG = 100;
-const DAMAGE_POWERUP_MULT = 1.25;
-/** Fixing-drone powerup: 1 HP every 1.25s. */
+/** Fixing-drone: 1 HP every 1.25s. */
 const FIXDRONE_HEAL_TICKS = Math.round(1.25 * TPS);
 /** Appear / start repair at this fraction of max HP (inclusive). */
 const FIXDRONE_HP_FRAC = 0.9;

@@ -2128,11 +2128,6 @@ function handleShopBuy(room, p, item, name) {
     if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
     p.coins = (p.coins | 0) - cost;
     p.powerups[name] = true;
-    if (name === 'turret') resetTurretState(p);
-    if (name === 'reload') {
-      if (p.reloadLeft > 0) p.reloadLeft = Math.max(1, Math.round(p.reloadLeft * 0.5));
-      if (p.turretReload > 0) p.turretReload = Math.max(1, Math.round(p.turretReload * 0.5));
-    }
     notifyPlayerCoins(room, p);
     notifyPowerups(room, p);
     return { ok: 1 };
@@ -2383,11 +2378,6 @@ function applyPickupToPlayer(room, p, u) {
     if (!name || !POWERUP_TYPES.includes(name)) return;
     if (p.powerups[name]) return; // already owned — collect still removes pickup
     p.powerups[name] = true;
-    if (name === 'turret') resetTurretState(p);
-    if (name === 'reload') {
-      if (p.reloadLeft > 0) p.reloadLeft = Math.max(1, Math.round(p.reloadLeft * 0.5));
-      if (p.turretReload > 0) p.turretReload = Math.max(1, Math.round(p.turretReload * 0.5));
-    }
     notifyPowerups(room, p);
     return;
   }
@@ -2730,12 +2720,6 @@ function spawnPlayer(id, name, colors, room) {
     weapon: wpn,
     weaponLevels: levels,
     powerups: freshPowerups(),
-    /** Admin cheat: buffed turret (see give admingun). */
-    admingun: false,
-    turretAmmo: TURRET_AMMO,
-    turretCd: 0,
-    turretReload: 0,
-    turretRetry: 0,
     shootAmmo: w.ammo, shootCd: 0, reloadLeft: 0, bursting: false,
     railChargeLeft: 0,
     /** Legacy snap pad (always 0 — ground coin pools removed). */
@@ -2774,7 +2758,6 @@ function respawnPlayer(room, p, keepLoadout, maxHp) {
   p.shootAmmo = w.ammo;
   p.shootCd = 0; p.reloadLeft = 0; p.bursting = false;
   p.railChargeLeft = 0;
-  resetTurretState(p);
   p.inputQueue = [];
 }
 
@@ -2825,11 +2808,10 @@ function notifyPlayerWeapon(room, p, fromPickup) {
   }
 }
 
-/** Normalize console give aliases → canonical weapon / powerup / admingun / lives. */
+/** Normalize console give aliases → canonical weapon / vital / lives. */
 function resolveAdminGiveItem(raw) {
   const s = String(raw || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
   if (!s) return null;
-  if (s === 'admingun' || s === 'admin') return { kind: 'admingun', name: 'admingun' };
   if (s === 'live' || s === 'lives' || s === 'life') return { kind: 'lives', name: 'lives' };
   const weaponAlias = {
     default: 'default', gun: 'default', blaster: 'default',
@@ -2845,10 +2827,7 @@ function resolveAdminGiveItem(raw) {
   if (weaponAlias[s]) return { kind: 'weapon', name: weaponAlias[s] };
   if (WEAPON_SLOTS.indexOf(s) >= 0) return { kind: 'weapon', name: s };
   const powerAlias = {
-    damage: 'damage', dmg: 'damage',
-    turret: 'turret',
     shield: 'shield',
-    reload: 'reload',
     drone: 'drone', fixing: 'drone', fixdrone: 'drone', repair: 'drone'
   };
   if (powerAlias[s]) return { kind: 'powerup', name: powerAlias[s] };
@@ -2903,7 +2882,7 @@ function handleAdminSpawn(ws, kindRaw) {
 }
 
 /**
- * Admin console `give <item>` — equip weapon, grant powerup, lives, or buffed admingun.
+ * Admin console `give <item>` — equip weapon, grant vitals (shield/drone), or lives.
  */
 function handleAdminGive(ws, itemRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -2916,7 +2895,7 @@ function handleAdminGive(ws, itemRaw) {
   if (!item) {
     return {
       ok: 0,
-      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield reload drone | admingun | live'
+      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | vitals: shield drone | live'
     };
   }
 
@@ -2925,15 +2904,6 @@ function handleAdminGive(ws, itemRaw) {
     p.lives = 99;
     notifyPlayerLives(room, p);
     return { ok: 1, kind: 'lives', item: 'lives', n: 99 };
-  }
-
-  if (item.kind === 'admingun') {
-    p.admingun = true;
-    if (!p.powerups) p.powerups = freshPowerups();
-    p.powerups.turret = true;
-    resetTurretState(p);
-    notifyPowerups(room, p);
-    return { ok: 1, kind: 'admingun', item: 'admingun' };
   }
 
   if (item.kind === 'weapon') {
@@ -2953,11 +2923,6 @@ function handleAdminGive(ws, itemRaw) {
   if (item.kind === 'powerup') {
     if (!p.powerups) p.powerups = freshPowerups();
     p.powerups[item.name] = true;
-    if (item.name === 'turret') resetTurretState(p);
-    if (item.name === 'reload') {
-      if (p.reloadLeft > 0) p.reloadLeft = Math.max(1, Math.round(p.reloadLeft * 0.5));
-      if (p.turretReload > 0) p.turretReload = Math.max(1, Math.round(p.turretReload * 0.5));
-    }
     notifyPowerups(room, p);
     return { ok: 1, kind: 'powerup', item: item.name };
   }
@@ -4537,8 +4502,6 @@ function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
   if (!room) return;
   const R = ROCKET_BLAST_RADIUS;
   let maxDmg = ROCKET_BLAST_DMG;
-  const owner = ownerId > 0 ? room.players.get(ownerId) : null;
-  if (owner && playerHasPowerup(owner, 'damage')) maxDmg *= DAMAGE_POWERUP_MULT;
   const skipEnemyId = opts && opts.skipEnemyId != null ? (opts.skipEnemyId | 0) : 0;
 
   for (const p of room.players.values()) {
@@ -5550,24 +5513,6 @@ function asteroidBlocksRay(room, ox, oy, ang, maxDist) {
   return false;
 }
 
-function fireTurretBullet(room, p, ang) {
-  const x = p.x + Math.cos(ang) * TURRET_MUZZLE;
-  const y = p.y + Math.sin(ang) * TURRET_MUZZLE;
-  const vel = bulletVelocity(p, ang, TURRET_SPEED, false);
-  const b = {
-    id: room.nextBulletId++,
-    owner: p.id,
-    type: 'turret',
-    dmg: effectiveBulletDmg(p, 'turret'),
-    x, y, spawnX: x, spawnY: y,
-    vx: vel.vx,
-    vy: vel.vy,
-    spawnSt: Date.now()
-  };
-  room.bullets.push(b);
-  roomBroadcast(room, { t: 'bf', b: packBullet(b) });
-}
-
 /** Fixing-drone: latch on at ≤90% HP, heal 1/1.25s until 100%, then dismiss. */
 function updateFixDrones(room) {
   for (const p of room.players.values()) {
@@ -5601,89 +5546,6 @@ function updateFixDrones(room) {
       p.fixdroneActive = false;
       p.fixdroneCd = 0;
     }
-  }
-}
-
-function updateTurrets(room) {
-  for (const p of room.players.values()) {
-    if (p.hp <= 0 || !playerHasPowerup(p, 'turret')) continue;
-    if (p.turretReload > 0) {
-      p.turretReload--;
-      if (p.turretReload === 0) p.turretAmmo = turretMaxAmmo(p);
-      continue;
-    }
-    if (p.turretRetry > 0) {
-      p.turretRetry--;
-      continue;
-    }
-    if (p.turretCd > 0) {
-      p.turretCd--;
-      continue;
-    }
-    if ((p.turretAmmo | 0) <= 0) {
-      p.turretReload = turretReloadTicksFor(p);
-      continue;
-    }
-
-    let best = null;
-    let bestD2 = Infinity;
-    let bestKind = null; // 'player' | 'enemy' | 'asteroid'
-    for (const e of room.players.values()) {
-      if (e.id === p.id || e.hp <= 0 || e.godLeft > 0) continue;
-      const dx = e.x - p.x;
-      const dy = e.y - p.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 < bestD2) {
-        bestD2 = d2;
-        best = e;
-        bestKind = 'player';
-      }
-    }
-    // Solo: prefer AI ships, then asteroids if none are around.
-    if (!best && room.practice) {
-      for (const e of room.enemies || []) {
-        if (!enemyIsSpawned(e) || e.hp <= 0) continue;
-        const dx = e.x - p.x;
-        const dy = e.y - p.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 < bestD2) {
-          bestD2 = d2;
-          best = e;
-          bestKind = 'enemy';
-        }
-      }
-      if (!best) {
-        for (const a of room.asteroids || []) {
-          if (isOffScreen(a)) continue;
-          const dx = a.x - p.x;
-          const dy = a.y - p.y;
-          const d2 = dx * dx + dy * dy;
-          if (d2 < bestD2) {
-            bestD2 = d2;
-            best = a;
-            bestKind = 'asteroid';
-          }
-        }
-      }
-    }
-    if (!best) continue;
-
-    const ang = leadInterceptAngle(
-      p.x, p.y,
-      best.x, best.y,
-      best.vx || 0, best.vy || 0,
-      TURRET_SPEED
-    );
-    const range = Math.sqrt(bestD2) + 80 * RES_SCALE;
-    // Don't ray-block against the rock we're trying to shoot.
-    if (bestKind !== 'asteroid' && asteroidBlocksRay(room, p.x, p.y, ang, range)) {
-      p.turretRetry = TURRET_RETRY;
-      continue;
-    }
-    fireTurretBullet(room, p, ang);
-    p.turretAmmo--;
-    p.turretCd = turretCooldownFor(p);
-    if (p.turretAmmo <= 0) p.turretReload = turretReloadTicksFor(p);
   }
 }
 
@@ -5796,8 +5658,6 @@ function updateBullets(room) {
         active.add(key);
         applyVoidOverlapPulse(b, key, (dmg) => {
           let d = dmg;
-          const owner = players.get(b.owner);
-          if (owner && playerHasPowerup(owner, 'damage')) d *= DAMAGE_POWERUP_MULT;
           dealDamageToPlayer(room, p, d, b.owner | 0);
           voidScramblePlayerAim(p, 4);
           roomBroadcast(room, { t: 'vd', k: 'p', id: p.id | 0, x: p.x, y: p.y });
@@ -5809,8 +5669,6 @@ function updateBullets(room) {
         active.add(key);
         applyVoidOverlapPulse(b, key, (dmg) => {
           let d = dmg;
-          const owner = players.get(b.owner);
-          if (owner && playerHasPowerup(owner, 'damage')) d *= DAMAGE_POWERUP_MULT;
           damageAsteroid(room, a, d, b.owner | 0);
           roomBroadcast(room, { t: 'vd', k: 'a', id: a.id | 0, x: a.x, y: a.y });
         });
@@ -5825,8 +5683,6 @@ function updateBullets(room) {
           active.add(key);
           applyVoidOverlapPulse(b, key, (dmg) => {
             let d = dmg;
-            const owner = players.get(b.owner);
-            if (owner && playerHasPowerup(owner, 'damage')) d *= DAMAGE_POWERUP_MULT;
             damageEnemy(room, e, d, b.owner | 0);
             roomBroadcast(room, { t: 'vd', k: 'e', id: e.id | 0, x: e.x, y: e.y });
           });
