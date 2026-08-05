@@ -744,7 +744,7 @@
       background: #081018;
     }
     #solo-shop .ss-equipped {
-      display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap;
+      display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
     }
     #solo-shop .ss-equipped .ss-preview {
       width: 112px; height: 112px; flex: 0 0 auto;
@@ -755,7 +755,7 @@
       background: #020810;
       border: 1px solid #3a90b0;
     }
-    #solo-shop .ss-equipped-info { flex: 1 1 140px; min-width: 0; padding-top: 2px; }
+    #solo-shop .ss-equipped-info { flex: 1 1 140px; min-width: 0; align-self: flex-start; padding-top: 2px; }
     #solo-shop .ss-equipped-label {
       font-family: "Press Start 2P", Consolas, monospace;
       font-size: 9px; letter-spacing: 0.08em; color: #5ad8ff;
@@ -781,8 +781,9 @@
       border: 1px solid #1a3848;
     }
     #solo-shop .ss-equipped button {
-      background: #0a5070;
-      color: #e8ffff;
+      background: #208028;
+      color: #e8ffe0;
+      border-color: #2a9030;
       font-size: 9px;
       padding: 13px 12px;
       min-height: calc(1em + 26px);
@@ -792,6 +793,7 @@
       line-height: 1.35;
       text-align: center;
       box-sizing: border-box;
+      align-self: flex-end;
     }
     #solo-shop .ss-equipped button:hover:not(:disabled),
     #solo-shop .ss-row button:hover:not(:disabled),
@@ -803,28 +805,30 @@
       opacity: 0.4; cursor: default;
     }
     #solo-shop .ss-owned-pu {
-      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-      padding-top: 8px; border-top: 1px solid #1e3a48;
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+      padding-top: 12px; padding-bottom: 4px;
+      min-height: 56px;
+      border-top: 1px solid #1e3a48;
     }
     #solo-shop .ss-owned-pu-label {
       font-family: "Press Start 2P", Consolas, monospace;
-      font-size: 7px; letter-spacing: 0.08em; color: #8ec8e0;
+      font-size: 9px; letter-spacing: 0.08em; color: #8ec8e0;
       margin-right: 4px;
     }
     #solo-shop .ss-owned-chip {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 4px 8px;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 8px 12px;
       border: 1px solid #345868;
       background: #0c1824;
-      font-size: 11px; text-transform: uppercase;
+      font-size: 14px; text-transform: uppercase;
       color: #c8e8f8;
     }
     #solo-shop .ss-owned-chip canvas {
-      width: 14px; height: 14px; display: block; background: #020810;
+      width: 28px; height: 28px; display: block; background: #020810;
       border: 1px solid #345868;
     }
     #solo-shop .ss-owned-empty {
-      font-size: 12px; color: #486878;
+      font-size: 14px; color: #486878;
     }
     #solo-shop .ss-section {
       margin-bottom: 14px;
@@ -2290,6 +2294,6 @@
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=83"></script>
-<script src="game.js?v=937"></script>
+<script src="game.js?v=938"></script>
 </body>
 </html>
