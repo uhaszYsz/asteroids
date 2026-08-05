@@ -5205,13 +5205,10 @@ function drawEnemyCorpses(dt) {
     const c = enemyCorpses[i];
     const t = c.age / Math.max(1e-3, c.life);
     const alpha = t > 0.9 ? Math.max(0, 1 - (t - 0.9) / 0.1) : 1;
-    const flicker = 0.85 + Math.sin(performance.now() * 0.028 + i * 1.7) * 0.35
-      + (Math.random() - 0.5) * 0.25;
-    const emit = Math.max(0, (1.4 + flicker) * alpha);
     drawSpriteShipPlane(
-      c.x, c.y, c.angle, 0, -1 - i, dt, opt, false, COL_FIRE,
+      c.x, c.y, c.angle, 0, -1 - i, dt, opt, false, COL.enemy,
       c.bank, ENEMY_COMMON_SPRITE_SCALE, null,
-      { noOutline: true, gray: true, valueMul: ENEMY_CORPSE_VALUE, alpha, emit }
+      { noOutline: true, gray: true, valueMul: ENEMY_CORPSE_VALUE, alpha }
     );
   }
 }
