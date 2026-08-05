@@ -601,6 +601,9 @@ wss.on('connection', (ws) => {
       if (!room || (ws.state !== 'playing' && ws.state !== 'practice')) return;
       const p = room.players.get(ws.playerId);
       if (!p || (p.hp | 0) <= 0) return;
+      // Admin Q-shop: grant a big credit stash (server-side admin gate only).
+      p.coins = 999999;
+      notifyPlayerCoins(room, p);
       if (room.shopOpen) {
         send(ws, packShopState(room, p));
         return;
