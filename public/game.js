@@ -13223,8 +13223,8 @@ function attachShopPreview(row, kind, name, seedId) {
 
 function attachShopChipPreview(chip, name, seedId) {
   const c = document.createElement('canvas');
-  c.width = 56;
-  c.height = 56;
+  c.width = 28;
+  c.height = 28;
   const ctx = c.getContext('2d');
   chip.appendChild(c);
   shopPreviewSlots.push({ canvas: c, ctx, kind: 'powerup', name, id: seedId | 0 });
@@ -13259,6 +13259,8 @@ function updateShopPreviews() {
     for (let i = 0; i < shopPreviewSlots.length; i++) {
       const slot = shopPreviewSlots[i];
       const fb = clearShopPreviewRegion();
+      // Powerup meshes read large in the shop — half the shared preview scale.
+      _shopVisScale = slot.kind === 'powerup' ? SHOP_PREV_SCALE * 0.5 : SHOP_PREV_SCALE;
       if (slot.kind === 'powerup') {
         drawPowerupPickup({ powerup: slot.name, id: slot.id }, cx, cy, 0, 1);
       } else {
