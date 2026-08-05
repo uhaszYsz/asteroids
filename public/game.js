@@ -5089,18 +5089,19 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
   const ang = pose.angle || e.angle || 0;
   const eVx = pose.vx || e.vx || 0; // px/tick at death
   const eVy = pose.vy || e.vy || 0;
+  const kickMul = 1.3; // 30% faster than death velocity
   const spinDegTick = 4 + Math.random() * 3; // 4–7 °/tick
   enemyCorpses.push({
     x: px,
     y: py,
-    vx: eVx * TPS, // keep death velocity (px/s for dt integrator)
-    vy: eVy * TPS,
+    vx: eVx * TPS * kickMul,
+    vy: eVy * TPS * kickMul,
     angle: ang,
     spin: (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS,
     bank: bank || 0,
     life: 4.0 + Math.random() * 2.0, // 4–6 s (2× prior)
     age: 0,
-    decelTick: 0.05
+    decelTick: 0.025
   });
 }
 
@@ -5178,7 +5179,7 @@ function updateEnemyCorpses(dt) {
     }
     c.x += c.vx * step;
     c.y += c.vy * step;
-    const decel = c.decelTick != null ? c.decelTick : 0.05;
+    const decel = c.decelTick != null ? c.decelTick : 0.025;
     const spd = Math.hypot(c.vx, c.vy);
     if (spd > 1e-6) {
       const spdTick = spd / TPS;
