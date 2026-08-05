@@ -755,8 +755,10 @@ function makeEnemy(kind, wave, weapon) {
 /**
  * Even waves = enemy waves (commons). Every 2nd enemy wave (4, 8, 12…) is special:
  * one UFO/spinner + half the commons. Wave 10 is always worm boss (no commons/specials).
+ * At most MAX_COMMON_ON_FIELD commons live at once; extras wait in queue.
+ * When all asteroids are gone, remaining commons (and queue) are purged so the wave can end.
  */
-const MAX_COMMON_ON_FIELD = 4;
+const MAX_COMMON_ON_FIELD = 5;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
 
 function soloEnemyCounts(wave) {
@@ -799,6 +801,20 @@ function tryPromoteQueuedCommons(room) {
     next.queued = false;
     next.appearLeft = COMMON_QUEUE_SPAWN_DELAY;
   }
+}
+
+/** Drop all common/common1 enemies (live + queued). Keeps specials / worm. */
+function clearSoloCommons(room) {
+  if (!room.enemies || !room.enemies.length) return;
+  const kept = [];
+  for (const e of room.enemies) {
+    if (!isCommonKind(e.kind)) {
+      kept.push(e);
+      continue;
+    }
+    if (enemyIsSpawned(e)) emitEnemyDead(room, e, true);
+  }
+  room.enemies = kept;
 }
 
 function spawnSoloWaveEnemies(room, wave) {
@@ -1900,6 +1916,10 @@ function tickSoloWaves(room) {
     return;
   }
 
+  // Rocks cleared → dump remaining commons/queue so they don't hold the wave.
+  // Specials / worm still must be killed.
+  if (!soloWaveHasAsteroidThreats(room)) clearSoloCommons(room);
+
   if (soloWaveHasFieldThreats(room)) return;
   if (room.pendingBigSpawns && room.pendingBigSpawns.length) {
     // Practice never schedules big refills; drop stale entries so waves can't soft-lock.
@@ -1911,8 +1931,8 @@ function tickSoloWaves(room) {
   roomBroadcast(room, { t: 'waveClear', n: room.wave | 0 });
 }
 
-/** True if anything still blocks advancing the solo wave. */
-function soloWaveHasFieldThreats(room) {
+/** True if any world asteroid still blocks advancing the solo wave. */
+function soloWaveHasAsteroidThreats(room) {
   for (const a of room.asteroids || []) {
     // Meteor-gun rocks are player shots — never block wave clear.
     if (a.playerShot) continue;
@@ -1924,6 +1944,12 @@ function soloWaveHasFieldThreats(room) {
     // Still inbound (not entered) or on-field → must clear.
     return true;
   }
+  return false;
+}
+
+/** True if anything still blocks advancing the solo wave. */
+function soloWaveHasFieldThreats(room) {
+  if (soloWaveHasAsteroidThreats(room)) return true;
   for (const e of room.enemies || []) {
     // Queued commons aren't on the field yet but still belong to this wave.
     return true;
