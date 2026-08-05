@@ -17501,12 +17501,14 @@ function enemyAgeTicks(e) {
 }
 
 /** One client tick of destinationSmooth (mirrors server; no random retarget).
- *  opts.noArriveSnap: match server stepEnemyMovement — stop without teleporting onto tx/ty. */
+ *  opts.noArriveSnap: match server stepEnemyMovement — no teleport onto tx/ty.
+ *  opts.noStop: keep flying at speed even inside arrive radius (common1). */
 function stepEnemyDestinationSmoothLocal(state, opts) {
   const dx = state.tx - state.x;
   const dy = state.ty - state.y;
   const dist = Math.hypot(dx, dy);
-  if (dist <= ENEMY_ARRIVE_R) {
+  const noStop = !!(opts && opts.noStop);
+  if (dist <= ENEMY_ARRIVE_R && !noStop) {
     if (!(opts && opts.noArriveSnap)) {
       state.x = state.tx;
       state.y = state.ty;
@@ -17515,7 +17517,9 @@ function stepEnemyDestinationSmoothLocal(state, opts) {
     state.vy = 0;
     return;
   }
-  const desired = Math.atan2(dy, dx);
+  const desired = dist > 1e-6
+    ? Math.atan2(dy, dx)
+    : (state.dir != null && Number.isFinite(state.dir) ? state.dir : (state.angle || 0));
   state.dir = enemyTurnAngleToward(state.dir, desired, enemyTurnMaxOf(state));
   const spd = enemyWanderSpeedOf(state);
   state.vx = Math.cos(state.dir) * spd;
@@ -17554,7 +17558,7 @@ function enemyAt(e) {
     };
     const chase = e.kind === 'common1';
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));
-    const stepOpts = chase ? { noArriveSnap: true } : null;
+    const stepOpts = chase ? { noArriveSnap: true, noStop: true } : null;
     for (let i = 0; i < steps; i++) stepEnemyDestinationSmoothLocal(state, stepOpts);
     return {
       x: state.x,

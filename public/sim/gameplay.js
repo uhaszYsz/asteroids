@@ -726,8 +726,10 @@ function makeEnemy(kind, wave, weapon) {
     railChargeLeft: 0,
     lastLaserAng: null,
     enteredPlay: false,
-    // common1: worm-rocket maxSpeed −20%; others roll wander band.
-    speed: k === 'common1' ? ENEMY_COMMON1_SPEED : randomEnemyWanderSpeed(),
+    // common1: worm-rocket maxSpeed −20%, ±10% per ship; others roll wander band.
+    speed: k === 'common1'
+      ? ENEMY_COMMON1_SPEED * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
+      : randomEnemyWanderSpeed(),
     // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
     // wormAtk cycles 0=laser, 1=rockets, 2=shotgun.
     wormPhase: 0,
@@ -1559,9 +1561,13 @@ function stepEnemyMovement(e) {
   const dx = e.tx - e.x;
   const dy = e.ty - e.y;
   const dist = Math.hypot(dx, dy);
-  if (dist <= ENEMY_ARRIVE_R) return true;
+  // common1 never stops — keep flying even when overlapping the chase point.
+  const chaseNoStop = e.kind === 'common1';
+  if (!chaseNoStop && dist <= ENEMY_ARRIVE_R) return true;
 
-  const desired = Math.atan2(dy, dx);
+  const desired = dist > 1e-6
+    ? Math.atan2(dy, dx)
+    : (e.dir != null && Number.isFinite(e.dir) ? e.dir : (e.angle || 0));
   const carrierLocked = e.kind === 'carrier' && (e.bursting || (e.railChargeLeft | 0) > 0);
 
   if (enemyMoveType(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
