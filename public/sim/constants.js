@@ -517,9 +517,12 @@ const ASTEROID_HP = 50;
 /** Coins granted to the destroyer when a world asteroid is killed. */
 const ASTEROID_COIN_GRANT = 32;
 /** Coins granted for destroying UFO / spinner. */
-const ENEMY_ELITE_COIN_GRANT = 1000;
-/** Visual 3D ore coins spawned on that kill (homing to the killer). */
+const ENEMY_ELITE_COIN_GRANT = 500;
+/** Coins granted for destroying the worm boss. */
+const ENEMY_WORM_COIN_GRANT = 1000;
+/** Visual 3D ore coins spawned on elite/worm kill (homing to the killer). */
 const ENEMY_ELITE_COIN_VISUAL = 150;
+const ENEMY_WORM_COIN_VISUAL = 200;
 /** Chance a non-start spawn (replacement big / split shard) is a special type. */
 const SPECIAL_ASTEROID_CHANCE = 0.1;
 const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden'];

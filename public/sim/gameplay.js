@@ -1729,12 +1729,21 @@ function damageEnemy(room, e, dmg, ownerId) {
   if (idx >= 0) room.enemies.splice(idx, 1);
   if (wasCommon) tryPromoteQueuedCommons(room);
 
-  if ((kind === 'ufo' || kind === 'spinner') && killerId > 0) {
+  let coinGrant = 0;
+  let coinVisual = 0;
+  if (kind === 'ufo' || kind === 'spinner') {
+    coinGrant = ENEMY_ELITE_COIN_GRANT;
+    coinVisual = ENEMY_ELITE_COIN_VISUAL;
+  } else if (kind === 'worm') {
+    coinGrant = ENEMY_WORM_COIN_GRANT;
+    coinVisual = ENEMY_WORM_COIN_VISUAL;
+  }
+  if (coinGrant > 0 && killerId > 0) {
     const killer = room.players.get(killerId);
     if (killer && !killer.bot) {
-      grantCoins(killer, ENEMY_ELITE_COIN_GRANT);
+      grantCoins(killer, coinGrant);
       notifyPlayerCoins(room, killer);
-      emitGoldAsteroidCoins(room, deathX, deathY, ENEMY_ELITE_COIN_VISUAL, killerId);
+      emitGoldAsteroidCoins(room, deathX, deathY, coinVisual, killerId);
     }
   }
 }
