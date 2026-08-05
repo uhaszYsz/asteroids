@@ -5098,7 +5098,7 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
     angle: ang,
     spin: (Math.random() < 0.5 ? -1 : 1) * spinDegTick * (Math.PI / 180) * TPS,
     bank: bank || 0,
-    life: 2.0 + Math.random() * 1.0,
+    life: 4.0 + Math.random() * 2.0, // 4–6 s (2× prior)
     age: 0,
     decelTick: 0.05
   });
@@ -5192,7 +5192,7 @@ function updateEnemyCorpses(dt) {
     }
     c.angle += c.spin * step;
     const lifeT = c.age / Math.max(1e-3, c.life);
-    const burn = lifeT > 0.75 ? Math.max(0, 1 - (lifeT - 0.75) / 0.25) : 1;
+    const burn = lifeT > 0.9 ? Math.max(0, 1 - (lifeT - 0.9) / 0.1) : 1;
     emitCorpseBurn(c, burn);
   }
 }
@@ -5204,7 +5204,7 @@ function drawEnemyCorpses(dt) {
   for (let i = 0; i < enemyCorpses.length; i++) {
     const c = enemyCorpses[i];
     const t = c.age / Math.max(1e-3, c.life);
-    const alpha = t > 0.75 ? Math.max(0, 1 - (t - 0.75) / 0.25) : 1;
+    const alpha = t > 0.9 ? Math.max(0, 1 - (t - 0.9) / 0.1) : 1;
     const flicker = 0.85 + Math.sin(performance.now() * 0.028 + i * 1.7) * 0.35
       + (Math.random() - 0.5) * 0.25;
     const emit = Math.max(0, (1.4 + flicker) * alpha);
