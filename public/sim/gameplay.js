@@ -1836,7 +1836,7 @@ function beginSoloWave(room, wave, opts) {
   for (const a of room.asteroids) emitAsteroidFire(room, a);
   clearSoloEnemies(room, true);
   spawnSoloWaveEnemies(room, room.wave);
-  // Clean projectiles / pickups so the new wave starts empty.
+  // Clean projectiles; keep powerup pickups across waves (weapons/health still wipe).
   if (room.bullets && room.bullets.length) {
     for (const b of room.bullets) {
       roomBroadcast(room, { t: 'bd', id: b.id });
@@ -1844,10 +1844,16 @@ function beginSoloWave(room, wave, opts) {
     room.bullets.length = 0;
   }
   if (room.pickups && room.pickups.length) {
+    const kept = [];
     for (const u of room.pickups) {
+      if (u.kind === 'powerup') {
+        kept.push(u);
+        continue;
+      }
       emitPickupDead(room, u.id, null, null, { silent: 1 });
     }
     room.pickups.length = 0;
+    for (const u of kept) room.pickups.push(u);
   }
   if (room.pendingRailBounces) room.pendingRailBounces.length = 0;
   placePlayersAtWaveStart(room, opts);
@@ -3819,6 +3825,14 @@ function emitRoundReset(room) {
     roomBroadcast(room, { t: 'bd', id: b.id });
   }
   room.bullets.length = 0;
+
+  // PvP: wipe field pickups (wave mode keeps powerups across waves).
+  if (!room.practice && room.pickups && room.pickups.length) {
+    for (const u of room.pickups) {
+      emitPickupDead(room, u.id, null, null, { silent: 1 });
+    }
+    room.pickups.length = 0;
+  }
 
   const scores = packScoreboard(room);
   const asteroids = room.asteroids.map(packAsteroid);

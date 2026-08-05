@@ -21590,12 +21590,15 @@ function handleWsMessage(e) {
         ssContinueBtn.textContent = 'START WAVE';
         ssContinueBtn.disabled = false;
       }
-      // Drop leftover projectiles/pickups/ghosts (server wipes too; this covers lag/races).
+      // Drop leftover projectiles / weapon+health pickups. Keep powerup pickups
+      // across waves (server keeps them too). PvP round reset still wipes all.
       if (practiceMode) {
         stopAllRocketTravelSfx();
         stopAllVoidTravelSfx();
         bullets.clear();
-        pickups.clear();
+        for (const [id, u] of pickups) {
+          if (!u || u.kind !== 'powerup') pickups.delete(id);
+        }
         ghostBullets.length = 0;
         hitLasers.length = 0;
         remoteLasers.clear();
@@ -22001,6 +22004,8 @@ function handleWsMessage(e) {
       stopAllRocketTravelSfx();
       stopAllVoidTravelSfx();
       bullets.clear();
+      // PvP: field pickups wipe with the round (wave mode keeps powerups).
+      if (!practiceMode) pickups.clear();
       // Authoritative asteroid snapshot after death freeze.
       if (msg.asteroids) replaceAsteroidsFromRows(msg.asteroids);
       selectedWeapon = msg.w != null ? (msg.w | 0) : 1;
