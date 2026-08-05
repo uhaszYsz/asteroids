@@ -12324,13 +12324,15 @@ function bulletDrawColor(type, ownerId) {
 }
 /** Shield pickup: charge-noise 3D sphere around ship (no load embers). */
 function drawShieldFx(x, y, shipAngle) {
+  // 1 blink / second (500ms on, 500ms off).
+  if ((Math.floor(performance.now() / 500) & 1) !== 0) return;
   const now = performance.now();
   const tSec = now * 0.001;
   // Breathe at ±10% of size per second peak rate: r = base * exp(0.1 * sin(t)).
   const baseR = 14 * RES_SCALE;
   const radius = baseR * Math.exp(0.1 * Math.sin(tSec));
   const spin = now * 0.007;
-  drawEnemyChargeSphere(x, y, radius, shipAngle || 0, spin, COL.powerShield, 0.5, {
+  drawEnemyChargeSphere(x, y, radius, shipAngle || 0, spin, COL.powerShield, 0.4, {
     chargeT: 0.55,
     noCore: true
   });
