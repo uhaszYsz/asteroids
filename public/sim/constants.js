@@ -546,8 +546,9 @@ const ADMINGUN_TURRET_COOLDOWN = 1;
 const ADMINGUN_TURRET_RELOAD = TPS;
 const ADMINGUN_TURRET_DMG = 100;
 const DAMAGE_POWERUP_MULT = 1.25;
-/** Fixing-drone powerup: 1 HP every 1.25s while below 90% max HP. */
+/** Fixing-drone powerup: 1 HP every 1.25s. */
 const FIXDRONE_HEAL_TICKS = Math.round(1.25 * TPS);
+/** Appear / start repair at this fraction of max HP (inclusive). */
 const FIXDRONE_HP_FRAC = 0.9;
 const ASTEROID_HP = 50;
 /** Coins granted to the destroyer when a world asteroid is killed. */

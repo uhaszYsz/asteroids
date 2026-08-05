@@ -5528,7 +5528,7 @@ function fireTurretBullet(room, p, ang) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
-/** Fixing-drone powerup: heal 1 HP / 1.25s while below 90% max HP. */
+/** Fixing-drone: latch on at ≤90% HP, heal 1/1.25s until 100%, then dismiss. */
 function updateFixDrones(room) {
   for (const p of room.players.values()) {
     if (p.hp <= 0 || !playerHasPowerup(p, 'drone')) {
@@ -5537,23 +5537,30 @@ function updateFixDrones(room) {
       continue;
     }
     const cap = room.practice ? SOLO_MAX_HP : MAX_HP;
-    const thresh = Math.ceil(cap * FIXDRONE_HP_FRAC);
-    if ((p.hp | 0) >= thresh) {
+    const hp = p.hp | 0;
+    if (hp >= cap) {
       p.fixdroneActive = false;
       p.fixdroneCd = 0;
       continue;
     }
+    const thresh = Math.floor(cap * FIXDRONE_HP_FRAC);
     if (!p.fixdroneActive) {
+      if (hp > thresh) continue; // wait until ≤90%
       p.fixdroneActive = true;
       p.fixdroneCd = FIXDRONE_HEAL_TICKS;
       continue;
     }
+    // Active: keep repairing all the way to full HP.
     if ((p.fixdroneCd | 0) > 0) {
       p.fixdroneCd--;
       if ((p.fixdroneCd | 0) > 0) continue;
     }
-    p.hp = Math.min(cap, (p.hp | 0) + 1);
+    p.hp = Math.min(cap, hp + 1);
     p.fixdroneCd = FIXDRONE_HEAL_TICKS;
+    if ((p.hp | 0) >= cap) {
+      p.fixdroneActive = false;
+      p.fixdroneCd = 0;
+    }
   }
 }
 

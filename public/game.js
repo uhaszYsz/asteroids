@@ -12513,14 +12513,14 @@ function drawTurret3D(x, y, aimAng, color) {
   }
 }
 
-/** Craft 136 repair drones — orbit while owned; beam+heal only below 90% HP. */
+/** Craft 136 repair drones — appear at ≤90% HP, stay until healed to 100%. */
 const FIXDRONE_SPRITE_ID = 'enemy_136';
 const FIXDRONE_COUNT = 2;
 const FIXDRONE_SCALE = 1 / 3;
 const FIXDRONE_ORBIT_R = 32 * RES_SCALE;
 const FIXDRONE_HP_FRAC = 0.9;
 const FIXDRONE_ORBIT_RAD_PER_SEC = 1.35;
-/** ownerId → { ang } */
+/** ownerId → { ang, repairing } */
 const fixdroneFx = new Map();
 
 function ownerCurrentHp(ownerId) {
@@ -12551,12 +12551,18 @@ function drawFixDrones(x, y, ownerId, dt) {
     fixdroneFx.delete(ownerId);
     return;
   }
-  // Repair beam only while damaged; drones themselves always orbit when owned.
-  const healing = hp < MAX_HP * FIXDRONE_HP_FRAC;
   let st = fixdroneFx.get(ownerId);
   if (!st) {
-    st = { ang: (ownerId | 0) * 1.7 };
+    st = { ang: (ownerId | 0) * 1.7, repairing: false };
     fixdroneFx.set(ownerId, st);
+  }
+  const thresh = Math.floor(MAX_HP * FIXDRONE_HP_FRAC);
+  if (hp >= MAX_HP) st.repairing = false;
+  else if (hp <= thresh) st.repairing = true;
+  // While latched (90%→100%), keep drones out even above 90%.
+  if (!st.repairing) {
+    fixdroneFx.delete(ownerId);
+    return;
   }
   st.ang += FIXDRONE_ORBIT_RAD_PER_SEC * Math.max(0.001, dt);
 
@@ -12581,12 +12587,11 @@ function drawFixDrones(x, y, ownerId, dt) {
         { flat: false }
       );
     } else {
-      // Fallback so ownership is obvious even if craft 136 tex is still loading.
       const r = 5 * RES_SCALE;
       drawThickSegment(dxPos - r, dyPos, dxPos + r, dyPos, 2, COL.powerDrone, 0.9, true);
       drawThickSegment(dxPos, dyPos - r, dxPos, dyPos + r, 2, COL.powerDrone, 0.9, true);
     }
-    if (healing) {
+    if (hp < MAX_HP) {
       const inset = 6 * RES_SCALE;
       const bx = x + Math.cos(face + Math.PI) * inset;
       const by = y + Math.sin(face + Math.PI) * inset;
