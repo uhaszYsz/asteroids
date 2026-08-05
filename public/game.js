@@ -17084,8 +17084,8 @@ function enemyWanderSpeedOf(e) {
 }
 
 function enemyTurnMaxOf(e) {
-  // Match server: common1 uses worm-rocket homing (°/tick).
-  if (e && e.kind === 'common1') return (2 * Math.PI) / 180;
+  // Match server: common1 uses worm-rocket homing +30% (°/tick).
+  if (e && e.kind === 'common1') return (2 * 1.3 * Math.PI) / 180;
   let t = ENEMY_TURN_MAX;
   if (e && e.kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) {
     t *= 2;

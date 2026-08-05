@@ -475,9 +475,9 @@ function enemySpeed(e) {
 }
 
 function enemyTurnMax(e) {
-  // common1: same turn rate as worm homing rockets (°/tick → rad/tick).
+  // common1: worm-rocket homing +30% (°/tick → rad/tick).
   if (e && e.kind === 'common1') {
-    return (ENEMY_WORM_ROCKET.homing * Math.PI) / 180;
+    return (ENEMY_COMMON1_HOMING * Math.PI) / 180;
   }
   let t = ENEMY_TURN_MAX;
   if (wormIsShotgunRush(e)) t *= 2;
