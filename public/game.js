@@ -13267,8 +13267,9 @@ let shopPreviewSlots = [];
 const SHOP_PREV_LOGIC = 112;
 /** Half of previous shop mesh scale so previews fit inside square cells. */
 const SHOP_PREV_SCALE = 2.6;
-/** Equipped loadout preview — same mesh fit as catalog (CSS window is larger). */
-const SHOP_EQUIPPED_PREV_SCALE = SHOP_PREV_SCALE;
+/** Equipped: bigger mesh + matching larger render box so it does not clip. */
+const SHOP_EQUIPPED_PREV_SCALE = SHOP_PREV_SCALE * 1.55;
+const SHOP_EQUIPPED_LOGIC = Math.round(SHOP_PREV_LOGIC * 1.55);
 
 const soloShopEl = document.getElementById('solo-shop');
 const ssWaveEl = document.getElementById('ss-wave');
@@ -13306,8 +13307,8 @@ function attachShopPreview(row, kind, name, seedId, opts) {
   const big = !!(opts && opts.big);
   const c = document.createElement('canvas');
   c.className = 'ss-preview';
-  c.width = big ? 160 : 96;
-  c.height = big ? 160 : 96;
+  c.width = big ? 192 : 96;
+  c.height = big ? 192 : 96;
   const ctx = c.getContext('2d');
   row.appendChild(c);
   shopPreviewSlots.push({ canvas: c, ctx, kind, name, id: seedId | 0, big });
@@ -13324,9 +13325,10 @@ function attachShopChipPreview(chip, name, seedId) {
   return c;
 }
 
-function clearShopPreviewRegion() {
+function clearShopPreviewRegion(logic) {
+  const L = logic > 0 ? logic : SHOP_PREV_LOGIC;
   const rs = canvas.width / W;
-  const fb = Math.max(1, Math.round(SHOP_PREV_LOGIC * rs));
+  const fb = Math.max(1, Math.round(L * rs));
   gl.enable(gl.SCISSOR_TEST);
   gl.scissor(0, canvas.height - fb, fb, fb);
   gl.clearColor(0.039, 0.071, 0.094, 1);
@@ -13345,14 +13347,14 @@ function blitShopPreview(slot, fb) {
 
 function updateShopPreviews() {
   if (!soloShopOpen || !shopPreviewSlots.length) return;
-  const cx = SHOP_PREV_LOGIC * 0.5;
-  const cy = SHOP_PREV_LOGIC * 0.5;
   _shopVisScale = SHOP_PREV_SCALE;
   try {
     for (let i = 0; i < shopPreviewSlots.length; i++) {
       const slot = shopPreviewSlots[i];
-      const fb = clearShopPreviewRegion();
-      // Always render at full shop mesh scale; CSS shrinks the canvas (keeps it sharp).
+      const logic = slot.big ? SHOP_EQUIPPED_LOGIC : SHOP_PREV_LOGIC;
+      const cx = logic * 0.5;
+      const cy = logic * 0.5;
+      const fb = clearShopPreviewRegion(logic);
       _shopVisScale = slot.big ? SHOP_EQUIPPED_PREV_SCALE : SHOP_PREV_SCALE;
       if (slot.kind === 'powerup') {
         drawPowerupPickup({ powerup: slot.name, id: slot.id }, cx, cy, 0, 1);
