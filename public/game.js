@@ -13259,8 +13259,9 @@ function updateShopPreviews() {
     for (let i = 0; i < shopPreviewSlots.length; i++) {
       const slot = shopPreviewSlots[i];
       const fb = clearShopPreviewRegion();
-      // Shop previews: half scale so weapon/vital/powerup art fits the tighter cards.
-      _shopVisScale = SHOP_PREV_SCALE * 0.5;
+      // Catalog cards stay compact; loadout preview uses full shop scale.
+      const equipped = !!(slot.canvas && slot.canvas.closest && slot.canvas.closest('.ss-equipped'));
+      _shopVisScale = equipped ? SHOP_PREV_SCALE : SHOP_PREV_SCALE * 0.5;
       if (slot.kind === 'powerup') {
         drawPowerupPickup({ powerup: slot.name, id: slot.id }, cx, cy, 0, 1);
       } else {
