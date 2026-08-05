@@ -961,6 +961,11 @@ const CVARS = {
     def: 0,
     help: 'Draw collision hitboxes (0/1). Asteroids = filled poly, players = dual circles, enemies = radius circle, bullets = solid red circles.'
   },
+  cl_touch: {
+    value: 1,
+    def: 1,
+    help: '1 = show on-screen touch controls (left/right turn + tap empty to shoot). 0 = hide.'
+  },
   cl_server_pose: {
     value: 0,
     def: 0,
@@ -1250,6 +1255,7 @@ function resetAllClCvars() {
   } catch (_) { /* ignore */ }
   syncSettingsBakeQualityUi();
   invalidateGridBake();
+  syncTouchControls();
 }
 
 function setCvar(name, raw) {
@@ -1282,9 +1288,11 @@ function setCvar(name, raw) {
   if (name === 'cl_bg_layer' || name === 'cl_bg_dir_invert'
     || name === 'cl_ast_outline_tex' || name === 'cl_ast_face_tex'
     || name === 'cl_ast_hue_tint'
-    || name === 'cl_grid_aliasing') {
+    || name === 'cl_grid_aliasing'
+    || name === 'cl_touch') {
     c.value = (n | 0) !== 0 ? 1 : 0;
   }
+  if (name === 'cl_touch') syncTouchControls();
   if (name === 'sv_send_asteroids') syncGetAsteroidsCvar();
   if (name === 'sv_predict_shoot_step' || name === 'sv_predict_shoot_angle') {
     syncPredictShootCvars();
@@ -11714,12 +11722,18 @@ const keys = {};
 let spaceLatch = false;
 let enterLatch = false;
 let shootPulse = false;
+/** On-screen touch: hold left/right turn; empty-area press fires (and holds for laser/rail). */
+const touchCtl = { left: false, right: false, fire: false };
+const touchPointers = new Map();
 
-function turnLeft() { return keys.ArrowLeft || keys.KeyA; }
-function turnRight() { return keys.ArrowRight || keys.KeyD; }
+function turnLeft() { return keys.ArrowLeft || keys.KeyA || touchCtl.left; }
+function turnRight() { return keys.ArrowRight || keys.KeyD || touchCtl.right; }
 function thrustUp() { return keys.ArrowUp || keys.KeyW; }
 function precisionTurn() {
   return keys.ArrowDown || keys.KeyS || keys.ShiftLeft || keys.ShiftRight;
+}
+function shootHeld() {
+  return !!(keys.Space || keys.Enter || spaceLatch || enterLatch || touchCtl.fire);
 }
 
 const GAME_KEYS = new Set([
@@ -11951,7 +11965,7 @@ const thrustBeams = [];
 const RAIL_CHARGE_DISC_R = 10 * RES_SCALE;
 
 function laserKeyHeld() {
-  return !!(keys.Space || keys.Enter);
+  return !!(keys.Space || keys.Enter || touchCtl.fire);
 }
 
 /** Arm local laser VFX for the current burst (ends with localShoot.bursting). */
@@ -12220,6 +12234,102 @@ addEventListener('keyup', e => {
   if (e.code === 'Space') spaceLatch = false;
   if (e.code === 'Enter') enterLatch = false;
 });
+
+function clearTouchPointers() {
+  touchPointers.clear();
+  touchCtl.left = false;
+  touchCtl.right = false;
+  touchCtl.fire = false;
+  const leftBtn = document.getElementById('touch-left');
+  const rightBtn = document.getElementById('touch-right');
+  if (leftBtn) leftBtn.classList.remove('active');
+  if (rightBtn) rightBtn.classList.remove('active');
+}
+
+function syncTouchCtlFromPointers() {
+  let left = false;
+  let right = false;
+  let fire = false;
+  for (const role of touchPointers.values()) {
+    if (role === 'left') left = true;
+    else if (role === 'right') right = true;
+    else if (role === 'fire') fire = true;
+  }
+  touchCtl.left = left;
+  touchCtl.right = right;
+  touchCtl.fire = fire;
+  const leftBtn = document.getElementById('touch-left');
+  const rightBtn = document.getElementById('touch-right');
+  if (leftBtn) leftBtn.classList.toggle('active', left);
+  if (rightBtn) rightBtn.classList.toggle('active', right);
+}
+
+function syncTouchControls() {
+  const el = document.getElementById('touch-controls');
+  if (!el) return;
+  const show = inGame && (cv('cl_touch') | 0) !== 0;
+  el.classList.toggle('visible', show);
+  el.setAttribute('aria-hidden', show ? 'false' : 'true');
+  if (!show) clearTouchPointers();
+}
+
+function bindTouchControls() {
+  const root = document.getElementById('touch-controls');
+  const leftBtn = document.getElementById('touch-left');
+  const rightBtn = document.getElementById('touch-right');
+  if (!root || !leftBtn || !rightBtn) return;
+
+  function bindHold(btn, role) {
+    const onDown = (e) => {
+      if (!(cv('cl_touch') | 0) || !inGame) return;
+      if (e.button != null && e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      touchPointers.set(e.pointerId, role);
+      syncTouchCtlFromPointers();
+      try { btn.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    };
+    const onUp = (e) => {
+      if (!touchPointers.has(e.pointerId)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      touchPointers.delete(e.pointerId);
+      syncTouchCtlFromPointers();
+      try { btn.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    };
+    btn.addEventListener('pointerdown', onDown);
+    btn.addEventListener('pointerup', onUp);
+    btn.addEventListener('pointercancel', onUp);
+    btn.addEventListener('lostpointercapture', onUp);
+  }
+  bindHold(leftBtn, 'left');
+  bindHold(rightBtn, 'right');
+
+  // Empty canvas tap/hold → shoot (turn buttons stopPropagation so they don't fire).
+  const onFireDown = (e) => {
+    if (!(cv('cl_touch') | 0) || !inGame) return;
+    if (e.button != null && e.button !== 0) return;
+    if (e.target !== canvas) return;
+    if (touchPointers.has(e.pointerId)) return;
+    e.preventDefault();
+    touchPointers.set(e.pointerId, 'fire');
+    syncTouchCtlFromPointers();
+    try { canvas.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+    triggerShoot();
+  };
+  const onFireUp = (e) => {
+    if (touchPointers.get(e.pointerId) !== 'fire') return;
+    touchPointers.delete(e.pointerId);
+    syncTouchCtlFromPointers();
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+  };
+  canvas.addEventListener('pointerdown', onFireDown, { passive: false });
+  canvas.addEventListener('pointerup', onFireUp);
+  canvas.addEventListener('pointercancel', onFireUp);
+  canvas.addEventListener('lostpointercapture', onFireUp);
+}
+
+// Bound after `inGame` exists (see below).
 
 const player = {
   x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, hp: 100, av: 0,
@@ -12631,6 +12741,8 @@ function leadInterceptPoint(ox, oy, tx, ty, tvx, tvy, speed) {
 let myId = null;
 let connected = false; // websocket to dedicated server (lobby)
 let inGame = false;    // matched into a room
+bindTouchControls();
+syncTouchControls();
 /** Client demo recorder / playback (`record` / `play` console cmds). */
 let demoRec = null;
 let demoPlay = null;
@@ -15486,6 +15598,7 @@ function clearStuckInputKeys() {
   spaceLatch = false;
   enterLatch = false;
   shootPulse = false;
+  clearTouchPointers();
 }
 
 let lastWorldSyncAt = 0;
@@ -15919,6 +16032,8 @@ function resetMatchState() {
   deathFreezeAt = 0;
   clearMatchPause();
   setRejoinOffer(null);
+  clearTouchPointers();
+  syncTouchControls();
   roomId = null;
   myId = null;
   matchLive = true;
@@ -20127,7 +20242,7 @@ function predictTick(forceShoot) {
   // Dual predict+snap was the shake/jump fight (esp. early thrust).
   // With sv_ping lag-sim, fall through to online-style client prediction so cl_server_pose can diverge.
   if (isOfflineLocalPlay() && !offlineLagSimActive()) {
-    if ((spaceLatch || enterLatch) && !localShoot.bursting && localShoot.reloadLeft === 0 &&
+    if (shootHeld() && !localShoot.bursting && localShoot.reloadLeft === 0 &&
         localShoot.shootAmmo > 0 && (localShoot.shootCd | 0) <= 0) {
       shootPulse = true;
     }
@@ -20153,7 +20268,7 @@ function predictTick(forceShoot) {
   }
 
   // Held shoot: re-pulse when a new burst can start (railgun after cooldown, post-reload, etc.).
-  if ((spaceLatch || enterLatch) && !localShoot.bursting && localShoot.reloadLeft === 0 &&
+  if (shootHeld() && !localShoot.bursting && localShoot.reloadLeft === 0 &&
       localShoot.shootAmmo > 0 && (localShoot.shootCd | 0) <= 0) {
     shootPulse = true;
   }
@@ -20870,6 +20985,7 @@ function enterGameFromWelcome(msg) {
   myId = msg.id;
   roomId = msg.room != null ? msg.room : null;
   inGame = true;
+  syncTouchControls();
   gridBakeDirty = true;
   deathSpectating = false;
   deathSeq = null;
@@ -21451,6 +21567,8 @@ function handleWsMessage(e) {
       clearMatchPause();
       setRejoinOffer(null);
       inGame = false;
+      clearTouchPointers();
+      syncTouchControls();
       gridBakeDirty = true;
       refreshGridStaticPins();
       updateHud();
@@ -24060,6 +24178,7 @@ function demoBeginPlayData(data, displayName) {
   };
   myId = demoPlay.myId;
   inGame = true;
+  syncTouchControls();
   gridBakeDirty = true;
   predReady = true;
   matchLive = true;

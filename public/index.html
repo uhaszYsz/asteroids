@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>Asteroids</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -37,7 +38,41 @@
       image-rendering: pixelated;
       image-rendering: crisp-edges;
       /* width/height set in JS — integer scale so 1px grid lines stay even */
+      touch-action: none;
     }
+    #touch-controls {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #touch-controls.visible { display: block; }
+    .touch-btn {
+      position: absolute;
+      bottom: max(28px, env(safe-area-inset-bottom, 0px) + 16px);
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      border: 2px solid rgba(180, 220, 255, 0.45);
+      background: rgba(8, 18, 36, 0.42);
+      color: rgba(210, 235, 255, 0.85);
+      font: 700 28px Orbitron, Consolas, monospace;
+      letter-spacing: 0.04em;
+      pointer-events: auto;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+      box-shadow: inset 0 0 18px rgba(120, 180, 255, 0.12);
+    }
+    .touch-btn:active, .touch-btn.active {
+      background: rgba(40, 90, 160, 0.55);
+      border-color: rgba(220, 240, 255, 0.85);
+      color: #fff;
+    }
+    #touch-left { left: max(18px, env(safe-area-inset-left, 0px) + 12px); }
+    #touch-right { right: max(18px, env(safe-area-inset-right, 0px) + 12px); }
     #status {
       position: fixed; left: 50%; top: 12px; transform: translateX(-50%);
       color: #aaa; font: 12px monospace; pointer-events: none; z-index: 2;
@@ -2283,10 +2318,14 @@
   <button id="cancel-btn" type="button">Cancel</button>
 </div>
 <canvas id="c"></canvas>
+<div id="touch-controls" aria-hidden="true">
+  <button type="button" id="touch-left" class="touch-btn" aria-label="Turn left">◀</button>
+  <button type="button" id="touch-right" class="touch-btn" aria-label="Turn right">▶</button>
+</div>
 <script src="lib/bassoonplayer.js"></script>
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=85"></script>
-<script src="game.js?v=949"></script>
+<script src="game.js?v=950"></script>
 </body>
 </html>
