@@ -17384,14 +17384,17 @@ function enemyAgeTicks(e) {
   return Math.max(0, (now - e.spawnSt) / 1000 * TPS);
 }
 
-/** One client tick of destinationSmooth (mirrors server; no random retarget). */
-function stepEnemyDestinationSmoothLocal(state) {
+/** One client tick of destinationSmooth (mirrors server; no random retarget).
+ *  opts.noArriveSnap: match server stepEnemyMovement — stop without teleporting onto tx/ty. */
+function stepEnemyDestinationSmoothLocal(state, opts) {
   const dx = state.tx - state.x;
   const dy = state.ty - state.y;
   const dist = Math.hypot(dx, dy);
   if (dist <= ENEMY_ARRIVE_R) {
-    state.x = state.tx;
-    state.y = state.ty;
+    if (!(opts && opts.noArriveSnap)) {
+      state.x = state.tx;
+      state.y = state.ty;
+    }
     state.vx = 0;
     state.vy = 0;
     return;
@@ -17414,21 +17417,9 @@ function stepEnemyDestinationSmoothLocal(state) {
   }
 }
 
-/** Live chase point for common1 (mirrors server soloHumanTarget). */
-function common1ChaseTarget() {
-  if (myId != null && player && (player.hp | 0) > 0) {
-    const me = localView();
-    return { x: me.x, y: me.y };
-  }
-  for (const r of remotes.values()) {
-    if ((r.hp | 0) <= 0) continue;
-    const v = remoteView(r);
-    return { x: v.x, y: v.y };
-  }
-  return null;
-}
-
-/** Pose from last ef/eu/es. destinationSmooth simulates ticks; destination dead-reckons. */
+/** Pose from last ef/eu/es. destinationSmooth simulates ticks; destination dead-reckons.
+ *  common1: do NOT re-home toward the live player — that fights server snaps
+ *  (server chased where you were each past tick; live replay aims where you are now). */
 function enemyAt(e) {
   if (enemyMoveTypeOf(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
     const state = {
@@ -17445,15 +17436,10 @@ function enemyAt(e) {
       wormPhase: e.wormPhase | 0,
       enteredPlay: !!e.enteredPlay
     };
-    const chase = e.kind === 'common1' ? common1ChaseTarget() : null;
+    const chase = e.kind === 'common1';
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));
-    for (let i = 0; i < steps; i++) {
-      if (chase) {
-        state.tx = chase.x;
-        state.ty = chase.y;
-      }
-      stepEnemyDestinationSmoothLocal(state);
-    }
+    const stepOpts = chase ? { noArriveSnap: true } : null;
+    for (let i = 0; i < steps; i++) stepEnemyDestinationSmoothLocal(state, stepOpts);
     return {
       x: state.x,
       y: state.y,

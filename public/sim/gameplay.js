@@ -1591,6 +1591,7 @@ function updateEnemies(room) {
   const target = soloHumanTarget(room);
   pushSoloAimHist(room, target);
   let wormHolding = false;
+  let common1Chase = false;
 
   for (let i = room.enemies.length - 1; i >= 0; i--) {
     const e = room.enemies[i];
@@ -1633,6 +1634,7 @@ function updateEnemies(room) {
       }
       stepEnemyMovement(e);
       enemyTryFire(room, e);
+      common1Chase = true;
       continue;
     }
 
@@ -1649,9 +1651,9 @@ function updateEnemies(room) {
     enemyTryFire(room, e);
   }
 
-  // Worm aim turns every tick — enemy-only snap every frame while holding.
+  // Worm aim / common1 chase: pose snap every tick so client predict can't drift.
   // Full field snap (enemies+asteroids+pickups) is tickWorldPoseSnap (~2 Hz).
-  if (wormHolding) emitEnemySnap(room, { field: false });
+  if (wormHolding || common1Chase) emitEnemySnap(room, { field: false });
 }
 
 function damageEnemy(room, e, dmg) {
