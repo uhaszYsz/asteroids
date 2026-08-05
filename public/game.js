@@ -5295,7 +5295,7 @@ function pushShipDebrisPiece(x, y, frame, eVx, eVy, cx, cy, opts) {
 function spawnEnemyDebris(e, x, y) {
   if (!e) return;
   const kind = e.kind || 'common';
-  if (kind === 'common') return;
+  if (isCommonKind(kind)) return;
   if (kind !== 'spinner' && kind !== 'ufo' && kind !== 'worm' && kind !== 'carrier') return;
 
   const cx = x;
@@ -17014,6 +17014,7 @@ const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 /** Match server ENEMY_R for laser/hitscan. */
 const ENEMY_R = {
   common: 6 * RES_SCALE,
+  common1: 6 * RES_SCALE,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
@@ -17053,6 +17054,8 @@ function enemyWanderSpeedOf(e) {
 }
 
 function enemyTurnMaxOf(e) {
+  // Match server: common1 uses worm-rocket homing (°/tick).
+  if (e && e.kind === 'common1') return (2 * Math.PI) / 180;
   let t = ENEMY_TURN_MAX;
   if (e && e.kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) {
     t *= 2;
@@ -17162,7 +17165,12 @@ function parseEnemyKind(raw) {
   if (raw === 'carrier') return 'carrier';
   if (raw === 'worm') return 'worm';
   if (raw === 'spinner') return 'spinner';
+  if (raw === 'common1') return 'common1';
   return 'common';
+}
+
+function isCommonKind(kind) {
+  return kind === 'common' || kind === 'common1';
 }
 
 function unpackEnemy(row) {
@@ -17325,7 +17333,7 @@ function removeEnemy(id, x, y, silent) {
     const py = y != null ? y : pose.y;
     const r = enemyHitR(e);
     const size = e.kind === 'carrier' ? 'medium' : 'small';
-    if ((e.kind || 'common') === 'common') spawnCommonEnemyCorpse(e, px, py, deathBank);
+    if ((e.kind || 'common') === 'common' || e.kind === 'common1') spawnCommonEnemyCorpse(e, px, py, deathBank);
     spawnEnemyDebris(e, px, py);
     emitAsteroidBurst(px, py, r, size, {
       sfx: SFX.enemyExplosion,
@@ -18361,7 +18369,7 @@ function drawEnemyCommonCharges() {
       continue;
     }
     const kind = ch.kind || e.kind;
-    if (kind !== 'common' && kind !== 'ufo' && kind !== 'worm') {
+    if (kind !== 'common' && kind !== 'common1' && kind !== 'ufo' && kind !== 'worm') {
       clearEnemyCharge(id);
       continue;
     }
@@ -18369,7 +18377,7 @@ function drawEnemyCommonCharges() {
       clearEnemyCharge(id);
       continue;
     }
-    if (kind === 'common' && e.kind !== 'common') {
+    if (isCommonKind(kind) && !isCommonKind(e.kind)) {
       clearEnemyCharge(id);
       continue;
     }
@@ -18440,7 +18448,10 @@ function drawEnemyCommonCharges() {
     }
 
     for (let g = 0; g < ENEMY_COMMON_GUNS.length; g++) {
-      const gun = ENEMY_COMMON_GUNS[g];
+      const gun = (e.kind === 'common1')
+        ? [7 * RES_SCALE, 0, 0]
+        : ENEMY_COMMON_GUNS[g];
+      if (e.kind === 'common1' && g > 0) break;
       let w = localToWorldBanked(gun[0], gun[1], gun[2], p.x, p.y, p.angle, bank);
       if (shake > 0) {
         const ph = now * 0.055 + id * 2.1 + g * 1.3;

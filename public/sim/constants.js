@@ -346,6 +346,10 @@ const ENEMY_UFO_ROCKET_SPEED = ENEMY_BULLET_SPEED * 0.85;
 const ENEMY_COMMON_BULLET_SPEED = ENEMY_BULLET_SPEED * 0.5;
 const ENEMY_COMMON_BULLET_DMG = 45;
 const ENEMY_COMMON_RELOAD = Math.round(2.5 * TPS);
+/** common1: single shot, 15% faster than common spread pellets. */
+const ENEMY_COMMON1_BULLET_SPEED = ENEMY_COMMON_BULLET_SPEED * 1.15;
+/** common1: 40% shorter gap between shots. */
+const ENEMY_COMMON1_RELOAD = Math.max(1, Math.round(ENEMY_COMMON_RELOAD * 0.6));
 /** Pre-shot telegraph length for commons (client charge spheres). */
 const ENEMY_COMMON_CHARGE = TPS;
 const ENEMY_UFO_RELOAD = Math.round(3.5 * TPS);
@@ -370,6 +374,7 @@ const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 const ENEMY_SNAP_INTERVAL = Math.round(0.5 * TPS);
 const ENEMY_R = {
   common: 6 * RES_SCALE,
+  common1: 6 * RES_SCALE,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
@@ -399,6 +404,7 @@ const ENEMY_WORM_HIT_WID = 0.7 * 0.6 * 2
 ENEMY_R.worm = Math.hypot(ENEMY_WORM_HIT_LEN * 0.5, ENEMY_WORM_HIT_WID * 0.5);
 const ENEMY_HP = {
   common: 95,
+  common1: 95,
   ufo: 300,
   carrier: 90,
   worm: 1000,

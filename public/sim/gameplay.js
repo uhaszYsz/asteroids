@@ -475,9 +475,17 @@ function enemySpeed(e) {
 }
 
 function enemyTurnMax(e) {
+  // common1: same turn rate as worm homing rockets (°/tick → rad/tick).
+  if (e && e.kind === 'common1') {
+    return (ENEMY_WORM_ROCKET.homing * Math.PI) / 180;
+  }
   let t = ENEMY_TURN_MAX;
   if (wormIsShotgunRush(e)) t *= 2;
   return t;
+}
+
+function isCommonKind(kind) {
+  return kind === 'common' || kind === 'common1';
 }
 
 function enemyMoveType(e) {
@@ -606,7 +614,7 @@ function tickWorldPoseSnap(room) {
 
 /** Common / UFO / worm about to fire — charge telegraph for clients. */
 function emitEnemyCharge(room, e, opts) {
-  if (!e || (e.kind !== 'common' && e.kind !== 'ufo' && e.kind !== 'worm')) return;
+  if (!e || (!isCommonKind(e.kind) && e.kind !== 'ufo' && e.kind !== 'worm')) return;
   const ms = e.kind === 'ufo'
     ? Math.round((ENEMY_UFO_CHARGE * 1000) / TPS)
     : e.kind === 'worm'
@@ -682,7 +690,8 @@ function placeEnemyOffscreenEntry(e) {
 
 function makeEnemy(kind, wave, weapon) {
   let k = 'common';
-  if (kind === 'ufo') k = 'ufo';
+  if (kind === 'common1') k = 'common1';
+  else if (kind === 'ufo') k = 'ufo';
   else if (kind === 'carrier') k = 'carrier';
   else if (kind === 'worm') k = 'worm';
   else if (kind === 'spinner') k = 'spinner';
@@ -717,7 +726,8 @@ function makeEnemy(kind, wave, weapon) {
     railChargeLeft: 0,
     lastLaserAng: null,
     enteredPlay: false,
-    speed: randomEnemyWanderSpeed(),
+    // common1: cruise at worm-rocket max speed; others roll wander band.
+    speed: k === 'common1' ? ENEMY_WORM_ROCKET.maxSpeed : randomEnemyWanderSpeed(),
     // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
     // wormAtk cycles 0=laser, 1=rockets, 2=shotgun.
     wormPhase: 0,
@@ -764,7 +774,7 @@ function enemyIsSpawned(e) {
 function countCommonSlots(room) {
   let n = 0;
   for (const e of room.enemies || []) {
-    if (e.kind !== 'common' || e.queued) continue;
+    if (!isCommonKind(e.kind) || e.queued) continue;
     n++;
   }
   return n;
@@ -774,7 +784,7 @@ function countCommonSlots(room) {
 function tryPromoteQueuedCommons(room) {
   if (!room.enemies) return;
   while (countCommonSlots(room) < MAX_COMMON_ON_FIELD) {
-    const next = room.enemies.find(e => e.kind === 'common' && e.queued);
+    const next = room.enemies.find(e => isCommonKind(e.kind) && e.queued);
     if (!next) break;
     next.queued = false;
     next.appearLeft = COMMON_QUEUE_SPAWN_DELAY;
@@ -814,7 +824,8 @@ function spawnSoloWaveEnemies(room, wave) {
   }
 
   for (let i = 0; i < commonN; i++) {
-    const e = makeEnemy('common', wave);
+    const commonKind = Math.random() < 0.5 ? 'common1' : 'common';
+    const e = makeEnemy(commonKind, wave);
     e.id = room.nextEnemyId++;
     if (i < MAX_COMMON_ON_FIELD) {
       e.queued = false;
@@ -1492,6 +1503,11 @@ function enemyTryFire(room, e) {
   // looked like a charge with no bullets.
   const base = (e.dir != null && Number.isFinite(e.dir)) ? e.dir
     : (Number.isFinite(e.angle) ? e.angle : 0);
+  if (e.kind === 'common1') {
+    fireEnemyLineBullet(room, e, base, ENEMY_COMMON1_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
+    e.fireCd = ENEMY_COMMON1_RELOAD;
+    return;
+  }
   const spread = (15 * Math.PI) / 180;
   fireEnemyLineBullet(room, e, base, ENEMY_COMMON_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
   fireEnemyLineBullet(room, e, base - spread, ENEMY_COMMON_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
@@ -1590,7 +1606,7 @@ function updateEnemies(room) {
     }
     if ((e.fireCd | 0) > 0) e.fireCd--;
     // Pre-shot charge telegraph (commons 1s, UFO turrets 0.5s).
-    if (e.kind === 'common' && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
+    if (isCommonKind(e.kind) && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
       emitEnemyCharge(room, e);
     }
     if (e.kind === 'ufo' && (e.fireCd | 0) === ENEMY_UFO_CHARGE) {
@@ -1634,7 +1650,7 @@ function damageEnemy(room, e, dmg) {
     emitEnemyHp(room, e);
     return;
   }
-  const wasCommon = e.kind === 'common';
+  const wasCommon = isCommonKind(e.kind);
   emitEnemyDead(room, e, false);
   const idx = room.enemies.indexOf(e);
   if (idx >= 0) room.enemies.splice(idx, 1);
@@ -2831,7 +2847,7 @@ function handleAdminSpawn(ws, kindRaw) {
     emitAsteroidFire(room, a);
     return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
   }
-  if (kind === 'common' || kind === 'ufo' || kind === 'worm' || kind === 'spinner') {
+  if (kind === 'common' || kind === 'common1' || kind === 'ufo' || kind === 'worm' || kind === 'spinner') {
     if (!room.practice) return { ok: 0, err: 'enemies only in solo/coop wave rooms' };
     if (!room.enemies) room.enemies = [];
     if (!room.nextEnemyId) room.nextEnemyId = 1;
@@ -2845,7 +2861,7 @@ function handleAdminSpawn(ws, kindRaw) {
   }
   return {
     ok: 0,
-    err: 'usage: spawn big|medium|small|huge|meteor|common|ufo|worm|spinner'
+    err: 'usage: spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner'
   };
 }
 
