@@ -737,7 +737,11 @@ function makeEnemy(kind, wave, weapon) {
     wormAtk: 0,
     spinAng: 0,
     astCheckLeft: 0,
-    lastHitBy: 0
+    lastHitBy: 0,
+    // common1 post-shot flank (deg peak, ticks remaining / duration).
+    flankDeg: 0,
+    flankLeft: 0,
+    flankDur: 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -1532,6 +1536,10 @@ function enemyTryFire(room, e) {
   if (e.kind === 'common1') {
     fireEnemyLineBullet(room, e, base, ENEMY_COMMON1_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
     e.fireCd = ENEMY_COMMON1_RELOAD;
+    // Start flank immediately: random ±FLANK_DEG, half-sine over 85% of reload.
+    e.flankDeg = -ENEMY_COMMON1_FLANK_DEG + Math.random() * (ENEMY_COMMON1_FLANK_DEG * 2);
+    e.flankDur = Math.max(1, Math.round(ENEMY_COMMON1_RELOAD * ENEMY_COMMON1_FLANK_RELOAD_FRAC));
+    e.flankLeft = e.flankDur;
     return;
   }
   const spread = (15 * Math.PI) / 180;
@@ -1589,9 +1597,25 @@ function stepEnemyMovement(e) {
   const chaseNoStop = e.kind === 'common1';
   if (!chaseNoStop && dist <= ENEMY_ARRIVE_R) return true;
 
-  const desired = dist > 1e-6
+  let desired = dist > 1e-6
     ? Math.atan2(dy, dx)
     : (e.dir != null && Number.isFinite(e.dir) ? e.dir : (e.angle || 0));
+
+  // common1: after shot, ease heading by ±flankDeg along a half-sine, then back to player.
+  if (e.kind === 'common1') {
+    const left = e.flankLeft | 0;
+    const dur = e.flankDur | 0;
+    const deg = +e.flankDeg || 0;
+    if (left > 0 && dur > 0 && deg !== 0) {
+      const progress = 1 - left / dur; // 0 right after shot → 1 at flank end
+      desired += (deg * Math.PI / 180) * Math.sin(Math.PI * progress);
+      e.flankLeft = left - 1;
+    } else {
+      e.flankLeft = 0;
+      e.flankDeg = 0;
+    }
+  }
+
   const carrierLocked = e.kind === 'carrier' && (e.bursting || (e.railChargeLeft | 0) > 0);
 
   if (enemyMoveType(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {

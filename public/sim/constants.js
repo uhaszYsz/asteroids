@@ -322,6 +322,9 @@ const ENEMY_COMMON_RELOAD = Math.round(2.5 * TPS);
 const ENEMY_COMMON1_BULLET_SPEED = ENEMY_COMMON_BULLET_SPEED * 1.15 * 1.1;
 /** common1: 40% shorter gap between shots. */
 const ENEMY_COMMON1_RELOAD = Math.max(1, Math.round(ENEMY_COMMON_RELOAD * 0.6));
+/** common1 post-shot flank: peak heading offset (±deg), half-sine over this fraction of reload. */
+const ENEMY_COMMON1_FLANK_DEG = 25;
+const ENEMY_COMMON1_FLANK_RELOAD_FRAC = 0.85;
 /** Pre-shot telegraph length for commons (client charge spheres). */
 const ENEMY_COMMON_CHARGE = TPS;
 const ENEMY_UFO_RELOAD = Math.round(3.5 * TPS);
