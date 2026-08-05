@@ -12513,14 +12513,14 @@ function drawTurret3D(x, y, aimAng, color) {
   }
 }
 
-/** Craft 136 repair drones — appear below 90% HP, orbit + fix beam (not laser shots). */
+/** Craft 136 repair drones — orbit while owned; beam+heal only below 90% HP. */
 const FIXDRONE_SPRITE_ID = 'enemy_136';
 const FIXDRONE_COUNT = 2;
 const FIXDRONE_SCALE = 1 / 3;
 const FIXDRONE_ORBIT_R = 32 * RES_SCALE;
 const FIXDRONE_HP_FRAC = 0.9;
 const FIXDRONE_ORBIT_RAD_PER_SEC = 1.35;
-/** ownerId → { ang, fade } */
+/** ownerId → { ang } */
 const fixdroneFx = new Map();
 
 function ownerCurrentHp(ownerId) {
@@ -12536,7 +12536,6 @@ function drawFixBeamSeg(x0, y0, x1, y1, alpha) {
   const w = Math.max(1, Math.round(2.2 * RES_SCALE));
   drawThickSegment(x0, y0, x1, y1, w, col, 0.55 * a, false);
   drawThickSegment(x0, y0, x1, y1, Math.max(1, w - 1), col, 0.85 * a, true);
-  // Soft tip sparkle on the hull end.
   const mx = x1;
   const my = y1;
   drawThickSegment(mx - 1, my, mx + 1, my, 2, col, 0.7 * a, true);
@@ -12548,46 +12547,50 @@ function drawFixDrones(x, y, ownerId, dt) {
     return;
   }
   const hp = ownerCurrentHp(ownerId);
-  const want = hp > 0 && hp < MAX_HP * FIXDRONE_HP_FRAC;
+  if (hp <= 0) {
+    fixdroneFx.delete(ownerId);
+    return;
+  }
+  // Repair beam only while damaged; drones themselves always orbit when owned.
+  const healing = hp < MAX_HP * FIXDRONE_HP_FRAC;
   let st = fixdroneFx.get(ownerId);
   if (!st) {
-    st = { ang: (ownerId | 0) * 1.7, fade: 0 };
+    st = { ang: (ownerId | 0) * 1.7 };
     fixdroneFx.set(ownerId, st);
-  }
-  const fadeRate = want ? 3.2 : 4.5;
-  st.fade = Math.max(0, Math.min(1, st.fade + (want ? 1 : -1) * fadeRate * Math.max(0.001, dt)));
-  if (st.fade < 0.01) {
-    if (!want) fixdroneFx.delete(ownerId);
-    return;
   }
   st.ang += FIXDRONE_ORBIT_RAD_PER_SEC * Math.max(0.001, dt);
 
   const opt = getShipOptionById(FIXDRONE_SPRITE_ID);
-  if (!opt || opt.kind !== 'sprite') return;
-  const fade = st.fade;
+  const canSprite = !!(opt && opt.kind === 'sprite' && opt.sprite
+    && spriteShipTexById.get(opt.sprite.id)
+    && spriteShipTexById.get(opt.sprite.id).ready);
 
   for (let i = 0; i < FIXDRONE_COUNT; i++) {
     const ang = st.ang + (i * Math.PI * 2) / FIXDRONE_COUNT;
-    // Slight radial bob so they don't look locked to a perfect circle.
     const bob = 1 + 0.06 * Math.sin(st.ang * 2.1 + i * 2.4);
     const dx = Math.cos(ang) * FIXDRONE_ORBIT_R * bob;
     const dy = Math.sin(ang) * FIXDRONE_ORBIT_R * bob;
     const dxPos = x + dx;
     const dyPos = y + dy;
-    // Nose toward ship while beaming (repair, not shooting out).
     const face = Math.atan2(y - dyPos, x - dxPos);
     const droneId = 910000 + ((ownerId | 0) * 8 + i);
-    drawSpriteShipPlane(
-      dxPos, dyPos, face, 0, droneId, dt, opt, true, COL.powerDrone,
-      0.15, FIXDRONE_SCALE, COL.powerDrone,
-      { flat: false }
-    );
-    if (want || fade > 0.2) {
-      // Beam from drone toward hull — green fix beam instead of laser shot.
+    if (canSprite) {
+      drawSpriteShipPlane(
+        dxPos, dyPos, face, 0, droneId, dt, opt, true, COL.powerDrone,
+        0.15, FIXDRONE_SCALE, COL.powerDrone,
+        { flat: false }
+      );
+    } else {
+      // Fallback so ownership is obvious even if craft 136 tex is still loading.
+      const r = 5 * RES_SCALE;
+      drawThickSegment(dxPos - r, dyPos, dxPos + r, dyPos, 2, COL.powerDrone, 0.9, true);
+      drawThickSegment(dxPos, dyPos - r, dxPos, dyPos + r, 2, COL.powerDrone, 0.9, true);
+    }
+    if (healing) {
       const inset = 6 * RES_SCALE;
       const bx = x + Math.cos(face + Math.PI) * inset;
       const by = y + Math.sin(face + Math.PI) * inset;
-      drawFixBeamSeg(dxPos, dyPos, bx, by, fade);
+      drawFixBeamSeg(dxPos, dyPos, bx, by, 1);
     }
   }
 }
