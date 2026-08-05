@@ -11118,7 +11118,7 @@ const spriteShipFS = `
     if (!spriteSolid(t)) discard;
     // Silhouette stencil: opaque sprite texels → solid player color (drawn offset).
     if (uOutline > 0.5) {
-      gl_FragColor = applyNightLit(applySpriteTipHeat(uTint), uAlpha, vWorld);
+      gl_FragColor = applyNightLit(uTint, uAlpha, vWorld);
       return;
     }
     t.rgb = remapSourceColor(t.rgb);
