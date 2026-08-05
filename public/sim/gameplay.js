@@ -398,15 +398,16 @@ function mediumAsteroidCap(room) {
  *   always 3 smalls
  *   bigs grow only on odd (no-enemy) waves: 1,1,2,2,3,3…
  *   mediums = half of bigs (cap 8)
- *   enemy waves (even): half the bigs and mediums
+ *   even enemy waves: half bigs/mediums (except worm wave 10)
+ *   wave 5 special: half bigs/mediums
  */
 function soloWaveCounts(wave) {
   const n = Math.max(1, wave | 0);
   // Odd waves add +1 big; even waves keep the previous odd count.
   let big = (n + 1) >> 1;
   let medium = Math.min(SOLO_MEDIUM_CAP, big >> 1);
-  // Even waves spawn enemies — ease asteroid pressure.
-  if (n % 2 === 0) {
+  // Ease asteroid pressure on special / normal enemy waves — not on worm wave 10.
+  if (n === 5 || (n % 2 === 0 && n !== 10)) {
     big = (big / 2) | 0;
     medium = (medium / 2) | 0;
   }
@@ -754,11 +755,11 @@ function makeEnemy(kind, wave, weapon) {
 
 /**
  * Commons only on even waves: wave 2→2, 4→4, 6→6… (odd waves: 0).
- * UFO is not planned here — rolled at spawn time (15% UFO-only wave).
+ * Specials (UFO/spinner) are milestone-only — not rolled into normal enemy waves.
+ * Worm is wave 10 only.
  */
 const MAX_COMMON_ON_FIELD = 4;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
-const UFO_WAVE_CHANCE = 0.25;
 
 function soloEnemyCounts(wave) {
   const n = Math.max(1, wave | 0);
@@ -798,24 +799,11 @@ function spawnSoloWaveEnemies(room, wave) {
   if (!room.enemies) room.enemies = [];
   if (!room.nextEnemyId) room.nextEnemyId = 1;
   const c = soloEnemyCounts(wave);
-  let commonN = c.common | 0;
+  const commonN = c.common | 0;
   const n = Math.max(1, wave | 0);
 
-  // Wave 5: worm boss — enters off-screen like other enemies.
+  // Wave 5: one random special (UFO or spinner) — no worm, no commons.
   if (n === 5) {
-    const worm = makeEnemy('worm', wave);
-    worm.id = room.nextEnemyId++;
-    worm.appearLeft = 0;
-    worm.queued = false;
-    room.enemies.push(worm);
-    emitEnemyFire(room, worm);
-  }
-
-  if (commonN <= 0) return;
-
-  // 25% special wave: one UFO or spinner (50/50), half the commons.
-  const spawnSpecial = Math.random() < UFO_WAVE_CHANCE;
-  if (spawnSpecial) {
     const specialKind = Math.random() < 0.5 ? 'spinner' : 'ufo';
     const e = makeEnemy(specialKind, wave);
     e.id = room.nextEnemyId++;
@@ -823,9 +811,23 @@ function spawnSoloWaveEnemies(room, wave) {
     e.queued = false;
     room.enemies.push(e);
     emitEnemyFire(room, e);
-    commonN = Math.max(0, (commonN / 2) | 0);
+    return;
   }
 
+  // Wave 10: worm boss only (shop opens before this wave). Full asteroid field.
+  if (n === 10) {
+    const worm = makeEnemy('worm', wave);
+    worm.id = room.nextEnemyId++;
+    worm.appearLeft = 0;
+    worm.queued = false;
+    room.enemies.push(worm);
+    emitEnemyFire(room, worm);
+    return;
+  }
+
+  if (commonN <= 0) return;
+
+  // Normal even waves: commons only (no UFO/spinner roll).
   for (let i = 0; i < commonN; i++) {
     const commonKind = Math.random() < 0.5 ? 'common1' : 'common';
     const e = makeEnemy(commonKind, wave);
