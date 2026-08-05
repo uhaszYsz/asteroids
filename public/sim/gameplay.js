@@ -726,8 +726,8 @@ function makeEnemy(kind, wave, weapon) {
     railChargeLeft: 0,
     lastLaserAng: null,
     enteredPlay: false,
-    // common1: cruise at worm-rocket max speed; others roll wander band.
-    speed: k === 'common1' ? ENEMY_WORM_ROCKET.maxSpeed : randomEnemyWanderSpeed(),
+    // common1: worm-rocket maxSpeed −20%; others roll wander band.
+    speed: k === 'common1' ? ENEMY_COMMON1_SPEED : randomEnemyWanderSpeed(),
     // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
     // wormAtk cycles 0=laser, 1=rockets, 2=shotgun.
     wormPhase: 0,
@@ -1621,6 +1621,17 @@ function updateEnemies(room) {
       e.tx = e.x;
       e.ty = e.y;
       wormCrushAsteroids(room, e);
+      enemyTryFire(room, e);
+      continue;
+    }
+
+    if (e.kind === 'common1') {
+      // Chase the player every tick (no wander waypoints).
+      if (target) {
+        e.tx = target.x;
+        e.ty = target.y;
+      }
+      stepEnemyMovement(e);
       enemyTryFire(room, e);
       continue;
     }

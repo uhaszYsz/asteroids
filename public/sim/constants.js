@@ -463,6 +463,8 @@ const ENEMY_WORM_ROCKET = {
   hp: ENEMY_ROCKET_HP,
   dmg: 30
 };
+/** common1 move speed: worm-rocket maxSpeed −20%. */
+const ENEMY_COMMON1_SPEED = ENEMY_WORM_ROCKET.maxSpeed * 0.8;
 /**
  * Worm 3rd attack — 360° line-shotgun. Per pellet: random L/W and speed.
  * Speeds are literal px/tick (same units as worm rockets).

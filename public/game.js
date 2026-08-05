@@ -17379,6 +17379,20 @@ function stepEnemyDestinationSmoothLocal(state) {
   }
 }
 
+/** Live chase point for common1 (mirrors server soloHumanTarget). */
+function common1ChaseTarget() {
+  if (myId != null && player && (player.hp | 0) > 0) {
+    const me = localView();
+    return { x: me.x, y: me.y };
+  }
+  for (const r of remotes.values()) {
+    if ((r.hp | 0) <= 0) continue;
+    const v = remoteView(r);
+    return { x: v.x, y: v.y };
+  }
+  return null;
+}
+
 /** Pose from last ef/eu/es. destinationSmooth simulates ticks; destination dead-reckons. */
 function enemyAt(e) {
   if (enemyMoveTypeOf(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
@@ -17396,8 +17410,15 @@ function enemyAt(e) {
       wormPhase: e.wormPhase | 0,
       enteredPlay: !!e.enteredPlay
     };
+    const chase = e.kind === 'common1' ? common1ChaseTarget() : null;
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));
-    for (let i = 0; i < steps; i++) stepEnemyDestinationSmoothLocal(state);
+    for (let i = 0; i < steps; i++) {
+      if (chase) {
+        state.tx = chase.x;
+        state.ty = chase.y;
+      }
+      stepEnemyDestinationSmoothLocal(state);
+    }
     return {
       x: state.x,
       y: state.y,
