@@ -142,7 +142,7 @@ function sanitizeInputFrame(frame, lastSeq, maxQueuedSeq) {
 
 /**
  * Safety-only drop when over cap. Shoot pulses merge onto next kept cmd.
- * Room tick coalesces backlog continuous keys (u/l/r) to one step — see rooms.js.
+ * Room tick applies at most one queued cmd (no multi-burn thrust stack).
  */
 function trimInputQueue(pl, maxLen) {
   const cap = Math.max(1, maxLen | 0);

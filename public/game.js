@@ -15168,8 +15168,8 @@ function clientPredictsMotion() {
 
 /**
  * How many unacked input seqs we may have in flight.
- * Server burns the queue in-order each tick, so this only covers hitch bursts
- * between ticks — not a sticky delay budget.
+ * Server applies one cmd per tick (backlog drains over time), so this caps
+ * how deep the queue may grow during hitch bursts.
  */
 function maxUnackedInputs() {
   if (isOfflineLocalPlay() && !offlineLagSimActive()) return 12;

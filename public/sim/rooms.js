@@ -14,39 +14,6 @@ function takePlayerInput(p) {
   }
 }
 
-/**
- * Jitter bursts pile cmds into one room tick. Continuous keys (u/l/r/sh) must
- * not stack N× thrust/turn — collapse to one cmd with max(OR) hold bits.
- * Shoot pulses merge onto that single cmd so they are not lost.
- */
-function coalescePlayerInputQueue(p) {
-  const q = p.inputQueue;
-  if (!q || q.length <= 1) return;
-  let u = 0, l = 0, r = 0, sh = 0, sp = 0;
-  let last = null;
-  while (q.length) {
-    last = q.shift();
-    if (last.u) u = 1;
-    if (last.l) l = 1;
-    if (last.r) r = 1;
-    if (last.sh) sh = 1;
-    if (last.sp) sp = 1;
-  }
-  // Both turn dirs across the burst → keep the newest frame's exclusive pick.
-  if (l && r) {
-    l = last.l ? 1 : 0;
-    r = last.r ? 1 : 0;
-  }
-  q.push({
-    seq: last.seq,
-    l,
-    r,
-    u,
-    sp,
-    sh
-  });
-}
-
 /** Drain queued cmds for ack/seq only (pause / death / frozen) — no movement. */
 function drainPlayerInputQueue(p) {
   while (p.inputQueue.length) {
@@ -57,8 +24,10 @@ function drainPlayerInputQueue(p) {
 }
 
 /**
- * One ship step per room tick. Backlog is coalesced so thrust/turn apply at
- * most once (max hold bits); empty queue → one held step.
+ * Exactly one ship step per room tick.
+ * Take at most one queued cmd (leave the rest for later ticks) so a jitter
+ * burst cannot stack N× thrust/turn. Empty queue → one held step.
+ * Seq advances 1:1 with physics so client prediction stays aligned.
  */
 function stepPlayerInputs(room, p) {
   const frozen = !!(room.shopOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice));
@@ -80,7 +49,6 @@ function stepPlayerInputs(room, p) {
     return;
   }
 
-  coalescePlayerInputQueue(p);
   takePlayerInput(p);
   demoRecorder.recordInput(room, p);
   if (live && p.inp.sp) tryStartBurst(p);
@@ -645,7 +613,7 @@ function stepRoom(room) {
       p.inp.sp = 0;
       continue;
     }
-    // Humans: one step/tick; backlog continuous keys coalesced (no thrust stack).
+    // Humans: one cmd/step per tick (backlog drains over time — no thrust stack).
     stepPlayerInputs(room, p);
   }
   if (room.matchLive && !roomPreRoundFrozen(room)) processPendingRailBounces(room);
