@@ -747,7 +747,7 @@
       display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     }
     #solo-shop .ss-equipped .ss-preview {
-      width: 72px; height: 72px; flex: 0 0 auto;
+      width: 36px; height: 36px; flex: 0 0 auto;
       aspect-ratio: 1 / 1;
       background: #020810;
       border: 1px solid #3a90b0;
@@ -830,16 +830,16 @@
     }
     #solo-shop .ss-list {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 8px;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 6px;
     }
     @media (max-width: 720px) {
       #solo-shop .ss-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     #solo-shop .ss-row {
       display: flex; flex-direction: column; align-items: stretch; justify-content: space-between;
-      gap: 8px;
-      padding: 10px;
+      gap: 5px;
+      padding: 6px;
       border: 1px solid #234858;
       background: #081018;
     }
@@ -851,10 +851,12 @@
       pointer-events: none;
     }
     #solo-shop .ss-preview {
-      width: 100%;
+      width: 52%;
+      max-width: 64px;
       aspect-ratio: 1 / 1;
       height: auto;
       display: block;
+      margin: 0 auto;
       background: #020810;
       border: 1px solid #234858;
       image-rendering: auto;
@@ -863,17 +865,17 @@
     }
     #solo-shop .ss-row .ss-name {
       font-family: "Press Start 2P", Consolas, monospace;
-      font-size: 8px; letter-spacing: 0.04em;
+      font-size: 16px; letter-spacing: 0.04em;
       text-transform: uppercase; color: #d0f8ff;
       text-align: center;
-      line-height: 1.45;
-      min-height: 2.9em;
+      line-height: 1.35;
+      min-height: 1.4em;
     }
     #solo-shop .ss-row button {
       background: #8a5800;
       color: #fff8d0;
       font-size: 8px;
-      padding: 9px 8px;
+      padding: 7px 6px;
       white-space: nowrap;
       width: 100%;
     }
@@ -2279,6 +2281,6 @@
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=79"></script>
-<script src="game.js?v=921"></script>
+<script src="game.js?v=922"></script>
 </body>
 </html>
