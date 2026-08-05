@@ -17165,7 +17165,7 @@ const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 /** Match server ENEMY_R for laser/hitscan. */
 const ENEMY_R = {
   common: 6 * RES_SCALE,
-  common1: 6 * RES_SCALE * 0.65,
+  common1: 6 * RES_SCALE,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
