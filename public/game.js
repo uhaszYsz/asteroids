@@ -12516,8 +12516,8 @@ function drawTurret3D(x, y, aimAng, color) {
 /** Craft 136 repair drones — appear at ≤90% HP, stay until healed to 100%. */
 const FIXDRONE_SPRITE_ID = 'enemy_136';
 const FIXDRONE_COUNT = 1;
-const FIXDRONE_SCALE = 1 / 3;
-const FIXDRONE_ORBIT_R = 32 * RES_SCALE;
+const FIXDRONE_SCALE = 1 / 6;
+const FIXDRONE_ORBIT_R = 12 * RES_SCALE;
 const FIXDRONE_HP_FRAC = 0.9;
 const FIXDRONE_ORBIT_RAD_PER_SEC = 1.35;
 /** ownerId → { ang, repairing } */
