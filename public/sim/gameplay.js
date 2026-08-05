@@ -2824,7 +2824,6 @@ function resolveAdminGiveItem(raw) {
     damage: 'damage', dmg: 'damage',
     turret: 'turret',
     shield: 'shield',
-    homing: 'homing',
     reload: 'reload'
   };
   if (powerAlias[s]) return { kind: 'powerup', name: powerAlias[s] };
@@ -2892,7 +2891,7 @@ function handleAdminGive(ws, itemRaw) {
   if (!item) {
     return {
       ok: 0,
-      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield homing reload | admingun'
+      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield reload | admingun'
     };
   }
 
@@ -5611,43 +5610,6 @@ function updateTurrets(room) {
   }
 }
 
-/** Nudge projectile velocity toward nearest living enemy (homing powerup). */
-function steerHomingBullet(room, b) {
-  if (!b) return;
-  if (!HOMING_BULLET_TYPES.has(b.type || 'default')) return;
-  if (b.type === 'enemy' || b.type === 'enemySpinner' || b.type === 'enemyWorm' || b.type === 'enemyRocket') return;
-  // Per-rocket homing (degrees/tick) is handled in applyRocketFlight.
-  if ((+b.homing || 0) > 0) return;
-  const owner = room.players.get(b.owner);
-  if (!playerHasPowerup(owner, 'homing')) return;
-  let best = null;
-  let bestD2 = Infinity;
-  for (const e of room.players.values()) {
-    if (e.id === b.owner || e.hp <= 0 || e.godLeft > 0) continue;
-    if (blocksFriendlyFire(room, b.owner)) continue;
-    const dx = e.x - b.x;
-    const dy = e.y - b.y;
-    const d2 = dx * dx + dy * dy;
-    if (d2 < bestD2) {
-      bestD2 = d2;
-      best = e;
-    }
-  }
-  if (!best) return;
-  const spd = Math.hypot(b.vx, b.vy);
-  if (!(spd > 1e-6)) return;
-  const cur = Math.atan2(b.vy, b.vx);
-  const want = Math.atan2(best.y - b.y, best.x - b.x);
-  let diff = want - cur;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-  if (diff > HOMING_TURN_RAD) diff = HOMING_TURN_RAD;
-  else if (diff < -HOMING_TURN_RAD) diff = -HOMING_TURN_RAD;
-  const nang = cur + diff;
-  b.vx = Math.cos(nang) * spd;
-  b.vy = Math.sin(nang) * spd;
-}
-
 function rocketHomingTarget(room, b) {
   if ((b.enemyOwner | 0) > 0) return soloHumanTarget(room);
   let best = null;
@@ -5720,7 +5682,6 @@ function updateBullets(room) {
     // Death sequence clears the bullet list mid-pass — stop cleanly.
     if (room.roundResetting) return;
     if (b.type === 'rocket') applyRocketFlight(room, b);
-    steerHomingBullet(room, b);
     b.x += b.vx;
     b.y += b.vy;
 

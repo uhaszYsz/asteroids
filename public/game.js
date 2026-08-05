@@ -1529,7 +1529,6 @@ const COL = {
   powerDamage: [1.0, 0.35, 0.55],
   powerTurret: [0.95, 0.85, 0.3],
   powerShield: [0.4, 0.85, 1.0],
-  powerHoming: [1.0, 0.55, 0.2],
   powerReload: [0.45, 1.0, 0.4],
   enemy: [1.0, 0.55, 0.25],
   enemyUfo: [0.55, 1.0, 0.65],
@@ -5975,7 +5974,6 @@ function powerupLetter(name) {
     case 'damage': return 'D';
     case 'turret': return 'T';
     case 'shield': return 'S';
-    case 'homing': return 'H';
     case 'reload': return 'R';
     default: return '?';
   }
@@ -5992,8 +5990,6 @@ const POWERUP_ORBIT = {
   turret: { text: 'T', pattern: 'cube6', orbit: 'sphere', textScale: 0.95, orbitR: 1 },
   // 8 corner mounts — cube cage
   shield: { text: 'S', pattern: 'cube8', orbit: 'cube', textScale: 0.82, orbitR: 1.08 },
-  // 8 equatorial ring — flat ring cage
-  homing: { text: 'H', pattern: 'ring8', orbit: 'ring', textScale: 0.88, orbitR: 1.12 },
   // 10 = ring8 + poles — hex cage
   reload: { text: 'R', pattern: 'ring8poles', orbit: 'hex', textScale: 0.8, orbitR: 1.08 }
 };
@@ -6263,17 +6259,6 @@ function buildCubeMesh() {
   return finalizePowerupMesh(verts, faces);
 }
 
-/** Tetrahedron — homing. */
-function buildTetrahedronMesh() {
-  const verts = [
-    [1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]
-  ];
-  const faces = [
-    [0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]
-  ];
-  return finalizePowerupMesh(verts, faces);
-}
-
 /** Hexagonal bipyramid (8 verts) — reload. */
 function buildHexBipyramidMesh() {
   const verts = [[0, 0, 1.15], [0, 0, -1.15]];
@@ -6301,7 +6286,6 @@ const POWERUP_SHAPE_MESH = {
   damage: buildOctahedronMesh(),
   turret: null, // sphere LODs
   shield: buildCubeMesh(),
-  homing: buildTetrahedronMesh(),
   reload: buildHexBipyramidMesh()
 };
 
@@ -12235,13 +12219,13 @@ addEventListener('keyup', e => {
 const player = {
   x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, hp: 100, av: 0,
   turnDecelStep: 0, turnDecelLeft: 0, turnDecelRev: 0, stunned: false, collideCd: 0, godLeft: 0,
-  powerups: { damage: false, turret: false, shield: false }
+  powerups: { damage: false, turret: false, shield: false, reload: false }
 };
 const serverGhost = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, av: 0, hp: 100, valid: false };
 /** performance.now() deadline — skip tight drift-snap so tab-resume can soft-blend. */
 let resumeBlendUntil = 0;
 
-const POWERUP_TYPES = ['damage', 'turret', 'shield', 'homing', 'reload'];
+const POWERUP_TYPES = ['damage', 'turret', 'shield', 'reload'];
 const PICKUP_CODE_POWERUP_BASE = 100;
 /** Match server: weapon/powerup crates bounce this many times, then drift off. */
 const PICKUP_BOUNCE_MAX = 3;
@@ -12251,7 +12235,6 @@ function freshPowerups() {
     damage: false,
     turret: false,
     shield: false,
-    homing: false,
     reload: false
   };
 }
@@ -12259,7 +12242,6 @@ function powerupColor(name) {
   if (name === 'damage') return COL.powerDamage;
   if (name === 'turret') return COL.powerTurret;
   if (name === 'shield') return COL.powerShield;
-  if (name === 'homing') return COL.powerHoming;
   if (name === 'reload') return COL.powerReload;
   return COL.pickup;
 }
@@ -12536,7 +12518,7 @@ function currentWeaponBulletSpeed() {
 }
 
 function leadInterceptPoint(ox, oy, tx, ty, tvx, tvy, speed) {
-  // Euclidean only — no torus shortcuts (matches server turrets / homing).
+  // Euclidean only — no torus shortcuts (matches server turrets).
   const dx = tx - ox;
   const dy = ty - oy;
   if (speed == null || !(speed > 0)) {
@@ -24484,7 +24466,7 @@ function runConsole(line) {
       conPrint('usage: give <item>  (or admin keys 1–8 in-game)', 'err');
       conPrint('weapons: default rocket laser shotgun rail plasma void meteor', 'info');
       conPrint('keys: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
-      conPrint('powerups: damage turret shield homing reload', 'info');
+      conPrint('powerups: damage turret shield reload', 'info');
       conPrint('admingun — turret + buff (100 ammo, 1 cooldown, 1s reload, 100 dmg)', 'info');
       return;
     }

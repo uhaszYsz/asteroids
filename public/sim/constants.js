@@ -207,7 +207,6 @@ function freshPowerups() {
     damage: false,
     turret: false,
     shield: false,
-    homing: false,
     reload: false
   };
 }
@@ -531,7 +530,7 @@ const HEALTH_PICKUP_HEAL = 30;
 /** Pickup type codes in network packs: 1+ weapons by slot, 99 health, 100+ powerups.
  *  Pickups = collectible items (weapon or health). Powerups are slotted buffs (one each). */
 const PICKUP_CODE_HEALTH = 99;
-const POWERUP_TYPES = ['damage', 'turret', 'shield', 'homing', 'reload'];
+const POWERUP_TYPES = ['damage', 'turret', 'shield', 'reload'];
 const PICKUP_CODE_POWERUP_BASE = 100;
 /** Turret auto-gun (mounted powerup). */
 const TURRET_AMMO = 3;
@@ -546,9 +545,6 @@ const ADMINGUN_TURRET_COOLDOWN = 1;
 const ADMINGUN_TURRET_RELOAD = TPS;
 const ADMINGUN_TURRET_DMG = 100;
 const DAMAGE_POWERUP_MULT = 1.25;
-/** Homing powerup: max turn toward target per sim tick (0.2°). */
-const HOMING_TURN_RAD = (0.2 * Math.PI) / 180;
-const HOMING_BULLET_TYPES = new Set(['default', 'shotgun', 'plasma', 'rocket', 'voidcannon', 'turret']);
 const ASTEROID_HP = 50;
 /** Coins granted to the destroyer when a world asteroid is killed. */
 const ASTEROID_COIN_GRANT = 32;
