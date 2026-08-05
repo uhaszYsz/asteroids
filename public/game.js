@@ -10419,6 +10419,7 @@ function drawFlatSpriteQuad(x, y, angle, bank, entry, uv, halfL, halfW, localZ, 
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, Math.max(0, Number(cv('cl_ship_emit')) || 0));
   bindSpriteDeadLook(false, 1);
+  bindSpriteTipHeat(0, halfL, halfW);
   if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
   bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
@@ -11077,6 +11078,10 @@ const spriteShipFS = `
   uniform float uRemapRange;
   uniform vec2 uHitLocal[5];
   uniform float uHitAge[5];
+  uniform float uTipHeat;
+  uniform vec3 uTipHot;
+  uniform vec2 uHalfLW;
+  uniform float uTipRad;
   varying vec2 vUV;
   varying vec2 vWorld;
   varying vec2 vLocal;
@@ -11100,12 +11105,20 @@ const spriteShipFS = `
     vec3 remapped = uRemapDst * (lum / srcLum);
     return mix(rgb, remapped, w);
   }
+  // Nose tip (+X local) cannon heat — same timing as triangle wireframe tip.
+  vec3 applySpriteTipHeat(vec3 rgb) {
+    if (uTipHeat < 0.001 || uTipRad < 0.001) return rgb;
+    vec2 dPx = vec2((vLocal.x - 1.0) * uHalfLW.x, vLocal.y * uHalfLW.y);
+    float d = length(dPx);
+    float mask = 1.0 - smoothstep(uTipRad * 0.55, uTipRad, d);
+    return mix(rgb, uTipHot, mask * clamp(uTipHeat, 0.0, 1.0));
+  }
   void main() {
     vec4 t = texture2D(uTex, vUV);
     if (!spriteSolid(t)) discard;
     // Silhouette stencil: opaque sprite texels → solid player color (drawn offset).
     if (uOutline > 0.5) {
-      gl_FragColor = applyNightLit(uTint, uAlpha, vWorld);
+      gl_FragColor = applyNightLit(applySpriteTipHeat(uTint), uAlpha, vWorld);
       return;
     }
     t.rgb = remapSourceColor(t.rgb);
@@ -11133,6 +11146,7 @@ const spriteShipFS = `
         rgb += hot * hitMask * fall * fade * 1.9;
       }
     }
+    rgb = applySpriteTipHeat(rgb);
     gl_FragColor = applyNightLit(rgb, t.a * uAlpha, vWorld);
   }
 `;
@@ -11159,6 +11173,12 @@ const ssURemapDst = gl.getUniformLocation(spriteShipProg, 'uRemapDst');
 const ssURemapRange = gl.getUniformLocation(spriteShipProg, 'uRemapRange');
 const ssUHitLocal = gl.getUniformLocation(spriteShipProg, 'uHitLocal[0]');
 const ssUHitAge = gl.getUniformLocation(spriteShipProg, 'uHitAge[0]');
+const ssUTipHeat = gl.getUniformLocation(spriteShipProg, 'uTipHeat');
+const ssUTipHot = gl.getUniformLocation(spriteShipProg, 'uTipHot');
+const ssUHalfLW = gl.getUniformLocation(spriteShipProg, 'uHalfLW');
+const ssUTipRad = gl.getUniformLocation(spriteShipProg, 'uTipRad');
+/** Nose tip heat paint radius on sprite ships (world px). */
+const SPRITE_NOSE_TIP_RAD = 6;
 const spriteShipLightU = {
   night: gl.getUniformLocation(spriteShipProg, 'uFlashNight'),
   ships: gl.getUniformLocation(spriteShipProg, 'uShipLight[0]'),
@@ -11168,6 +11188,14 @@ const spriteShipLightU = {
 function bindSpriteDeadLook(gray, valueMul) {
   if (ssUGray) gl.uniform1f(ssUGray, gray ? 1 : 0);
   if (ssUValueMul) gl.uniform1f(ssUValueMul, valueMul != null ? valueMul : 1);
+}
+/** Cannon tip heat on sprite nose (+X local). heat 0 = off. */
+function bindSpriteTipHeat(heat, halfL, halfW) {
+  const h = heat > 0 ? heat : 0;
+  if (ssUTipHeat) gl.uniform1f(ssUTipHeat, h);
+  if (ssUTipHot) gl.uniform3f(ssUTipHot, COL.cannonHot[0], COL.cannonHot[1], COL.cannonHot[2]);
+  if (ssUHalfLW) gl.uniform2f(ssUHalfLW, halfL > 0 ? halfL : 1, halfW > 0 ? halfW : 1);
+  if (ssUTipRad) gl.uniform1f(ssUTipRad, SPRITE_NOSE_TIP_RAD);
 }
 const ssAPos = gl.getAttribLocation(spriteShipProg, 'aPos');
 const ssAUV = gl.getAttribLocation(spriteShipProg, 'aUV');
@@ -11514,6 +11542,8 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, emitPow);
   bindSpriteDeadLook(deadGray, valueMul);
+  const tipHeat = (!deadGray && (id | 0) === (myId | 0)) ? shipCannonTipHeat() : 0;
+  bindSpriteTipHeat(tipHeat, halfL, halfW);
   if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
   bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
