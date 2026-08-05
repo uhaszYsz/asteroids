@@ -13267,8 +13267,8 @@ let shopPreviewSlots = [];
 const SHOP_PREV_LOGIC = 112;
 /** Half of previous shop mesh scale so previews fit inside square cells. */
 const SHOP_PREV_SCALE = 2.6;
-/** Equipped loadout preview — larger mesh fill than catalog cells. */
-const SHOP_EQUIPPED_PREV_SCALE = SHOP_PREV_SCALE * 1.55;
+/** Equipped loadout preview — same mesh fit as catalog (CSS window is larger). */
+const SHOP_EQUIPPED_PREV_SCALE = SHOP_PREV_SCALE;
 
 const soloShopEl = document.getElementById('solo-shop');
 const ssWaveEl = document.getElementById('ss-wave');
