@@ -500,7 +500,7 @@ function wormIsShotgunRush(e) {
 
 /**
  * Pack for ef/eu (spawn / retarget).
- * [id, kind, spawnX, spawnY, tx, ty, spawnSt, hp, weapon, angle, move, vx, vy, x, y, dir, speed, wormPhase]
+ * [id, kind, spawnX, spawnY, tx, ty, spawnSt, hp, weapon, angle, move, vx, vy, x, y, dir, speed, wormPhase, enteredPlay]
  * speed = base wander (worm rush / spinner crawl applied on predict via wormPhase / packed spinner speed).
  */
 function packEnemyNetSpeed(e) {
@@ -530,7 +530,8 @@ function packEnemy(e) {
     e.y,
     dir,
     packEnemyNetSpeed(e),
-    e.kind === 'worm' ? (e.wormPhase | 0) : 0
+    e.kind === 'worm' ? (e.wormPhase | 0) : 0,
+    e.enteredPlay ? 1 : 0
   ];
 }
 

@@ -17190,6 +17190,11 @@ function unpackEnemy(row) {
   const spd = packedSpeed > 0
     ? packedSpeed
     : (useSnapVel && Math.hypot(vx, vy) > 0.05 ? Math.hypot(vx, vy) : ENEMY_WANDER_SPEED);
+  // Off-screen entries must stay unclamped until they cross the playfield.
+  // Defaulting enteredPlay=true made destinationSmooth clamp them to the rim for a frame.
+  let enteredPlay;
+  if (row[18] != null) enteredPlay = !!(row[18] | 0);
+  else enteredPlay = x >= 8 && x <= W - 8 && y >= 8 && y <= H - 8;
   return {
     id: row[0] | 0,
     kind,
@@ -17209,7 +17214,7 @@ function unpackEnemy(row) {
     dir,
     hp,
     speed: spd,
-    enteredPlay: true,
+    enteredPlay,
     wormPhase: kind === 'worm' ? (row[17] | 0) : 0
   };
 }
@@ -17234,6 +17239,8 @@ function rebaseEnemyPredictOrigin(e) {
   e.spawnY = y;
   e.spawnSt = serverNow();
   e.travelDist = Math.hypot((e.tx || 0) - x, (e.ty || 0) - y);
+  // Never clamp an off-screen entry onto the rim during client predict.
+  if (x < 8 || x > W - 8 || y < 8 || y > H - 8) e.enteredPlay = false;
 }
 
 function applyEnemyUpdate(row) {
@@ -17379,7 +17386,7 @@ function enemyAt(e) {
       speed: e.speed,
       kind: e.kind,
       wormPhase: e.wormPhase | 0,
-      enteredPlay: e.enteredPlay !== false
+      enteredPlay: !!e.enteredPlay
     };
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));
     for (let i = 0; i < steps; i++) stepEnemyDestinationSmoothLocal(state);
