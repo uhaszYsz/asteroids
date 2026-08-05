@@ -5101,7 +5101,8 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
     bank: bank || 0,
     life: 2.4 + Math.random() * 1.2, // 2.4–3.6 s (40% shorter than 4–6)
     age: 0,
-    decelTick: 0.025
+    decelTick: 0.025,
+    kind: e.kind === 'common1' ? 'common1' : 'common'
   });
 }
 
@@ -5112,8 +5113,10 @@ function emitCorpseBurn(c, intensity) {
   const ang = c.angle || 0;
   const ca = Math.cos(ang);
   const sa = Math.sin(ang);
-  const hl = ENEMY_CORPSE_HALF_L * ENEMY_COMMON_SPRITE_SCALE;
-  const hw = ENEMY_CORPSE_HALF_W * ENEMY_COMMON_SPRITE_SCALE;
+  const is1 = c.kind === 'common1';
+  const sc = is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
+  const hl = (is1 ? ENEMY_COMMON1_HALF_L0 : ENEMY_CORPSE_HALF_L) * sc;
+  const hw = (is1 ? ENEMY_COMMON1_HALF_W0 : ENEMY_CORPSE_HALF_W) * sc;
   const n = 2 + ((Math.random() * (1 + t * 3)) | 0); // 2–5 sites
   for (let i = 0; i < n; i++) {
     const lx = (Math.random() * 2 - 1) * hl * 0.85;
@@ -5200,15 +5203,17 @@ function updateEnemyCorpses(dt) {
 
 function drawEnemyCorpses(dt) {
   if (!enemyCorpses.length) return;
-  const opt = getShipOptionById(ENEMY_COMMON_SPRITE_ID);
-  if (!opt || opt.kind !== 'sprite') return;
   for (let i = 0; i < enemyCorpses.length; i++) {
     const c = enemyCorpses[i];
+    const is1 = c.kind === 'common1';
+    const opt = getShipOptionById(is1 ? ENEMY_COMMON1_SPRITE_ID : ENEMY_COMMON_SPRITE_ID);
+    if (!opt || opt.kind !== 'sprite') continue;
+    const scale = is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
     const t = c.age / Math.max(1e-3, c.life);
     const alpha = t > 0.9 ? Math.max(0, 1 - (t - 0.9) / 0.1) : 1;
     drawSpriteShipPlane(
       c.x, c.y, c.angle, 0, -1 - i, dt, opt, false, COL.enemy,
-      c.bank, ENEMY_COMMON_SPRITE_SCALE, null,
+      c.bank, scale, null,
       { noOutline: true, gray: true, valueMul: ENEMY_CORPSE_VALUE, alpha }
     );
   }
@@ -17044,7 +17049,7 @@ const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 /** Match server ENEMY_R for laser/hitscan. */
 const ENEMY_R = {
   common: 6 * RES_SCALE,
-  common1: 6 * RES_SCALE,
+  common1: 6 * RES_SCALE * 0.65,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
@@ -17532,6 +17537,12 @@ function pickForwardGunLocals(mesh) {
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
+/** common1 = Craft 263, scaled down 35%. */
+const ENEMY_COMMON1_SPRITE_ID = 'enemy_263';
+const ENEMY_COMMON1_SPRITE_SCALE = 0.65;
+/** Craft 263 base half-extents (fh×fw / 2) before scale. */
+const ENEMY_COMMON1_HALF_L0 = 59 * 0.5;
+const ENEMY_COMMON1_HALF_W0 = 77 * 0.5;
 const ENEMY_WORM_SPRITE_ID = 'enemy_367';
 const ENEMY_WORM_SPRITE_SCALE = 1.6;
 /** Continuous roll around nose / length axis (rad/s) while wandering. */
@@ -17727,14 +17738,17 @@ function clearEnemyBank(id) {
   enemyBankSmooth.delete(key);
 }
 
-function drawEnemyCommon(x, y, angle, color, id, dt) {
+function drawEnemyCommon(x, y, angle, color, id, dt, kind) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const vib = hitVibrationRoll('e', id);
-  const opt = getShipOptionById(ENEMY_COMMON_SPRITE_ID);
+  const is1 = kind === 'common1';
+  const spriteId = is1 ? ENEMY_COMMON1_SPRITE_ID : ENEMY_COMMON_SPRITE_ID;
+  const scale = is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
+  const opt = getShipOptionById(spriteId);
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
-      bank, ENEMY_COMMON_SPRITE_SCALE, COL.enemyOutline
+      bank, scale, COL.enemyOutline
     );
   } else {
     drawEnemyShipMesh(ENEMY_COMMON_MESH, x, y, angle, color, bank + vib, id, {
@@ -18499,8 +18513,9 @@ function drawEnemyCommonCharges() {
     }
 
     for (let g = 0; g < ENEMY_COMMON_GUNS.length; g++) {
+      const gunSc = e.kind === 'common1' ? ENEMY_COMMON1_SPRITE_SCALE : 1;
       const gun = (e.kind === 'common1')
-        ? [7 * RES_SCALE, 0, 0]
+        ? [7 * RES_SCALE * gunSc, 0, 0]
         : ENEMY_COMMON_GUNS[g];
       if (e.kind === 'common1' && g > 0) break;
       let w = localToWorldBanked(gun[0], gun[1], gun[2], p.x, p.y, p.angle, bank);
@@ -18621,7 +18636,7 @@ function drawEnemies(dt) {
       const bank = drawEnemySpinner(x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
     } else {
-      const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt);
+      const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt, p.kind || e.kind);
       enemyDrawBank.set(id, bank);
     }
     if (showHit) {

@@ -374,7 +374,7 @@ const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 const ENEMY_SNAP_INTERVAL = Math.round(0.5 * TPS);
 const ENEMY_R = {
   common: 6 * RES_SCALE,
-  common1: 6 * RES_SCALE,
+  common1: 6 * RES_SCALE * 0.65,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
