@@ -2830,11 +2830,12 @@ function notifyPlayerWeapon(room, p, fromPickup) {
   }
 }
 
-/** Normalize console give aliases → canonical weapon / powerup / admingun. */
+/** Normalize console give aliases → canonical weapon / powerup / admingun / lives. */
 function resolveAdminGiveItem(raw) {
   const s = String(raw || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
   if (!s) return null;
   if (s === 'admingun' || s === 'admin') return { kind: 'admingun', name: 'admingun' };
+  if (s === 'live' || s === 'lives' || s === 'life') return { kind: 'lives', name: 'lives' };
   const weaponAlias = {
     default: 'default', gun: 'default', blaster: 'default',
     rocket: 'rocket', rockets: 'rocket',
@@ -2907,7 +2908,7 @@ function handleAdminSpawn(ws, kindRaw) {
 }
 
 /**
- * Admin console `give <item>` — equip weapon, grant powerup, or enable buffed admingun turret.
+ * Admin console `give <item>` — equip weapon, grant powerup, lives, or buffed admingun.
  */
 function handleAdminGive(ws, itemRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -2920,8 +2921,15 @@ function handleAdminGive(ws, itemRaw) {
   if (!item) {
     return {
       ok: 0,
-      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield reload drone | admingun'
+      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | powerups: damage turret shield reload drone | admingun | live'
     };
+  }
+
+  if (item.kind === 'lives') {
+    if (!room.practice) return { ok: 0, err: 'lives only in solo/coop wave rooms' };
+    p.lives = 99;
+    notifyPlayerLives(room, p);
+    return { ok: 1, kind: 'lives', item: 'lives', n: 99 };
   }
 
   if (item.kind === 'admingun') {

@@ -21271,6 +21271,8 @@ function handleWsMessage(e) {
         const label = msg.item || 'item';
         if (msg.kind === 'admingun') {
           conPrint('gave admingun (turret buffed: 100 ammo / 1 cooldown / 1s reload / 100 dmg)', 'info');
+        } else if (msg.kind === 'lives') {
+          conPrint('gave ' + ((msg.n | 0) || 99) + ' lives', 'info');
         } else if (msg.kind === 'weapon' && msg.lvl != null) {
           conPrint('gave ' + label + ' L' + (msg.lvl | 0), 'info');
         } else {
@@ -24587,6 +24589,7 @@ function runConsole(line) {
       conPrint('weapons: default rocket laser shotgun rail plasma void meteor', 'info');
       conPrint('keys: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
       conPrint('powerups: damage turret shield reload drone', 'info');
+      conPrint('live — set lives to 99 (solo/coop)', 'info');
       conPrint('admingun — turret + buff (100 ammo, 1 cooldown, 1s reload, 100 dmg)', 'info');
       return;
     }
@@ -24623,7 +24626,7 @@ function runConsole(line) {
     conPrint('record <name> | stop | play <name> | demos | demolish <name>', 'info');
     conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
-    conPrint('give <weapon|powerup|admingun>  — grant loadout (admin, in-game)', 'info');
+    conPrint('give <weapon|powerup|admingun|live>  — grant loadout / 99 lives (admin, in-game)', 'info');
     conPrint('spawn big|medium|small|huge|meteor|common|ufo|worm|spinner  — off-screen spawn (admin, in-game)', 'info');
     conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
