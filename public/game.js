@@ -3782,7 +3782,7 @@ function updateDynamicLightState() {
   const nightOn = lightsOn && nightModeLightEnabled;
   const me = localView();
   const alive = !!(player && (player.hp | 0) > 0);
-  const precise = !!(inMatch && alive && precisionTurn());
+  const precise = !!(inMatch && alive && precisionAimLight());
   // Cone always on while alive; idle = full width @ low alpha, precision = shrink + full strength.
   const coneOn = !!(inMatch && alive);
   _lightFlashOn = coneOn ? 1 : 0;
@@ -11722,15 +11722,24 @@ const keys = {};
 let spaceLatch = false;
 let enterLatch = false;
 let shootPulse = false;
-/** On-screen touch: hold left/right turn; empty-area press fires (and holds for laser/rail). */
-const touchCtl = { left: false, right: false, fire: false };
+/** On-screen touch: turn / slow-turn / empty-area fire. */
+const touchCtl = { left: false, right: false, slowLeft: false, slowRight: false, fire: false };
 const touchPointers = new Map();
+/** After releasing a slow-turn touch button, keep aim cone lit until this time (ms). */
+let touchAimLightUntil = 0;
+const TOUCH_AIM_LIGHT_HOLD_MS = 2000;
 
-function turnLeft() { return keys.ArrowLeft || keys.KeyA || touchCtl.left; }
-function turnRight() { return keys.ArrowRight || keys.KeyD || touchCtl.right; }
+function turnLeft() { return keys.ArrowLeft || keys.KeyA || touchCtl.left || touchCtl.slowLeft; }
+function turnRight() { return keys.ArrowRight || keys.KeyD || touchCtl.right || touchCtl.slowRight; }
 function thrustUp() { return keys.ArrowUp || keys.KeyW; }
 function precisionTurn() {
-  return keys.ArrowDown || keys.KeyS || keys.ShiftLeft || keys.ShiftRight;
+  return !!(keys.ArrowDown || keys.KeyS || keys.ShiftLeft || keys.ShiftRight
+    || touchCtl.slowLeft || touchCtl.slowRight);
+}
+/** Aim flashlight: keyboard precision, or touch slow-turn (+ 2s linger after release). */
+function precisionAimLight() {
+  if (precisionTurn()) return true;
+  return performance.now() < touchAimLightUntil;
 }
 function shootHeld() {
   return !!(keys.Space || keys.Enter || spaceLatch || enterLatch || touchCtl.fire);
@@ -12239,29 +12248,49 @@ function clearTouchPointers() {
   touchPointers.clear();
   touchCtl.left = false;
   touchCtl.right = false;
+  touchCtl.slowLeft = false;
+  touchCtl.slowRight = false;
   touchCtl.fire = false;
-  const leftBtn = document.getElementById('touch-left');
-  const rightBtn = document.getElementById('touch-right');
-  if (leftBtn) leftBtn.classList.remove('active');
-  if (rightBtn) rightBtn.classList.remove('active');
+  touchAimLightUntil = 0;
+  for (const id of ['touch-left', 'touch-right', 'touch-slow-left', 'touch-slow-right']) {
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.remove('active');
+  }
 }
 
 function syncTouchCtlFromPointers() {
+  const wasSlow = touchCtl.slowLeft || touchCtl.slowRight;
   let left = false;
   let right = false;
+  let slowLeft = false;
+  let slowRight = false;
   let fire = false;
   for (const role of touchPointers.values()) {
     if (role === 'left') left = true;
     else if (role === 'right') right = true;
+    else if (role === 'slowLeft') slowLeft = true;
+    else if (role === 'slowRight') slowRight = true;
     else if (role === 'fire') fire = true;
   }
   touchCtl.left = left;
   touchCtl.right = right;
+  touchCtl.slowLeft = slowLeft;
+  touchCtl.slowRight = slowRight;
   touchCtl.fire = fire;
-  const leftBtn = document.getElementById('touch-left');
-  const rightBtn = document.getElementById('touch-right');
-  if (leftBtn) leftBtn.classList.toggle('active', left);
-  if (rightBtn) rightBtn.classList.toggle('active', right);
+  // Touch-only: keep aim light 2s after the last slow-turn button is released.
+  if (wasSlow && !slowLeft && !slowRight) {
+    touchAimLightUntil = performance.now() + TOUCH_AIM_LIGHT_HOLD_MS;
+  }
+  const map = [
+    ['touch-left', left],
+    ['touch-right', right],
+    ['touch-slow-left', slowLeft],
+    ['touch-slow-right', slowRight]
+  ];
+  for (const [id, on] of map) {
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.toggle('active', on);
+  }
 }
 
 function syncTouchControls() {
@@ -12277,7 +12306,9 @@ function bindTouchControls() {
   const root = document.getElementById('touch-controls');
   const leftBtn = document.getElementById('touch-left');
   const rightBtn = document.getElementById('touch-right');
-  if (!root || !leftBtn || !rightBtn) return;
+  const slowLeftBtn = document.getElementById('touch-slow-left');
+  const slowRightBtn = document.getElementById('touch-slow-right');
+  if (!root || !leftBtn || !rightBtn || !slowLeftBtn || !slowRightBtn) return;
 
   function bindHold(btn, role) {
     const onDown = (e) => {
@@ -12304,6 +12335,8 @@ function bindTouchControls() {
   }
   bindHold(leftBtn, 'left');
   bindHold(rightBtn, 'right');
+  bindHold(slowLeftBtn, 'slowLeft');
+  bindHold(slowRightBtn, 'slowRight');
 
   // Empty canvas tap/hold → shoot (turn buttons stopPropagation so they don't fire).
   const onFireDown = (e) => {

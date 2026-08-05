@@ -66,6 +66,14 @@
       -webkit-tap-highlight-color: transparent;
       box-shadow: inset 0 0 18px rgba(120, 180, 255, 0.12);
     }
+    .touch-btn.touch-slow {
+      width: 72px;
+      height: 72px;
+      font-size: 20px;
+      bottom: calc(max(28px, env(safe-area-inset-bottom, 0px) + 16px) + 108px);
+      border-color: rgba(160, 210, 255, 0.35);
+      background: rgba(8, 18, 36, 0.36);
+    }
     .touch-btn:active, .touch-btn.active {
       background: rgba(40, 90, 160, 0.55);
       border-color: rgba(220, 240, 255, 0.85);
@@ -73,6 +81,12 @@
     }
     #touch-left { left: max(18px, env(safe-area-inset-left, 0px) + 12px); }
     #touch-right { right: max(18px, env(safe-area-inset-right, 0px) + 12px); }
+    #touch-slow-left {
+      left: max(30px, env(safe-area-inset-left, 0px) + 24px);
+    }
+    #touch-slow-right {
+      right: max(30px, env(safe-area-inset-right, 0px) + 24px);
+    }
     #status {
       position: fixed; left: 50%; top: 12px; transform: translateX(-50%);
       color: #aaa; font: 12px monospace; pointer-events: none; z-index: 2;
@@ -2319,6 +2333,8 @@
 </div>
 <canvas id="c"></canvas>
 <div id="touch-controls" aria-hidden="true">
+  <button type="button" id="touch-slow-left" class="touch-btn touch-slow" aria-label="Slow turn left">‹</button>
+  <button type="button" id="touch-slow-right" class="touch-btn touch-slow" aria-label="Slow turn right">›</button>
   <button type="button" id="touch-left" class="touch-btn" aria-label="Turn left">◀</button>
   <button type="button" id="touch-right" class="touch-btn" aria-label="Turn right">▶</button>
 </div>
@@ -2326,6 +2342,6 @@
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=85"></script>
-<script src="game.js?v=950"></script>
+<script src="game.js?v=951"></script>
 </body>
 </html>
