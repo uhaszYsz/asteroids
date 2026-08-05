@@ -21592,15 +21592,11 @@ function handleWsMessage(e) {
         ssContinueBtn.textContent = 'START WAVE';
         ssContinueBtn.disabled = false;
       }
-      // Drop leftover projectiles / weapon+health pickups. Keep powerup pickups
-      // across waves (server keeps them too). PvP round reset still wipes all.
+      // Drop leftover projectiles/FX. Keep all pickups across waves (PvP still wipes).
       if (practiceMode) {
         stopAllRocketTravelSfx();
         stopAllVoidTravelSfx();
         bullets.clear();
-        for (const [id, u] of pickups) {
-          if (!u || u.kind !== 'powerup') pickups.delete(id);
-        }
         ghostBullets.length = 0;
         hitLasers.length = 0;
         remoteLasers.clear();

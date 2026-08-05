@@ -1836,24 +1836,12 @@ function beginSoloWave(room, wave, opts) {
   for (const a of room.asteroids) emitAsteroidFire(room, a);
   clearSoloEnemies(room, true);
   spawnSoloWaveEnemies(room, room.wave);
-  // Clean projectiles; keep powerup pickups across waves (weapons/health still wipe).
+  // Clean projectiles only — keep all pickups across waves (PvP still wipes on round).
   if (room.bullets && room.bullets.length) {
     for (const b of room.bullets) {
       roomBroadcast(room, { t: 'bd', id: b.id });
     }
     room.bullets.length = 0;
-  }
-  if (room.pickups && room.pickups.length) {
-    const kept = [];
-    for (const u of room.pickups) {
-      if (u.kind === 'powerup') {
-        kept.push(u);
-        continue;
-      }
-      emitPickupDead(room, u.id, null, null, { silent: 1 });
-    }
-    room.pickups.length = 0;
-    for (const u of kept) room.pickups.push(u);
   }
   if (room.pendingRailBounces) room.pendingRailBounces.length = 0;
   placePlayersAtWaveStart(room, opts);
@@ -2971,8 +2959,9 @@ function handleAdminGive(ws, itemRaw) {
 }
 
 /**
- * Admin `sv_wave N` — wipe field (asteroids/enemies/bullets/pickups) and begin wave N
+ * Admin `sv_wave N` — wipe field (asteroids/enemies/bullets) and begin wave N
  * as a normal solo/coop wave start (banner, godmode, center spawn in solo).
+ * Pickups are kept across the wave jump.
  */
 function handleAdminWave(ws, waveRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -3834,7 +3823,7 @@ function emitRoundReset(room) {
   }
   room.bullets.length = 0;
 
-  // PvP: wipe field pickups (wave mode keeps powerups across waves).
+  // PvP: wipe field pickups (wave mode keeps all pickups across waves).
   if (!room.practice && room.pickups && room.pickups.length) {
     for (const u of room.pickups) {
       emitPickupDead(room, u.id, null, null, { silent: 1 });
