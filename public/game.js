@@ -17537,12 +17537,12 @@ function pickForwardGunLocals(mesh) {
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
-/** common1 = Craft 263, scaled down 35%. */
-const ENEMY_COMMON1_SPRITE_ID = 'enemy_263';
+/** common1 = Craft 10, scaled down 35%. */
+const ENEMY_COMMON1_SPRITE_ID = 'enemy_10';
 const ENEMY_COMMON1_SPRITE_SCALE = 0.65;
-/** Craft 263 base half-extents (fh×fw / 2) before scale. */
-const ENEMY_COMMON1_HALF_L0 = 59 * 0.5;
-const ENEMY_COMMON1_HALF_W0 = 77 * 0.5;
+/** Craft 10 base half-extents (fh×fw / 2) before scale. */
+const ENEMY_COMMON1_HALF_L0 = 62 * 0.5;
+const ENEMY_COMMON1_HALF_W0 = 67 * 0.5;
 const ENEMY_WORM_SPRITE_ID = 'enemy_367';
 const ENEMY_WORM_SPRITE_SCALE = 1.6;
 /** Continuous roll around nose / length axis (rad/s) while wandering. */
