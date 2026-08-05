@@ -553,6 +553,7 @@ const FIXDRONE_HEAL_TICKS = Math.round(1.25 * TPS);
 const FIXDRONE_HP_FRAC = 0.9;
 const ASTEROID_HP = 50;
 /** Coins granted to the destroyer when a world asteroid is killed. */
+const ASTEROID_COIN_GRANT = 32;
 /** Coins granted for destroying UFO / spinner. */
 const ENEMY_ELITE_COIN_GRANT = 1000;
 /** Visual 3D ore coins spawned on that kill (homing to the killer). */
