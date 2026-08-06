@@ -7313,9 +7313,8 @@ function emitLocalShootFx() {
 const GHOST_BULLET_COL = [1.0, 0.12, 0.08];
 const ghostBullets = [];
 const GHOST_BULLET_MAX = 96;
-/** Input-lag probe: stamp Date.now() on first draw of the next local bullet (SpaceT0 utc_ms). */
-let _lagProbeMarkNextGhost = false;
-let _lagProbeAwaitOwnBullet = false;
+/** Input-lag probe: stamp Date.now() when a local shot projectile is created (SpaceT0 utc_ms). */
+let _lagProbeOwnBulletLeft = 0;
 
 function logBulletAppearProbe() {
   const utcMs = Date.now();
@@ -7326,33 +7325,26 @@ function logBulletAppearProbe() {
 function spawnGhostBullet(x, y, angle, speed, radius, type) {
   if (ghostBullets.length >= GHOST_BULLET_MAX) ghostBullets.shift();
   const spd = Math.max(0.05, +speed || 0);
-  const g = {
+  ghostBullets.push({
     x: +x,
     y: +y,
     vx: Math.cos(angle) * spd,
     vy: Math.sin(angle) * spd,
     r: Math.max(0.8 * RES_SCALE, +radius || 2 * RES_SCALE),
     type: type || 'default'
-  };
-  if (_lagProbeMarkNextGhost) {
-    _lagProbeMarkNextGhost = false;
-    g.lagProbe = true;
-  }
-  ghostBullets.push(g);
+  });
 }
 
 /** Local predictive projectiles at muzzle/aim the instant a local shot FX fires. */
 function spawnGhostBulletsForLocalShot() {
   if ((cv('cl_ghost_bullet') | 0) === 0) {
-    _lagProbeAwaitOwnBullet = true;
+    // No local ghost — stamp when each of our server bullets first draws.
+    _lagProbeOwnBulletLeft++;
     return;
   }
-  _lagProbeMarkNextGhost = true;
   const name = currentWeaponName();
-  if (name === 'laser' || name === 'railgun' || name === 'asteroidgun') {
-    _lagProbeMarkNextGhost = false;
-    return;
-  }
+  if (name === 'laser' || name === 'railgun' || name === 'asteroidgun') return;
+  const before = ghostBullets.length;
   const me = localView();
   const m = shipMuzzle(me.x, me.y, me.angle);
   const ang = me.angle;
@@ -7369,27 +7361,23 @@ function spawnGhostBulletsForLocalShot() {
       const a = ang - spreadRad * 0.5 + spreadRad * t;
       spawnGhostBullet(m.x, m.y, a, lo + (hi - lo) * t, 2 * RES_SCALE, 'shotgun');
     }
-    return;
-  }
-  if (name === 'rocket') {
+  } else if (name === 'rocket') {
     const spd = w.launchSpeed != null ? w.launchSpeed : (w.speed || 15);
     spawnGhostBullet(m.x, m.y, ang, spd, 4 * RES_SCALE, 'rocket');
-    return;
-  }
-  if (name === 'plasma') {
+  } else if (name === 'plasma') {
     spawnGhostBullet(m.x, m.y, ang, w.speed || (9 * RES_SCALE * 1.7), 3 * RES_SCALE, 'plasma');
-    return;
-  }
-  if (name === 'voidcannon') {
+  } else if (name === 'voidcannon') {
     let size = 27 * RES_SCALE;
     if (lvl >= 3) size *= 1.3;
     spawnGhostBullet(m.x, m.y, ang, w.speed || (2.1504 * RES_SCALE), size * 0.45, 'voidcannon');
-    return;
+  } else {
+    // Default blaster (L2 = 2× hit size).
+    let size = 2 * RES_SCALE;
+    if (lvl >= 2) size *= 2;
+    spawnGhostBullet(m.x, m.y, ang, w.speed || 13.5, size, 'default');
   }
-  // Default blaster (L2 = 2× hit size).
-  let size = 2 * RES_SCALE;
-  if (lvl >= 2) size *= 2;
-  spawnGhostBullet(m.x, m.y, ang, w.speed || 13.5, size, 'default');
+  // One stamp per local shot (burst of 3 ammo → 3 lines), not per shotgun pellet.
+  if (ghostBullets.length > before) logBulletAppearProbe();
 }
 
 function ghostBulletCollides(g) {
@@ -7469,10 +7457,6 @@ function renderGhostBullets() {
   for (let i = 0; i < ghostBullets.length; i++) {
     const g = ghostBullets[i];
     if (g.x < 0 || g.x > W || g.y < 0 || g.y > H) continue;
-    if (g.lagProbe) {
-      g.lagProbe = false;
-      logBulletAppearProbe();
-    }
     const ang = Math.atan2(g.vy, g.vx);
     const type = g.type || 'default';
     const sizeOpts = (type === 'default' || type === 'voidcannon') ? { size: g.r } : null;
@@ -20915,10 +20899,10 @@ function renderBullets() {
         const vy = p.vy != null ? p.vy : b.vy;
         const ang = Math.atan2(vy, vx);
         if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
-        if (_lagProbeAwaitOwnBullet && (b.owner | 0) === (myId | 0)) {
+        if (_lagProbeOwnBulletLeft > 0 && (b.owner | 0) === (myId | 0)) {
           const t = b.type || 'default';
           if (t !== 'laser' && t !== 'railgun' && t !== 'thrust') {
-            _lagProbeAwaitOwnBullet = false;
+            _lagProbeOwnBulletLeft--;
             logBulletAppearProbe();
           }
         }
