@@ -966,8 +966,8 @@ const CVARS = {
     help: 'Draw collision hitboxes (0/1). Asteroids = filled poly, players = dual circles, enemies = radius circle, bullets = solid red circles.'
   },
   cl_touch: {
-    value: 1,
-    def: 1,
+    value: 0,
+    def: 0,
     help: '1 = show on-screen touch controls (left/right turn + tap empty to shoot). 0 = hide.'
   },
   cl_server_pose: {
