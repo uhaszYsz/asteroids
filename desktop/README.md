@@ -43,7 +43,7 @@ npm run desktop:pack:steam
 ```
 
 Creates:
-- `desktop/dist/steam-depot-windows/` → Launch: `AsteroidsArena.bat`
+- `desktop/dist/steam-depot-windows/` → Launch: `AsteroidsArena.vbs` (silent; `.bat` shows CMD)
 - `desktop/dist/steam-depot-linux/` → Launch: `AsteroidsArena.sh`
 - `desktop/dist/steam-depot-macos/` → Launch: `AsteroidsArena.sh`
 

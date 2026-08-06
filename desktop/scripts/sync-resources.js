@@ -62,6 +62,7 @@ function patchIndex(html) {
 (function () {
   if (typeof Neutralino === 'undefined') return;
   Neutralino.init();
+  try { Neutralino.window.setFullScreen(true); } catch (_) {}
   Neutralino.events.on('windowClose', function () {
     Neutralino.app.exit();
   });

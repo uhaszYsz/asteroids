@@ -169,16 +169,18 @@ async function packWindows(neuDist) {
   fs.mkdirSync(runtimeDir, { recursive: true });
   copyFile(process.execPath, path.join(runtimeDir, 'node.exe'));
 
-  writeCommonSteamFiles(out, 'AsteroidsArena.bat');
+  writeCommonSteamFiles(out, 'AsteroidsArena.vbs');
   copyFile(path.join(STEAM_DIR, 'AsteroidsArena.bat'), path.join(out, 'AsteroidsArena.bat'));
+  copyFile(path.join(STEAM_DIR, 'AsteroidsArena.vbs'), path.join(out, 'AsteroidsArena.vbs'));
 
   fs.writeFileSync(path.join(out, 'README-STEAM.txt'), [
     'Asteroids Arena Online — Windows Steam depot',
     '',
     'Steamworks Launch Option (Windows):',
-    '  Executable: AsteroidsArena.bat',
+    '  Executable: AsteroidsArena.vbs',
     '  Working Directory: (blank)',
     '',
+    '(AsteroidsArena.bat also works but shows a CMD window.)',
     'Upload this folder as your Windows depot via SteamPipe.',
     ''
   ].join('\n'));
