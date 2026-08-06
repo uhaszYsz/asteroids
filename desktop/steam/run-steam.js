@@ -20,11 +20,21 @@ const DESKTOP = path.resolve(__dirname, '..');
 const build = process.argv.includes('--build');
 
 function run(cmd, args, opts) {
-  const r = spawnSync(cmd, args, Object.assign({
+  const o = Object.assign({
     cwd: ROOT,
     stdio: 'inherit',
-    shell: process.platform === 'win32'
-  }, opts || {}));
+    // shell:true breaks absolute paths with spaces (e.g. C:\Program Files\nodejs\node.exe)
+    shell: false
+  }, opts || {});
+  // npm/npx need the shell on Windows to resolve .cmd shims
+  if (process.platform === 'win32' && (cmd === 'npm' || cmd === 'npx')) {
+    o.shell = true;
+  }
+  const r = spawnSync(cmd, args, o);
+  if (r.error) {
+    console.error(r.error);
+    process.exit(1);
+  }
   if (r.status) process.exit(r.status || 1);
 }
 
