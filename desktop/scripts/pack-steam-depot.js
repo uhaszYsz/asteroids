@@ -83,12 +83,20 @@ console.log('=== 2/3 Assembling Steam depot ===');
 rmDir(OUT);
 fs.mkdirSync(OUT, { recursive: true });
 
-// Game binaries / resources from neu build
+// Game binaries / resources from neu build (Windows depot only)
 for (const name of fs.readdirSync(neuDist)) {
   const from = path.join(neuDist, name);
-  const to = path.join(OUT, name === exeName ? 'asteroids-win_x64.exe' : name);
-  if (fs.statSync(from).isDirectory()) copyDir(from, to);
-  else copyFile(from, to);
+  if (fs.statSync(from).isDirectory()) {
+    copyDir(from, path.join(OUT, name));
+    continue;
+  }
+  // Skip non-Windows Neutralino binaries
+  if (/\.exe$/i.test(name)) {
+    copyFile(from, path.join(OUT, 'asteroids-win_x64.exe'));
+    continue;
+  }
+  if (/^asteroids-(linux|mac)/i.test(name)) continue;
+  copyFile(from, path.join(OUT, name));
 }
 
 // Portable Node (same major as build machine)
