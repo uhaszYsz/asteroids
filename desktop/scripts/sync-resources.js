@@ -56,14 +56,79 @@ function copyDir(src, dest) {
 }
 
 function patchIndex(html) {
+  // Neutralino: SW registration 404s / breaks asset loads (black WebGL, UI-only).
+  html = html.replace(/\r\n/g, '\n').replace(
+    /\n  <script>\n    \/\/ Hash-keyed asset cache:[\s\S]*?\n  <\/script>\n/,
+    '\n  <!-- serviceWorker disabled for Neutralino desktop -->\n'
+  );
+
   let boot = `
 <script src="js/neutralino.js"></script>
 <script>
 (function () {
   if (typeof Neutralino === 'undefined') return;
   Neutralino.init();
-  // Borderless maximized (config) — avoid exclusive fullscreen (adds display lag).
-  try { Neutralino.window.maximize(); } catch (_) {}
+  // Drop any SW that slipped in from a prior session.
+  try {
+    if (navigator.serviceWorker) {
+      navigator.serviceWorker.getRegistrations().then(function (regs) {
+        regs.forEach(function (r) { r.unregister(); });
+      });
+    }
+  } catch (_) {}
+  var covering = false;
+  var coveredOnce = false;
+  function coverDisplay(force) {
+    if (covering) return Promise.resolve();
+    if (coveredOnce && !force) return Promise.resolve();
+    covering = true;
+    // One-shot borderless fullscreen. Do NOT refocus / resize on a timer —
+    // that steals focus from dropdowns and Windows Snipping Tool.
+    return Promise.resolve()
+      .then(function () { return Neutralino.window.setAlwaysOnTop(true); })
+      .catch(function () {})
+      .then(function () {
+        return Neutralino.window.isMaximized().then(function (m) {
+          return m ? Neutralino.window.unmaximize() : null;
+        });
+      })
+      .catch(function () {})
+      .then(function () { return Neutralino.window.setFullScreen(true); })
+      .catch(function () {})
+      .then(function () { return Neutralino.computer.getDisplays(); })
+      .then(function (displays) {
+        var d = displays && displays[0];
+        var rw = d && d.resolution && d.resolution.width;
+        var rh = d && d.resolution && d.resolution.height;
+        var w = Math.max(screen.width || 0, rw || 0, 800);
+        var h = Math.max(screen.height || 0, rh || 0, 600);
+        return Neutralino.window.setSize({ width: w, height: h, resizable: false })
+          .then(function () { return Neutralino.window.move(0, 0); });
+      })
+      .catch(function () {
+        try {
+          Neutralino.window.setSize({
+            width: screen.width || 1920,
+            height: screen.height || 1080,
+            resizable: false
+          });
+          Neutralino.window.move(0, 0);
+        } catch (_) {}
+      })
+      .then(function () {
+        try { Neutralino.window.setAlwaysOnTop(true); } catch (_) {}
+        coveredOnce = true;
+      })
+      .then(function () { covering = false; }, function () { covering = false; });
+  }
+  coverDisplay(true);
+  setTimeout(function () { coverDisplay(true); }, 300);
+  try {
+    Neutralino.events.on('windowRestore', function () {
+      coveredOnce = false;
+      setTimeout(function () { coverDisplay(true); }, 100);
+    });
+  } catch (_) {}
   Neutralino.events.on('windowClose', function () {
     Neutralino.app.exit();
   });

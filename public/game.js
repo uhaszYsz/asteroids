@@ -393,8 +393,10 @@ function loadRenderResolution() {
 function syncSettingsResolutionUi() {
   const sel = document.getElementById('settings-resolution');
   if (!sel) return;
+  // Don't touch the <select> while the user has it open — setting option.selected closes it.
+  if (document.activeElement === sel) return;
   const v = renderScaleMode === 'auto' ? '0' : String(renderScaleMode);
-  if (document.activeElement !== sel) sel.value = v;
+  sel.value = v;
   sel.querySelectorAll('option').forEach((opt) => {
     opt.selected = opt.value === v;
   });
