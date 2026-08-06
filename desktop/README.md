@@ -42,10 +42,11 @@ Steam setup details: see `steam/README.md`.
 npm run desktop:pack:steam
 ```
 
-Upload the whole folder `desktop/dist/steam-depot/` via SteamPipe.
+Creates:
+- `desktop/dist/steam-depot-windows/` → Launch: `AsteroidsArena.bat`
+- `desktop/dist/steam-depot-linux/` → Launch: `AsteroidsArena.sh`
+- `desktop/dist/steam-depot-macos/` → Launch: `AsteroidsArena.sh`
 
-Steamworks → Installation → Launch Options:
-- Executable: `AsteroidsArena.bat`
-- Working Directory: (blank)
+(`desktop/dist/steam-depot/` is a Windows copy for compatibility.)
 
-`AsteroidsArena.bat` fetches a fresh Steam ticket each launch, then starts the game exe.
+In Steamworks create **3 depots** (Windows / Linux / macOS) and one Launch Option per OS.

@@ -8,6 +8,7 @@ accounts.json.bak
 desktop/bin/
 desktop/.tmp/
 desktop/dist/
+desktop/.cache/
 desktop/resources/
 desktop/steam/node_modules/
 desktop/steam/session.json
