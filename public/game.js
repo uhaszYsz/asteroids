@@ -387,9 +387,10 @@ function syncSettingsResolutionUi() {
   });
 }
 
-/** Fit canvas to the window (contain) — keep W:H aspect, maximize size, no fixed 2× letterbox. */
+/** Fit canvas to the window (contain) — integer CSS scale so 1px grid lines stay even. */
 function fitCanvasIntegerScale() {
-  const scale = getFitCssScale();
+  // Non-integer CSS scale makes 1px world lines render as 1px/2px unevenly after stretch.
+  const scale = getFitCssScaleFloor();
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
   if (renderScaleMode === 'auto') {
