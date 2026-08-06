@@ -38,4 +38,14 @@ Steam setup details: see `steam/README.md`.
 
 ## Steam depot
 
-Upload `desktop/dist/asteroids/` after `desktop:build:steam`. Set launch exe to `asteroids-win_x64.exe`.
+```bash
+npm run desktop:pack:steam
+```
+
+Upload the whole folder `desktop/dist/steam-depot/` via SteamPipe.
+
+Steamworks → Installation → Launch Options:
+- Executable: `AsteroidsArena.bat`
+- Working Directory: (blank)
+
+`AsteroidsArena.bat` fetches a fresh Steam ticket each launch, then starts the game exe.

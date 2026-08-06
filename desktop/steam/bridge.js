@@ -97,11 +97,21 @@ async function main() {
     at: Date.now()
   };
   writeSession(session);
+
+  const outExtra = String(process.env.STEAM_SESSION_OUT || '').trim();
+  if (outExtra) {
+    fs.mkdirSync(path.dirname(outExtra), { recursive: true });
+    fs.writeFileSync(outExtra, JSON.stringify(session, null, 2));
+    console.log('Steam session also written:', outExtra);
+  }
+
   console.log('Steam session written:', SESSION_FILE);
   console.log('steamId=', steamId, 'name=', personaName, 'ticketBytes=', bytes.length);
 
   // Do NOT cancel the ticket here — Neutralino starts afterward and the game server
   // must AuthenticateUserTicket while the ticket is still valid.
+  // steamworks.js keeps native handles; force exit so launchers (spawnSync) continue.
+  process.exit(0);
 }
 
 main().catch((err) => {

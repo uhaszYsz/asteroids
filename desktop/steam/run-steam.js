@@ -45,8 +45,22 @@ if (!fs.existsSync(steamNm)) {
   run('npm', ['install'], { cwd: __dirname });
 }
 
-console.log('Fetching Steam auth ticket…');
-run(process.execPath, [path.join(__dirname, 'bridge.js')]);
+if (!build) {
+  console.log('Fetching Steam auth ticket…');
+  const sessionOutRun = path.join(DESKTOP, 'bin', 'steam_session.json');
+  process.env.STEAM_SESSION_OUT = sessionOutRun;
+  run(process.execPath, [path.join(__dirname, 'bridge.js')], { env: process.env });
+} else {
+  // Depot launcher fetches a fresh ticket at runtime — placeholder is enough for the bundle.
+  const placeholder = {
+    ok: 0,
+    err: 'no_session',
+    detail: 'Launch via AsteroidsArena.bat to fetch a Steam ticket',
+    at: Date.now()
+  };
+  fs.writeFileSync(path.join(__dirname, 'session.json'), JSON.stringify(placeholder, null, 2));
+  console.log('Build mode: skipping live Steam ticket (launcher fetches at runtime).');
+}
 
 console.log('Syncing Neutralino resources (Steam)…');
 run(process.execPath, [path.join(DESKTOP, 'scripts', 'sync-resources.js'), '--steam']);
@@ -57,6 +71,14 @@ if (!fs.existsSync(neuBin) || !fs.readdirSync(neuBin).length) {
   console.log('Downloading Neutralino binaries (first run)…');
   run('npx', ['neu', 'update'], { cwd: DESKTOP });
 }
+// neu run loads from bin/ — put session next to the binary for boot-steam.js
+try {
+  const sess = path.join(__dirname, 'session.json');
+  if (!build && fs.existsSync(sess)) {
+    fs.mkdirSync(neuBin, { recursive: true });
+    fs.copyFileSync(sess, path.join(neuBin, 'steam_session.json'));
+  }
+} catch (_) {}
 
 if (build) {
   console.log('Building Neutralino Steam package…');

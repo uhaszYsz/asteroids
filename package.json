@@ -11,6 +11,7 @@
     "desktop:build": "npm run desktop:sync && cd desktop && npx neu build",
     "desktop:run:steam": "node desktop/steam/run-steam.js",
     "desktop:build:steam": "node desktop/steam/run-steam.js --build",
+    "desktop:pack:steam": "node desktop/scripts/pack-steam-depot.js",
     "steam:ticket": "node desktop/steam/bridge.js"
   },
   "dependencies": {
