@@ -37,7 +37,7 @@
       display: block;
       image-rendering: pixelated;
       image-rendering: crisp-edges;
-      /* width/height set in JS — integer scale so 1px grid lines stay even */
+      /* width/height set in JS — contain-fit to the window */
       touch-action: none;
     }
     #touch-controls {
@@ -126,7 +126,7 @@
       z-index: 18; pointer-events: none;
       max-width: min(92vw, 720px);
       padding: 0 4px;
-      font: 700 26px Consolas, "Courier New", monospace;
+      font: 700 22px Consolas, "Courier New", monospace;
       letter-spacing: 0.12em;
       text-align: left;
       white-space: nowrap;
@@ -158,7 +158,7 @@
       100% { background-position: 220% center; }
     }
     @media (max-width: 520px) {
-      #now-playing { font-size: 22px; letter-spacing: 0.08em; }
+      #now-playing { font-size: 16px; letter-spacing: 0.08em; }
     }
     #menu {
       position: fixed; inset: 0; z-index: 3;
@@ -2364,6 +2364,6 @@
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=85"></script>
-<script src="game.js?v=968"></script>
+<script src="game.js?v=969"></script>
 </body>
 </html>

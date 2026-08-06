@@ -347,10 +347,10 @@ function getCoverCssScaleCeil() {
 
 function pickAutoRenderScale() {
   // Prefer matching a dense framebuffer; bump to 3 on large screens, drop to 1 if tiny.
-  const fit = getFitCssScaleFloor();
+  const fit = getFitCssScale();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   if (fit >= 3 || (fit >= 2 && dpr >= 2 && window.innerWidth >= W * 3)) return 3;
-  if (fit >= 2) return 2;
+  if (fit >= 1.75) return 2;
   return 1;
 }
 
@@ -402,9 +402,13 @@ function syncSettingsResolutionUi() {
   });
 }
 
-/** Fit canvas to the window — integer contain (16:9 world fills 16:9 screens exactly). */
+/**
+ * Fit canvas to the window (contain, letterbox).
+ * Fractional CSS size so typical laptop windows aren't stuck at 1× (960×540)
+ * after the 16:9 world change — integer floor needed ≥1920×1080 for 2×.
+ */
 function fitCanvasIntegerScale() {
-  const scale = getFitCssScaleFloor();
+  const scale = getFitCssScale();
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
   if (renderScaleMode === 'auto') {
