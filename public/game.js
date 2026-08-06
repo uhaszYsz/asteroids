@@ -20964,6 +20964,7 @@ const menuTitleFS = `
   uniform float uTime;
   uniform float uAlpha;
   uniform float uAmiga;
+  uniform float uPad;
   uniform vec2 uTexel;
   uniform vec2 uUv0;
   uniform vec2 uUv1;
@@ -20983,25 +20984,47 @@ const menuTitleFS = `
     return mix(d, e, x - 3.0);
   }
 
+  vec3 cyanOutline(float t, vec2 p) {
+    float wave = 0.5 + 0.5 * sin(t * 5.2 + p.x * 14.0 + p.y * 9.0);
+    float chase = fract(p.x * 0.85 + p.y * 0.45 - t * 0.95);
+    float spark = smoothstep(0.0, 0.08, chase) * (1.0 - smoothstep(0.08, 0.22, chase));
+    vec3 c0 = vec3(0.05, 0.55, 0.95);
+    vec3 c1 = vec3(0.25, 1.00, 1.00);
+    vec3 c2 = vec3(0.70, 1.00, 1.00);
+    vec3 col = mix(c0, c1, wave);
+    col = mix(col, c2, spark);
+    col += vec3(0.15, 0.45, 0.55) * (0.35 + 0.65 * wave);
+    return col;
+  }
+
   float sampleA(vec2 uv) {
-    vec2 c = clamp(uv, uUv0, uUv1);
-    return texture2D(uTex, c).a;
+    if (uv.x < uUv0.x || uv.x > uUv1.x || uv.y < uUv0.y || uv.y > uUv1.y) return 0.0;
+    return texture2D(uTex, uv).a;
   }
 
   void main() {
-    vec2 uv = vec2(mix(uUv0.x, uUv1.x, vUV.x), mix(uUv0.y, uUv1.y, vUV.y));
-    vec4 tex = texture2D(uTex, uv);
+    // vUV covers padded quad; map so [uPad, 1-uPad] is the sprite frame.
+    float denom = max(1e-4, 1.0 - 2.0 * uPad);
+    vec2 local = (vUV - uPad) / denom;
+    vec2 uv = vec2(mix(uUv0.x, uUv1.x, local.x), mix(uUv0.y, uUv1.y, local.y));
 
-    // Dilate alpha for a crisp dark outline (Amiga/demo-scene logo look).
+    bool inside = local.x >= 0.0 && local.x <= 1.0 && local.y >= 0.0 && local.y <= 1.0;
+    vec4 tex = inside ? texture2D(uTex, clamp(uv, uUv0, uUv1)) : vec4(0.0);
+
+    // Dilate alpha for outline — pad on the quad so this isn't clipped by the bbox.
     float aMax = tex.a;
+    aMax = max(aMax, sampleA(uv + vec2(-3.0,  0.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 3.0,  0.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 0.0, -3.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 0.0,  3.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2(-3.0, -3.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 3.0, -3.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2(-3.0,  3.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 3.0,  3.0) * uTexel));
     aMax = max(aMax, sampleA(uv + vec2(-2.0,  0.0) * uTexel));
     aMax = max(aMax, sampleA(uv + vec2( 2.0,  0.0) * uTexel));
     aMax = max(aMax, sampleA(uv + vec2( 0.0, -2.0) * uTexel));
     aMax = max(aMax, sampleA(uv + vec2( 0.0,  2.0) * uTexel));
-    aMax = max(aMax, sampleA(uv + vec2(-2.0, -2.0) * uTexel));
-    aMax = max(aMax, sampleA(uv + vec2( 2.0, -2.0) * uTexel));
-    aMax = max(aMax, sampleA(uv + vec2(-2.0,  2.0) * uTexel));
-    aMax = max(aMax, sampleA(uv + vec2( 2.0,  2.0) * uTexel));
     aMax = max(aMax, sampleA(uv + vec2(-1.0,  0.0) * uTexel));
     aMax = max(aMax, sampleA(uv + vec2( 1.0,  0.0) * uTexel));
     aMax = max(aMax, sampleA(uv + vec2( 0.0, -1.0) * uTexel));
@@ -21010,23 +21033,22 @@ const menuTitleFS = `
     if (aMax < 0.06) discard;
 
     if (tex.a < 0.18) {
-      float oa = smoothstep(0.06, 0.4, aMax) * uAlpha;
-      gl_FragColor = vec4(0.02, 0.02, 0.06, oa);
+      float oa = smoothstep(0.06, 0.45, aMax) * uAlpha;
+      vec3 ocol = cyanOutline(uTime, local);
+      gl_FragColor = vec4(ocol, oa);
       return;
     }
 
     vec3 rgb = tex.rgb;
     if (uAmiga > 0.5) {
       float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
-      float scroll = vUV.y * 1.85 - uTime * 0.62 + lum * 0.4;
+      float scroll = local.y * 1.85 - uTime * 0.62 + lum * 0.4;
       vec3 pal = amigaCopper(scroll);
       rgb = pal * (0.42 + 0.78 * lum);
-      // Moving copper highlight bar.
-      float bar = abs(fract(vUV.y * 1.35 - uTime * 0.9) - 0.5);
+      float bar = abs(fract(local.y * 1.35 - uTime * 0.9) - 0.5);
       float shine = smoothstep(0.11, 0.0, bar);
       rgb += vec3(1.0, 0.92, 0.65) * shine * 0.55;
-      // Soft chroma pulse (demo-scene vibe).
-      float pulse = 0.92 + 0.08 * sin(uTime * 5.5 + vUV.x * 8.0);
+      float pulse = 0.92 + 0.08 * sin(uTime * 5.5 + local.x * 8.0);
       rgb *= pulse;
     }
 
@@ -21044,6 +21066,7 @@ const mtUTex = gl.getUniformLocation(menuTitleProg, 'uTex');
 const mtUTime = gl.getUniformLocation(menuTitleProg, 'uTime');
 const mtUAlpha = gl.getUniformLocation(menuTitleProg, 'uAlpha');
 const mtUAmiga = gl.getUniformLocation(menuTitleProg, 'uAmiga');
+const mtUPad = gl.getUniformLocation(menuTitleProg, 'uPad');
 const mtUTexel = gl.getUniformLocation(menuTitleProg, 'uTexel');
 const mtUUv0 = gl.getUniformLocation(menuTitleProg, 'uUv0');
 const mtUUv1 = gl.getUniformLocation(menuTitleProg, 'uUv1');
@@ -21056,9 +21079,15 @@ function drawMenuTitle(now) {
   if (!menuTitleReady) return;
   const fw = Math.max(1, (menuTitleTw / MENU_TITLE_FRAMES) | 0);
   const fh = Math.max(1, menuTitleTh | 0);
-  // Fit ~62% of screen width, keep native aspect.
-  const worldW = Math.min(W * 0.62, fw * (RES_SCALE >= 2 ? 2.35 : 2.0));
-  const worldH = worldW * (fh / fw);
+  // Half of prior size (~31% screen / ~1.175× native at RES_SCALE 2).
+  const contentW = Math.min(W * 0.31, fw * (RES_SCALE >= 2 ? 1.175 : 1.0));
+  const contentH = contentW * (fh / fw);
+  // Extra room so dilated cyan outline isn't clipped by the quad.
+  const outlineTexels = 5;
+  const padFrac = Math.max(outlineTexels / fw, outlineTexels / fh);
+  const worldW = contentW * (1 + 2 * padFrac);
+  const worldH = contentH * (1 + 2 * padFrac);
+  const padUv = padFrac / (1 + 2 * padFrac);
   const cx = W * 0.5;
   const cy = 28 * RES_SCALE + worldH * 0.5;
   const hw = worldW * 0.5;
@@ -21089,6 +21118,7 @@ function drawMenuTitle(now) {
   gl.uniform2f(mtURes, W, H);
   gl.uniform1f(mtUTime, t);
   gl.uniform1f(mtUAlpha, 1);
+  gl.uniform1f(mtUPad, padUv);
   gl.uniform2f(mtUTexel, 1 / Math.max(1, menuTitleTw), 1 / Math.max(1, menuTitleTh));
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, menuTitleTex);
