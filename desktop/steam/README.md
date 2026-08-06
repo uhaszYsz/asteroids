@@ -4,7 +4,7 @@ This folder is **only** for Steam desktop builds. It is never required for the b
 
 ## Setup
 
-1. Put your real AppID in `steam_appid.txt` (replace the Spacewar `480` test id).
+1. AppID is in `steam_appid.txt` (`5069920`).
 2. Install bridge deps once:
    ```bash
    cd desktop/steam
@@ -19,7 +19,9 @@ This folder is **only** for Steam desktop builds. It is never required for the b
 
 ## Run Steam client
 
-Steam client must be running and logged in.
+Steam client must be running and logged in. Your Steam account must **own** AppID `5069920`
+(Steamworks → Packages: add yourself / redeem a test key / install from partner site).
+Without ownership, `GetAuthTicketForWebApi` times out.
 
 ```bash
 npm run desktop:run:steam

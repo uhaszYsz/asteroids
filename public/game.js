@@ -13882,15 +13882,30 @@ function accountErrText(err) {
   }
 }
 
+/** True only in Neutralino Steam builds (boot-steam.js sets this). Browser never has it. */
+function isSteamDesktopClient() {
+  return !!(typeof window !== 'undefined' && window.__ASTEROIDS_STEAM__);
+}
+
+/** Hide Register/Login (PIN) on Steam desktop; keep them for browser / non-Steam exe. */
+function syncAccountAuthButtons() {
+  const hidePinAuth = !!(accountSession.registered || accountSession.steam || isSteamDesktopClient());
+  if (accountRegisterBtn) accountRegisterBtn.style.display = hidePinAuth ? 'none' : '';
+  if (accountLoginBtn) accountLoginBtn.style.display = hidePinAuth ? 'none' : '';
+}
+
 /**
- * Steam desktop builds only. Browser / plain Neutralino never set
- * window.__ASTEROIDS_STEAM__, so this is a no-op there.
+ * Steam desktop builds only — silent autologin, no PIN prompt.
+ * Browser / plain Neutralino never set window.__ASTEROIDS_STEAM__, so this is a no-op there.
  */
 function trySteamAuthLogin() {
   const steam = typeof window !== 'undefined' ? window.__ASTEROIDS_STEAM__ : null;
   if (!steam) return;
   if (!ws || ws.readyState !== 1) return;
   if (accountSession.registered) return;
+
+  syncAccountAuthButtons();
+  setAccountMsg('Signing in with Steam…', true);
 
   const attempt = () => {
     const s = window.__ASTEROIDS_STEAM__;
@@ -13912,7 +13927,7 @@ function trySteamAuthLogin() {
   let n = 0;
   const iv = setInterval(() => {
     n += 1;
-    if (attempt() || n > 40) clearInterval(iv);
+    if (attempt() || n > 80) clearInterval(iv);
   }, 100);
 }
 
@@ -13979,12 +13994,7 @@ function applyAccountSession(msg) {
   if (accountMmrEl) {
     accountMmrEl.textContent = String(accountSession.mmr | 0);
   }
-  if (accountRegisterBtn) {
-    accountRegisterBtn.style.display = (accountSession.registered || accountSession.steam) ? 'none' : '';
-  }
-  if (accountLoginBtn) {
-    accountLoginBtn.style.display = (accountSession.registered || accountSession.steam) ? 'none' : '';
-  }
+  syncAccountAuthButtons();
   try {
     if (accountSession.registered && accountSession.name) {
       localStorage.setItem('asteroids_account_name', accountSession.name);
@@ -21574,9 +21584,8 @@ function handleWsMessage(e) {
     if (msg.t === 'steamLogin') {
       applyAccountSession(msg);
       if (msg.ok) {
-        setAccountMsg(msg.created ? 'Steam account linked.' : 'Signed in with Steam.', true);
-        if (accountRegisterBtn) accountRegisterBtn.style.display = 'none';
-        if (accountLoginBtn) accountLoginBtn.style.display = 'none';
+        setAccountMsg(msg.created ? 'Signed in with Steam.' : 'Signed in with Steam.', true);
+        syncAccountAuthButtons();
       } else if (msg.err && msg.err !== 'disabled' && msg.err !== 'already') {
         setAccountMsg('Steam login failed (' + accountErrText(msg.err) + ').', false);
       }
@@ -24934,6 +24943,16 @@ function frame(now) {
     updateHud();
     render();
   }
+}
+
+if (isSteamDesktopClient()) {
+  syncAccountAuthButtons();
+  setAccountMsg('Signing in with Steam…', true);
+  const hidePinIv = setInterval(() => {
+    syncAccountAuthButtons();
+    const s = window.__ASTEROIDS_STEAM__;
+    if (!s || !s.pending) clearInterval(hidePinIv);
+  }, 200);
 }
 
 connect();

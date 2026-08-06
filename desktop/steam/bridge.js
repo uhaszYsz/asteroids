@@ -70,7 +70,7 @@ async function main() {
 
   let ticket;
   try {
-    ticket = await client.auth.getAuthTicketForWebApi(IDENTITY, 15);
+    ticket = await client.auth.getAuthTicketForWebApi(IDENTITY, 45);
   } catch (err) {
     writeSession({
       ok: 0,
@@ -100,9 +100,8 @@ async function main() {
   console.log('Steam session written:', SESSION_FILE);
   console.log('steamId=', steamId, 'name=', personaName, 'ticketBytes=', bytes.length);
 
-  // Keep process alive briefly so Steam callbacks stay valid until the game reads the ticket.
-  // Cancel after write — server will AuthenticateUserTicket once.
-  try { ticket.cancel(); } catch (_) {}
+  // Do NOT cancel the ticket here — Neutralino starts afterward and the game server
+  // must AuthenticateUserTicket while the ticket is still valid.
 }
 
 main().catch((err) => {

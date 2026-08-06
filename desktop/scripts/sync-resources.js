@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+const PUBLIC = path.join(ROOT, 'public');
 const DESKTOP = path.resolve(__dirname, '..');
 const RES = path.join(DESKTOP, 'resources');
 const STEAM_DIR = path.join(DESKTOP, 'steam');
@@ -20,12 +21,14 @@ const FILES = [
   'index.html',
   'game.js',
   'music.js',
+  'sw.js',
   'ship-meshes.js',
   'alien-ship-meshes.js'
 ];
 
 const DIRS = [
   'lib',
+  'sim',
   'sounds',
   'music',
   'sprites',
@@ -92,7 +95,7 @@ rmDir(RES);
 fs.mkdirSync(RES, { recursive: true });
 
 for (const f of FILES) {
-  const src = path.join(ROOT, f);
+  const src = path.join(PUBLIC, f);
   if (!fs.existsSync(src)) {
     console.warn('skip missing', f);
     continue;
@@ -106,7 +109,7 @@ for (const f of FILES) {
 }
 
 for (const d of DIRS) {
-  copyDir(path.join(ROOT, d), path.join(RES, d));
+  copyDir(path.join(PUBLIC, d), path.join(RES, d));
 }
 
 // Desktop-specific server config (do not use repo config.js empty default).

@@ -22,9 +22,9 @@ npm run desktop:sync         # copy HTML/JS/assets only (no Steam)
 
 Desktop uses `desktop/config.client.js` (copied to `resources/config.js`).
 
-Default: `http://127.0.0.1:8765`
+Default: `https://szkodnik.com/asteroids`
 
-For a public build, edit that file to your dedicated server before build.
+For local-only testing, temporarily set `http://127.0.0.1:8765` in that file.
 
 ## Steam vs browser
 
