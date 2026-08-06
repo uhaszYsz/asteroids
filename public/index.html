@@ -29,7 +29,7 @@
   <style>
     * { margin: 0; box-sizing: border-box; }
     body {
-      background: radial-gradient(ellipse at center, #1a0830 0%, #0a0218 55%, #05010d 100%);
+      background: #000;
       overflow: hidden; display: flex; justify-content: center; align-items: center;
       height: 100vh; font-family: Consolas, "Courier New", monospace;
     }
@@ -164,14 +164,14 @@
       padding-bottom: max(28px, 7vh);
     }
     #menu.hidden { display: none; }
-    #play-btn, #cancel-btn, #settings-btn, #account-btn, #leaderboard-btn, #rejoin-btn {
+    #play-btn, #cancel-btn, #settings-btn, #account-btn, #leaderboard-btn, #rejoin-btn, #exit-btn {
       border: 1px solid #c44aaa; background: #2a1040; color: #f0d0ff;
       padding: 12px 36px; font: 16px Consolas, "Courier New", monospace;
       letter-spacing: 0.08em; cursor: pointer; text-transform: uppercase;
       pointer-events: auto;
       box-shadow: 0 0 16px rgba(255, 60, 180, 0.2);
     }
-    #play-btn:hover, #cancel-btn:hover, #settings-btn:hover, #account-btn:hover, #leaderboard-btn:hover, #rejoin-btn:hover { background: #3c1860; }
+    #play-btn:hover, #cancel-btn:hover, #settings-btn:hover, #account-btn:hover, #leaderboard-btn:hover, #rejoin-btn:hover, #exit-btn:hover { background: #3c1860; }
     #play-btn:disabled { opacity: 0.45; cursor: default; }
     #rejoin-btn {
       border-color: #c4a44a; background: #2a2410; color: #ffe9b0;
@@ -179,6 +179,13 @@
     }
     #rejoin-btn.hidden { display: none; }
     #rejoin-btn:hover { background: #3a3018; }
+    #exit-btn {
+      border-color: #aa6a6a; background: #281818; color: #ffd0d0;
+      box-shadow: 0 0 12px rgba(200, 80, 80, 0.15);
+      padding: 10px 28px; font-size: 14px;
+    }
+    #exit-btn:hover { background: #3a2020; }
+    #exit-btn.hidden { display: none; }
     #menu .menu-actions {
       display: flex; flex-direction: column; align-items: center; gap: 12px;
       pointer-events: auto;
@@ -2133,6 +2140,7 @@
     <button id="settings-btn" type="button">Settings</button>
     <button id="account-btn" type="button">Account</button>
     <button id="leaderboard-btn" type="button">Leaderboards</button>
+    <button id="exit-btn" type="button" class="hidden">Exit</button>
   </div>
 </div>
 <div id="settings-panel" aria-hidden="true">
@@ -2342,6 +2350,6 @@
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=85"></script>
-<script src="game.js?v=952"></script>
+<script src="game.js?v=953"></script>
 </body>
 </html>

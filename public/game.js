@@ -320,17 +320,21 @@ function getRenderScale() {
   return renderScale;
 }
 
-/** Largest whole-number upscale that fits the window (used for Auto framebuffer). */
+/** Largest CSS scale that fits the window while keeping world aspect (W:H). */
 function getFitCssScale() {
-  return Math.max(1, Math.floor(Math.min(
-    window.innerWidth / W,
-    window.innerHeight / H
-  )));
+  const sx = window.innerWidth / W;
+  const sy = window.innerHeight / H;
+  return Math.max(0.01, Math.min(sx, sy));
+}
+
+/** Whole-number fit used only for Auto framebuffer picking. */
+function getFitCssScaleFloor() {
+  return Math.max(1, Math.floor(getFitCssScale()));
 }
 
 function pickAutoRenderScale() {
-  // Prefer matching the fixed 2× display; bump to 3 on large screens, drop to 1 if tiny.
-  const fit = getFitCssScale();
+  // Prefer matching a dense framebuffer; bump to 3 on large screens, drop to 1 if tiny.
+  const fit = getFitCssScaleFloor();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   if (fit >= 3 || (fit >= 2 && dpr >= 2 && window.innerWidth >= W * 3)) return 3;
   if (fit >= 2) return 2;
@@ -383,9 +387,9 @@ function syncSettingsResolutionUi() {
   });
 }
 
-/** Fixed 2× on-screen size. Independent of internal render resolution. */
+/** Fit canvas to the window (contain) — keep W:H aspect, maximize size, no fixed 2× letterbox. */
 function fitCanvasIntegerScale() {
-  const scale = 2;
+  const scale = getFitCssScale();
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
   if (renderScaleMode === 'auto') {
@@ -13193,6 +13197,7 @@ const settingsDynLightEl = null;
 const settingsBakeQualityEl = null;
 const accountBtn = document.getElementById('account-btn');
 const leaderboardBtn = document.getElementById('leaderboard-btn');
+const exitBtn = document.getElementById('exit-btn');
 const leaderboardPanelEl = document.getElementById('leaderboard-panel');
 const leaderboardCloseBtn = document.getElementById('leaderboard-close-btn');
 const lbBodyEl = document.getElementById('lb-body');
@@ -13881,6 +13886,34 @@ function accountErrText(err) {
     default: return err ? String(err) : 'Request failed.';
   }
 }
+
+/** True in Neutralino desktop shell (Steam or plain). */
+function isDesktopShell() {
+  return typeof Neutralino !== 'undefined' || isSteamDesktopClient();
+}
+
+function exitDesktopGame() {
+  try {
+    if (typeof Neutralino !== 'undefined' && Neutralino.app && Neutralino.app.exit) {
+      Neutralino.app.exit();
+      return;
+    }
+  } catch (_) {}
+  try { window.close(); } catch (_) {}
+}
+
+function syncExitButton() {
+  if (!exitBtn) return;
+  exitBtn.classList.toggle('hidden', !isDesktopShell());
+}
+
+if (exitBtn) {
+  exitBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    exitDesktopGame();
+  });
+}
+syncExitButton();
 
 /** True only in Neutralino Steam builds (boot-steam.js sets this). Browser never has it. */
 function isSteamDesktopClient() {
@@ -24947,12 +24980,16 @@ function frame(now) {
 
 if (isSteamDesktopClient()) {
   syncAccountAuthButtons();
+  syncExitButton();
   setAccountMsg('Signing in with Steam…', true);
   const hidePinIv = setInterval(() => {
     syncAccountAuthButtons();
+    syncExitButton();
     const s = window.__ASTEROIDS_STEAM__;
     if (!s || !s.pending) clearInterval(hidePinIv);
   }, 200);
+} else {
+  syncExitButton();
 }
 
 connect();
