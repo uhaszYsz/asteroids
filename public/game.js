@@ -13231,7 +13231,10 @@ const pauseTitleEl = document.getElementById('pause-title');
 const pauseMetaEl = document.getElementById('pause-meta');
 const pauseCdEl = document.getElementById('pause-cd');
 const pauseReadyBtn = document.getElementById('pause-ready-btn');
+const pauseCancelMmBtn = document.getElementById('pause-cancel-mm-btn');
 const pauseLeaveBtn = document.getElementById('pause-leave-btn');
+/** Esc pause overlay while queued but not yet in a match pause state. */
+let pauseMenuMatchmakingOnly = false;
 const settingsBtn = document.getElementById('settings-btn');
 const settingsPanelEl = document.getElementById('settings-panel');
 const settingsResEl = document.getElementById('settings-resolution');
@@ -13798,7 +13801,11 @@ function showSoloOverScreen(wave, score) {
     soloOverEl.setAttribute('aria-hidden', 'false');
   }
   if (menuEl) menuEl.classList.add('hidden');
-  if (cancelBtn) cancelBtn.classList.add('visible');
+  if (cancelBtn) {
+    if (waitingOnlineQueue) cancelBtn.classList.remove('visible');
+    else cancelBtn.classList.add('visible');
+  }
+  syncExitButton();
   if (waitBannerEl) {
     waitBannerEl.classList.remove('hidden');
     waitBannerEl.style.top = '';
@@ -13951,7 +13958,15 @@ function exitDesktopGame() {
 
 function syncExitButton() {
   if (!exitBtn) return;
-  exitBtn.classList.toggle('hidden', !isDesktopShell());
+  const onMainMenu = !!(
+    isDesktopShell()
+    && menuEl
+    && !menuEl.classList.contains('hidden')
+    && !inGame
+    && !waitingOnlineQueue
+    && !soloOverOpen
+  );
+  exitBtn.classList.toggle('hidden', !onMainMenu);
 }
 
 if (exitBtn) {
@@ -15904,9 +15919,12 @@ function setPracticeWaiting(on) {
     }
   }
   if (cancelBtn) {
-    if (practiceMode) cancelBtn.classList.add('visible');
+    // Matchmaking cancel lives in Esc pause only — not the top Cancel button.
+    if (waitingOnlineQueue) cancelBtn.classList.remove('visible');
+    else if (practiceMode) cancelBtn.classList.add('visible');
     else if (inGame) cancelBtn.classList.remove('visible');
   }
+  syncExitButton();
 }
 
 function showMenu() {
@@ -15914,6 +15932,7 @@ function showMenu() {
   if (playBtn) playBtn.disabled = !canOpenPlayMenu();
   if (cancelBtn) cancelBtn.classList.remove('visible');
   syncRejoinButton();
+  syncExitButton();
   playMenuMusic();
 }
 
@@ -15922,7 +15941,8 @@ function showQueue() {
   if (usingLocalSolo || (ws && ws.__local) || waitingOnlineQueue) {
     if (menuEl) menuEl.classList.add('hidden');
     if (playBtn) playBtn.disabled = true;
-    if (cancelBtn) cancelBtn.classList.add('visible');
+    if (cancelBtn) cancelBtn.classList.remove('visible');
+    syncExitButton();
     if (waitBannerEl && waitingOnlineQueue && !practiceMode) {
       waitBannerEl.classList.remove('hidden');
       waitBannerEl.style.top = '';
@@ -15936,10 +15956,12 @@ function showQueue() {
   if (menuEl) menuEl.classList.remove('hidden');
   if (playBtn) playBtn.disabled = true;
   if (cancelBtn) cancelBtn.classList.add('visible');
+  syncExitButton();
 }
 
 function hideMenu() {
   if (menuEl) menuEl.classList.add('hidden');
+  syncExitButton();
 }
 
 function fmtPauseBudget(ms) {
@@ -15961,6 +15983,7 @@ function syncRejoinButton() {
 }
 
 function closePausePanel() {
+  pauseMenuMatchmakingOnly = false;
   if (pausePanelEl) {
     pausePanelEl.classList.remove('open');
     pausePanelEl.setAttribute('aria-hidden', 'true');
@@ -15969,7 +15992,10 @@ function closePausePanel() {
   if (pauseReadyBtn) {
     pauseReadyBtn.disabled = false;
     pauseReadyBtn.textContent = 'Ready';
+    pauseReadyBtn.hidden = false;
   }
+  if (pauseLeaveBtn) pauseLeaveBtn.hidden = false;
+  if (pauseCancelMmBtn) pauseCancelMmBtn.hidden = true;
 }
 
 function clearMatchPause() {
@@ -15981,12 +16007,36 @@ function clearMatchPause() {
 
 function openPausePanel() {
   if (!pausePanelEl) return;
+  pauseMenuMatchmakingOnly = false;
   pausePanelEl.classList.add('open');
   pausePanelEl.setAttribute('aria-hidden', 'false');
   renderPausePanel();
 }
 
+/** Esc overlay while queued online (before / without a server match-pause). */
+function openMatchmakingPausePanel() {
+  if (!pausePanelEl || !waitingOnlineQueue) return;
+  pauseMenuMatchmakingOnly = true;
+  pausePanelEl.classList.add('open');
+  pausePanelEl.setAttribute('aria-hidden', 'false');
+  if (pauseTitleEl) pauseTitleEl.textContent = 'Matchmaking';
+  if (pauseMetaEl) {
+    const q = onlineQueueNeed
+      ? ('You are in matchmaking… (' + (onlineQueueWaiting | 0) + '/' + (onlineQueueNeed | 0) + ')')
+      : 'You are in matchmaking…';
+    pauseMetaEl.textContent = q + '\nPress Cancel matchmaking to leave the queue.';
+  }
+  if (pauseCdEl) pauseCdEl.textContent = '';
+  if (pauseReadyBtn) pauseReadyBtn.hidden = true;
+  if (pauseLeaveBtn) pauseLeaveBtn.hidden = true;
+  if (pauseCancelMmBtn) pauseCancelMmBtn.hidden = false;
+}
+
 function renderPausePanel() {
+  if (pauseMenuMatchmakingOnly) {
+    openMatchmakingPausePanel();
+    return;
+  }
   if (!pauseState) return;
   const reason = pauseState.reason || 'manual';
   const budgets = pauseState.budgets || {};
@@ -15996,15 +16046,22 @@ function renderPausePanel() {
   const cd = pauseState.countdown | 0;
   const holds = Array.isArray(pauseState.holds) ? pauseState.holds : [];
   const disconnected = holds.some(h => h && h[2]);
+  const mm = !!waitingOnlineQueue;
 
   let title = 'Paused';
-  if (reason === 'disconnect' || disconnected) title = 'Connection lost';
+  if (mm) title = 'Paused — matchmaking';
+  else if (reason === 'disconnect' || disconnected) title = 'Connection lost';
   else if (reason === 'rejoin') title = 'Rejoined — waiting';
   if (pauseTitleEl) pauseTitleEl.textContent = title;
 
   const myBudget = budgets[myId] != null ? budgets[myId] : null;
   const burnBudget = burnId != null && budgets[burnId] != null ? budgets[burnId] : null;
   const lines = [];
+  if (mm) {
+    lines.push(onlineQueueNeed
+      ? ('You are in matchmaking… (' + (onlineQueueWaiting | 0) + '/' + (onlineQueueNeed | 0) + ')')
+      : 'You are in matchmaking…');
+  }
   if (reason === 'disconnect' || disconnected) {
     lines.push('Opponent disconnected. Match is paused.');
     lines.push('Waiting for them to rejoin…');
@@ -16012,7 +16069,7 @@ function renderPausePanel() {
     lines.push('You paused the match.');
   } else if (burnId != null) {
     lines.push('Opponent paused the match.');
-  } else {
+  } else if (!mm) {
     lines.push('Match paused.');
   }
   if (burnId != null && burnBudget != null) {
@@ -16042,15 +16099,42 @@ function renderPausePanel() {
 
   const iAmReady = myId != null && ready.includes(myId | 0);
   if (pauseReadyBtn) {
+    pauseReadyBtn.hidden = false;
     const blockReady = !!(cd > 0 || iAmReady || disconnected);
     pauseReadyBtn.disabled = blockReady;
     pauseReadyBtn.textContent = disconnected
       ? 'Waiting…'
       : (cd > 0 ? 'Get ready…' : (iAmReady ? 'Ready ✓' : 'Ready'));
   }
+  if (pauseCancelMmBtn) pauseCancelMmBtn.hidden = !mm;
   if (pauseLeaveBtn) {
+    pauseLeaveBtn.hidden = !!mm;
     pauseLeaveBtn.textContent = (practiceMode && !coopMode) ? 'Quit to menu' : 'Leave match';
   }
+}
+
+function cancelMatchmakingFromPause() {
+  if (!waitingOnlineQueue) return;
+  if (!confirm('Cancel matchmaking and return to the main menu?')) return;
+  const local = ws && ws.__local ? ws : null;
+  const remote = remoteWs && remoteWs.readyState === 1 ? remoteWs
+    : (ws && !ws.__local && ws.readyState === 1 ? ws : null);
+  if (remote) {
+    try { remote.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+  }
+  if (local && local.readyState === 1) {
+    try { local.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+  } else if (ws && ws.readyState === 1 && !remote) {
+    try { ws.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
+  }
+  waitingOnlineQueue = null;
+  hideSoloOverScreen();
+  hideSoloShop();
+  clearMatchPause();
+  setPracticeWaiting(false);
+  if (usingLocalSolo) restoreRemoteSocketAfterSolo();
+  returnToLobby();
+  syncExitButton();
 }
 
 function applyPausedMsg(msg) {
@@ -16140,6 +16224,10 @@ function sendPauseReady() {
 
 function leaveFromPause() {
   if (!ws || ws.readyState !== 1) return;
+  if (waitingOnlineQueue) {
+    cancelMatchmakingFromPause();
+    return;
+  }
   const solo = practiceMode && !coopMode;
   const label = solo ? 'Quit to the main menu?' : 'Leave match? You will forfeit.';
   if (!confirm(label)) return;
@@ -21740,13 +21828,19 @@ function handleWsMessage(e) {
             ? ('Still matchmaking… (' + onlineQueueWaiting + '/' + onlineQueueNeed + ')')
             : 'Still matchmaking…';
         }
-        if (cancelBtn) cancelBtn.classList.add('visible');
+        if (cancelBtn) cancelBtn.classList.remove('visible');
+        if (pausePanelEl && pausePanelEl.classList.contains('open') && waitingOnlineQueue) {
+          renderPausePanel();
+        }
         return;
       }
       // Practice welcome usually follows; keep cancel ready if still on menu.
       if (!inGame) showQueue();
       else if (practiceMode && waitBannerEl) {
         syncSoloWaitBanner();
+      }
+      if (pausePanelEl && pausePanelEl.classList.contains('open') && waitingOnlineQueue) {
+        renderPausePanel();
       }
       return;
     }
@@ -22455,9 +22549,12 @@ function handleRemoteBackgroundMsg(bg) {
     if (soloOverOpen && waitBannerEl) {
       waitBannerEl.classList.remove('hidden');
       waitBannerEl.textContent = 'Still matchmaking… (' + onlineQueueWaiting + '/' + onlineQueueNeed + ')';
-      if (cancelBtn) cancelBtn.classList.add('visible');
+      if (cancelBtn) cancelBtn.classList.remove('visible');
     } else {
       syncSoloWaitBanner();
+    }
+    if (pausePanelEl && pausePanelEl.classList.contains('open') && waitingOnlineQueue) {
+      renderPausePanel();
     }
     return;
   }
@@ -22580,6 +22677,9 @@ if (rejoinBtn) {
 if (pauseReadyBtn) {
   pauseReadyBtn.addEventListener('click', () => sendPauseReady());
 }
+if (pauseCancelMmBtn) {
+  pauseCancelMmBtn.addEventListener('click', () => cancelMatchmakingFromPause());
+}
 if (pauseLeaveBtn) {
   pauseLeaveBtn.addEventListener('click', () => leaveFromPause());
 }
@@ -22592,24 +22692,19 @@ if (pausePanelEl) {
 if (cancelBtn) {
   cancelBtn.addEventListener('click', () => {
     if (soloShopOpen) return;
+    if (waitingOnlineQueue) return;
     if (!connected && !(remoteWs && remoteWs.readyState === 1)) return;
     if (soloOverOpen || (inGame && practiceMode)) {
       if (!confirm(soloOverOpen
-        ? 'Quit matchmaking and return to the main menu?'
+        ? 'Quit and return to the main menu?'
         : 'Quit solo run and return to the main menu?')) return;
     }
     const local = ws && ws.__local ? ws : null;
-    const remote = remoteWs && remoteWs.readyState === 1 ? remoteWs
-      : (ws && !ws.__local && ws.readyState === 1 ? ws : null);
-    if (waitingOnlineQueue && remote) {
-      try { remote.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
-    }
     if (local && local.readyState === 1) {
       try { local.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
     } else if (ws && ws.readyState === 1) {
       try { ws.send(JSON.stringify({ t: 'cancel' })); } catch (_) {}
     }
-    waitingOnlineQueue = null;
     hideSoloOverScreen();
     hideSoloShop();
     setPracticeWaiting(false);
@@ -22666,8 +22761,21 @@ addEventListener('keydown', e => {
     demoStopPlay(false);
     return;
   }
+  if (e.code === 'Escape' && waitingOnlineQueue) {
+    e.preventDefault();
+    if (pauseMenuMatchmakingOnly || (pausePanelEl && pausePanelEl.classList.contains('open') && waitingOnlineQueue && !matchPaused)) {
+      closePausePanel();
+      return;
+    }
+    if (inGame && ws && ws.readyState === 1) {
+      requestMatchPause();
+      return;
+    }
+    openMatchmakingPausePanel();
+    return;
+  }
   if (e.code === 'Escape' && soloOverOpen && ws && ws.readyState === 1) {
-    if (!confirm('Quit matchmaking and return to the main menu?')) return;
+    if (!confirm('Quit and return to the main menu?')) return;
     ws.send(JSON.stringify({ t: 'cancel' }));
     returnToLobby();
     return;
