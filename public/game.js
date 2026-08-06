@@ -20914,7 +20914,198 @@ function stepMenuAsteroids() {
 }
 
 function renderMenuBackdrop() {
-  // Title screen: grid + etched logo only (no floating asteroids).
+  drawMenuTitle(performance.now());
+}
+
+/* ========== Main-menu title strip (Title_strip2.png — ASTEROIDS ARENA | ONLINE) ========== */
+const MENU_TITLE_STRIP_URL = 'sprites/Title_strip2.png';
+const MENU_TITLE_FRAMES = 2;
+const menuTitleTex = gl.createTexture();
+let menuTitleReady = false;
+let menuTitleTw = 500;
+let menuTitleTh = 106;
+
+(function loadMenuTitleStrip() {
+  const img = new Image();
+  img.onload = () => {
+    menuTitleTw = img.naturalWidth | 0;
+    menuTitleTh = img.naturalHeight | 0;
+    gl.bindTexture(gl.TEXTURE_2D, menuTitleTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    menuTitleReady = true;
+  };
+  img.onerror = () => console.error('Failed to load menu title strip');
+  img.src = MENU_TITLE_STRIP_URL;
+})();
+
+const menuTitleVS = `
+  attribute vec2 aPos;
+  attribute vec2 aUV;
+  uniform vec2 uRes;
+  varying vec2 vUV;
+  void main() {
+    vec2 p = floor(aPos + 0.5) / uRes * 2.0 - 1.0;
+    gl_Position = vec4(p.x, -p.y, 0.0, 1.0);
+    vUV = aUV;
+  }
+`;
+const menuTitleFS = `
+  precision mediump float;
+  uniform sampler2D uTex;
+  uniform float uTime;
+  uniform float uAlpha;
+  uniform float uAmiga;
+  uniform vec2 uTexel;
+  uniform vec2 uUv0;
+  uniform vec2 uUv1;
+  varying vec2 vUV;
+
+  vec3 amigaCopper(float t) {
+    // Classic Amiga copper-bar palette: gold → amber → magenta → cyan → gold.
+    float x = fract(t) * 4.0;
+    vec3 a = vec3(1.00, 0.95, 0.55);
+    vec3 b = vec3(1.00, 0.55, 0.10);
+    vec3 c = vec3(1.00, 0.20, 0.65);
+    vec3 d = vec3(0.20, 0.90, 1.00);
+    vec3 e = vec3(1.00, 0.98, 0.60);
+    if (x < 1.0) return mix(a, b, x);
+    if (x < 2.0) return mix(b, c, x - 1.0);
+    if (x < 3.0) return mix(c, d, x - 2.0);
+    return mix(d, e, x - 3.0);
+  }
+
+  float sampleA(vec2 uv) {
+    vec2 c = clamp(uv, uUv0, uUv1);
+    return texture2D(uTex, c).a;
+  }
+
+  void main() {
+    vec2 uv = vec2(mix(uUv0.x, uUv1.x, vUV.x), mix(uUv0.y, uUv1.y, vUV.y));
+    vec4 tex = texture2D(uTex, uv);
+
+    // Dilate alpha for a crisp dark outline (Amiga/demo-scene logo look).
+    float aMax = tex.a;
+    aMax = max(aMax, sampleA(uv + vec2(-2.0,  0.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 2.0,  0.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 0.0, -2.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 0.0,  2.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2(-2.0, -2.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 2.0, -2.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2(-2.0,  2.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 2.0,  2.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2(-1.0,  0.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 1.0,  0.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 0.0, -1.0) * uTexel));
+    aMax = max(aMax, sampleA(uv + vec2( 0.0,  1.0) * uTexel));
+
+    if (aMax < 0.06) discard;
+
+    if (tex.a < 0.18) {
+      float oa = smoothstep(0.06, 0.4, aMax) * uAlpha;
+      gl_FragColor = vec4(0.02, 0.02, 0.06, oa);
+      return;
+    }
+
+    vec3 rgb = tex.rgb;
+    if (uAmiga > 0.5) {
+      float lum = dot(rgb, vec3(0.299, 0.587, 0.114));
+      float scroll = vUV.y * 1.85 - uTime * 0.62 + lum * 0.4;
+      vec3 pal = amigaCopper(scroll);
+      rgb = pal * (0.42 + 0.78 * lum);
+      // Moving copper highlight bar.
+      float bar = abs(fract(vUV.y * 1.35 - uTime * 0.9) - 0.5);
+      float shine = smoothstep(0.11, 0.0, bar);
+      rgb += vec3(1.0, 0.92, 0.65) * shine * 0.55;
+      // Soft chroma pulse (demo-scene vibe).
+      float pulse = 0.92 + 0.08 * sin(uTime * 5.5 + vUV.x * 8.0);
+      rgb *= pulse;
+    }
+
+    gl_FragColor = vec4(rgb, tex.a * uAlpha);
+  }
+`;
+const menuTitleProg = gl.createProgram();
+gl.bindAttribLocation(menuTitleProg, 0, 'aPos');
+gl.bindAttribLocation(menuTitleProg, 1, 'aUV');
+gl.attachShader(menuTitleProg, shader(gl.VERTEX_SHADER, menuTitleVS));
+gl.attachShader(menuTitleProg, shader(gl.FRAGMENT_SHADER, menuTitleFS));
+linkProgram(menuTitleProg);
+const mtURes = gl.getUniformLocation(menuTitleProg, 'uRes');
+const mtUTex = gl.getUniformLocation(menuTitleProg, 'uTex');
+const mtUTime = gl.getUniformLocation(menuTitleProg, 'uTime');
+const mtUAlpha = gl.getUniformLocation(menuTitleProg, 'uAlpha');
+const mtUAmiga = gl.getUniformLocation(menuTitleProg, 'uAmiga');
+const mtUTexel = gl.getUniformLocation(menuTitleProg, 'uTexel');
+const mtUUv0 = gl.getUniformLocation(menuTitleProg, 'uUv0');
+const mtUUv1 = gl.getUniformLocation(menuTitleProg, 'uUv1');
+const mtAPos = gl.getAttribLocation(menuTitleProg, 'aPos');
+const mtAUV = gl.getAttribLocation(menuTitleProg, 'aUV');
+const menuTitleBuf = gl.createBuffer();
+const menuTitleMesh = new Float32Array(6 * 4);
+
+function drawMenuTitle(now) {
+  if (!menuTitleReady) return;
+  const fw = Math.max(1, (menuTitleTw / MENU_TITLE_FRAMES) | 0);
+  const fh = Math.max(1, menuTitleTh | 0);
+  // Fit ~62% of screen width, keep native aspect.
+  const worldW = Math.min(W * 0.62, fw * (RES_SCALE >= 2 ? 2.35 : 2.0));
+  const worldH = worldW * (fh / fw);
+  const cx = W * 0.5;
+  const cy = 28 * RES_SCALE + worldH * 0.5;
+  const hw = worldW * 0.5;
+  const hh = worldH * 0.5;
+  const t = now * 0.001;
+  const corners = [
+    [-hw, -hh, 0, 0],
+    [hw, -hh, 1, 0],
+    [-hw, hh, 0, 1],
+    [hw, hh, 1, 1]
+  ];
+  const idx = [0, 1, 2, 1, 3, 2];
+  for (let v = 0; v < 6; v++) {
+    const q = corners[idx[v]];
+    menuTitleMesh[v * 4] = cx + q[0];
+    menuTitleMesh[v * 4 + 1] = cy + q[1];
+    menuTitleMesh[v * 4 + 2] = q[2];
+    menuTitleMesh[v * 4 + 3] = q[3];
+  }
+
+  gl.useProgram(menuTitleProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, menuTitleBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, menuTitleMesh, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(mtAPos);
+  gl.enableVertexAttribArray(mtAUV);
+  gl.vertexAttribPointer(mtAPos, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(mtAUV, 2, gl.FLOAT, false, 16, 8);
+  gl.uniform2f(mtURes, W, H);
+  gl.uniform1f(mtUTime, t);
+  gl.uniform1f(mtUAlpha, 1);
+  gl.uniform2f(mtUTexel, 1 / Math.max(1, menuTitleTw), 1 / Math.max(1, menuTitleTh));
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, menuTitleTex);
+  gl.uniform1i(mtUTex, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+  // Frame 0: ASTEROIDS ARENA — Amiga copper color-cycle.
+  gl.uniform1f(mtUAmiga, 1);
+  gl.uniform2f(mtUUv0, 0, 0);
+  gl.uniform2f(mtUUv1, 0.5, 1);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+  // Frame 1: ONLINE — same rect, static cyan (sprite already positioned for overlay).
+  gl.uniform1f(mtUAmiga, 0);
+  gl.uniform2f(mtUUv0, 0.5, 0);
+  gl.uniform2f(mtUUv1, 1, 1);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+  gl.disable(gl.BLEND);
+  gl.disableVertexAttribArray(mtAUV);
 }
 
 /** Match server BULLET_TYPES collision extents for cl_hitbox debug. */
@@ -25179,9 +25370,3 @@ if (isSteamDesktopClient()) {
 
 connect();
 requestAnimationFrame(frame);
-// Rebuild menu title bake once Orbitron is ready (first paint may use fallback).
-if (document.fonts && document.fonts.load) {
-  document.fonts.load('64px "Press Start 2P"').then(() => {
-    gridBakeDirty = true;
-  }).catch(() => {});
-}
