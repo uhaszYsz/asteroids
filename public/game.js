@@ -12229,6 +12229,10 @@ addEventListener('keydown', e => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'Space' && !spaceLatch) {
     spaceLatch = true;
+    // Input-lag probe: same clock as SpaceT0 utc_ms (Desktop/measure).
+    const utcMs = Date.now();
+    console.log('SPACE utc_ms=' + utcMs);
+    conPrint('SPACE utc_ms=' + utcMs, 'info');
     triggerShoot();
   }
   if (e.code === 'Enter' && !enterLatch) {
