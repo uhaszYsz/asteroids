@@ -52,10 +52,16 @@ console.log('Syncing Neutralino resources (Steam)…');
 run(process.execPath, [path.join(DESKTOP, 'scripts', 'sync-resources.js'), '--steam']);
 
 process.chdir(DESKTOP);
+const neuBin = path.join(DESKTOP, 'bin');
+if (!fs.existsSync(neuBin) || !fs.readdirSync(neuBin).length) {
+  console.log('Downloading Neutralino binaries (first run)…');
+  run('npx', ['neu', 'update'], { cwd: DESKTOP });
+}
+
 if (build) {
   console.log('Building Neutralino Steam package…');
-  run('npx', ['neu', 'build']);
+  run('npx', ['neu', 'build'], { cwd: DESKTOP });
 } else {
   console.log('Launching Neutralino…');
-  run('npx', ['neu', 'run']);
+  run('npx', ['neu', 'run'], { cwd: DESKTOP });
 }
