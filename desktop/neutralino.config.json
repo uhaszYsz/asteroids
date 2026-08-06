@@ -25,16 +25,17 @@
       "height": 720,
       "minWidth": 640,
       "minHeight": 360,
-      "fullScreen": true,
+      "fullScreen": false,
       "alwaysOnTop": false,
       "icon": "/resources/icons/appIcon.png",
       "enableInspector": false,
-      "borderless": false,
-      "maximize": false,
+      "borderless": true,
+      "maximize": true,
       "hidden": false,
       "resizable": true,
       "exitProcessOnClose": true,
-      "center": true
+      "center": true,
+      "webviewArgs": "--disable-features=CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-ipc-flooding-protection --enable-gpu-rasterization --enable-zero-copy --ignore-gpu-blocklist"
     }
   },
   "cli": {
@@ -42,7 +43,7 @@
     "resourcesPath": "/resources/",
     "extensionsPath": "/extensions/",
     "clientLibrary": "/resources/js/neutralino.js",
-    "binaryVersion": "6.0.0",
-    "clientVersion": "6.0.0"
+    "binaryVersion": "6.2.0",
+    "clientVersion": "6.2.0"
   }
 }

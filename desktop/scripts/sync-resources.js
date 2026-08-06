@@ -62,7 +62,8 @@ function patchIndex(html) {
 (function () {
   if (typeof Neutralino === 'undefined') return;
   Neutralino.init();
-  try { Neutralino.window.setFullScreen(true); } catch (_) {}
+  // Borderless maximized (config) — avoid exclusive fullscreen (adds display lag).
+  try { Neutralino.window.maximize(); } catch (_) {}
   Neutralino.events.on('windowClose', function () {
     Neutralino.app.exit();
   });

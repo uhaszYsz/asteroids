@@ -49,6 +49,19 @@ if (process.platform !== 'win32') {
 process.env.STEAM_SESSION_OUT = SESSION_OUT;
 if (!process.env.STEAM_APP_ID) process.env.STEAM_APP_ID = '5069920';
 
+// Low-latency WebView2 hints (also set via neutralino.config.json webviewArgs on 6.2+).
+if (!process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS) {
+  process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = [
+    '--disable-features=CalculateNativeWinOcclusion',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-ipc-flooding-protection',
+    '--enable-gpu-rasterization',
+    '--enable-zero-copy',
+    '--ignore-gpu-blocklist'
+  ].join(' ');
+}
+
 console.log('Fetching Steam auth ticket…');
 const ticket = spawnSync(process.execPath, [BRIDGE], {
   cwd: STEAM_DIR,
@@ -72,7 +85,8 @@ const child = spawn(GAME_EXE, [], {
   cwd: ROOT,
   detached: true,
   stdio: 'ignore',
-  windowsHide: false
+  windowsHide: false,
+  env: process.env
 });
 child.on('error', (err) => {
   console.error('Failed to start game:', err);
