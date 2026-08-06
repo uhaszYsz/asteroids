@@ -141,6 +141,14 @@ function writeCommonSteamFiles(outDir, launchHint) {
     detail: 'Run ' + launchHint + ' to fetch a Steam ticket',
     at: Date.now()
   }, null, 2));
+  // Unique per pack so SteamPipe/Web Upload never treats rebuilds as identical.
+  fs.writeFileSync(path.join(outDir, 'BUILD_STAMP.txt'), [
+    'appId=' + APP_ID,
+    'packedAt=' + new Date().toISOString(),
+    'launch=' + launchHint,
+    'host=' + require('os').hostname(),
+    ''
+  ].join('\n'));
 }
 
 function copySharedResources(neuDist, outDir) {
