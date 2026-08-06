@@ -44,8 +44,8 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   // Same-origin navigations / HTML: always network (keep deploys instant).
   if (req.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) return;
-  // Never touch API-ish endpoints.
-  if (url.pathname === '/health' || url.pathname === '/sw.js') return;
+  // Never touch API-ish endpoints (also /asteroids/health behind nginx).
+  if (url.pathname === '/sw.js' || /\/health\/?$/.test(url.pathname)) return;
 
   const rel = decodeURIComponent(url.pathname.replace(/^\//, ''));
   if (!rel || rel.includes('..')) return;

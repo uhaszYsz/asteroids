@@ -23,8 +23,26 @@ const MIME = {
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
+  // CORS for desktop Neutralino (http://127.0.0.1:random) and local probes.
+  const origin = req.headers.origin;
+  const allowOrigin = origin || '*';
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': allowOrigin,
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+      Vary: 'Origin'
+    });
+    res.end();
+    return;
+  }
+  if (req.url === '/health' || req.url === '/asteroids/health') {
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': allowOrigin,
+      Vary: 'Origin'
+    });
     res.end(JSON.stringify({
       ok: true,
       rooms: rooms.size,

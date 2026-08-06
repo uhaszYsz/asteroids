@@ -21060,9 +21060,11 @@ function pageServerBase() {
 }
 
 async function findHost() {
-  const bases = [];
   const configured = configuredServer();
-  if (configured) bases.push(configured);
+  // Desktop / Steam pins ASTEROIDS_SERVER — skip CORS health probes from 127.0.0.1:neuPort.
+  if (configured) return configured;
+
+  const bases = [];
   if (location.protocol === 'http:' || location.protocol === 'https:') {
     bases.push(pageServerBase());
     bases.push(location.origin);
