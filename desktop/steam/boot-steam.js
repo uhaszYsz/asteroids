@@ -2,6 +2,8 @@
  * Injected ONLY into Neutralino Steam builds (not browser, not plain desktop).
  * Prefer steam_session.json next to the .exe (written by the Steam launcher each run),
  * then fall back to bundled steam/session.json for local neu run.
+ *
+ * Must wait for Neutralino "ready" before filesystem APIs work.
  */
 (function () {
   window.__ASTEROIDS_STEAM__ = window.__ASTEROIDS_STEAM__ || { pending: true };
@@ -21,6 +23,7 @@
       identity: data.identity || 'asteroids-game-server',
       appId: data.appId || ''
     };
+    try { console.log('[steam] session ready', data.personaName || data.steamId); } catch (_) {}
   }
 
   function apply(data) {
@@ -46,27 +49,68 @@
       });
   }
 
-  function fromDiskThenFetch() {
-    var hasNeu = typeof Neutralino !== 'undefined'
-      && Neutralino.filesystem
-      && typeof NL_PATH === 'string'
-      && NL_PATH;
-    if (!hasNeu) return fromFetch();
+  function sessionPath() {
+    var base = (typeof NL_PATH === 'string' && NL_PATH) ? NL_PATH : '';
+    // Neutralino accepts / on Windows; also try native separator.
+    return [
+      base + '/steam_session.json',
+      base + '\\steam_session.json'
+    ];
+  }
 
-    Neutralino.filesystem.readFile(NL_PATH + '/steam_session.json')
+  function readDiskOnce() {
+    if (typeof Neutralino === 'undefined' || !Neutralino.filesystem) {
+      return Promise.reject(new Error('no_filesystem'));
+    }
+    var paths = sessionPath();
+    var i = 0;
+    function next() {
+      if (i >= paths.length) return Promise.reject(new Error('missing_session_file'));
+      var p = paths[i++];
+      return Neutralino.filesystem.readFile(p).catch(function () { return next(); });
+    }
+    return next();
+  }
+
+  function fromDiskWithRetry(attempt) {
+    attempt = attempt || 0;
+    return readDiskOnce()
       .then(function (raw) {
-        try {
-          if (apply(JSON.parse(raw))) return;
-        } catch (e) {
-          fail('session_parse', String(e && e.message || e));
-          return;
+        var data = JSON.parse(raw);
+        if (apply(data)) return;
+        // Placeholder / stale — retry a few times (launcher may still be writing).
+        if (attempt < 15) {
+          return new Promise(function (resolve) {
+            setTimeout(function () {
+              resolve(fromDiskWithRetry(attempt + 1));
+            }, 150);
+          });
         }
         return fromFetch();
       })
       .catch(function () {
+        if (attempt < 15) {
+          return new Promise(function (resolve) {
+            setTimeout(function () {
+              resolve(fromDiskWithRetry(attempt + 1));
+            }, 150);
+          });
+        }
         return fromFetch();
       });
   }
 
-  fromDiskThenFetch();
+  function start() {
+    fromDiskWithRetry(0);
+  }
+
+  if (typeof Neutralino !== 'undefined' && Neutralino.events && Neutralino.events.on) {
+    Neutralino.events.on('ready', start);
+    // If ready already fired before this script loaded, still try shortly.
+    setTimeout(function () {
+      if (window.__ASTEROIDS_STEAM__ && window.__ASTEROIDS_STEAM__.pending) start();
+    }, 500);
+  } else {
+    start();
+  }
 })();

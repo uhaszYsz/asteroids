@@ -13882,6 +13882,11 @@ function accountErrText(err) {
     case 'reject': return 'Steam rejected the ticket.';
     case 'network': return 'Could not reach Steam.';
     case 'timeout': return 'Steam auth timed out.';
+    case 'session': return 'Steam session missing — relaunch via Steam.';
+    case 'no_session': return 'Steam session missing — relaunch via Steam.';
+    case 'session_fetch': return 'Could not load Steam session.';
+    case 'session_parse': return 'Bad Steam session file.';
+    case 'missing_session_file': return 'steam_session.json not found next to the game.';
     case 'steamid': return 'Invalid SteamID.';
     default: return err ? String(err) : 'Request failed.';
   }
@@ -13940,13 +13945,16 @@ function trySteamAuthLogin() {
   syncAccountAuthButtons();
   setAccountMsg('Signing in with Steam…', true);
 
+  let sent = false;
   const attempt = () => {
+    if (sent || accountSession.registered) return true;
     const s = window.__ASTEROIDS_STEAM__;
     if (!s || s.pending) return false;
     if (!s.ok || !s.ticketHex) {
-      if (s.err) setAccountMsg('Steam: ' + accountErrText(s.err), false);
+      if (s.err) setAccountMsg('Steam: ' + accountErrText(s.err) + (s.detail ? ' (' + s.detail + ')' : ''), false);
       return true;
     }
+    sent = true;
     ws.send(JSON.stringify({
       t: 'steamLogin',
       ticket: s.ticketHex,
@@ -13960,7 +13968,7 @@ function trySteamAuthLogin() {
   let n = 0;
   const iv = setInterval(() => {
     n += 1;
-    if (attempt() || n > 80) clearInterval(iv);
+    if (attempt() || n > 100) clearInterval(iv);
   }, 100);
 }
 
