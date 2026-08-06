@@ -1,5 +1,6 @@
 const RES_SCALE = 2;
-const W = 420 * RES_SCALE, H = 240 * RES_SCALE;
+// 16:9 world (was 420×240 = 7:4). With RES_SCALE=2 → 960×540.
+const W = 480 * RES_SCALE, H = 270 * RES_SCALE;
 const canvas = document.getElementById('c');
 const statusEl = document.getElementById('status');
 const scoreHudEl = document.getElementById('score-hud');
@@ -304,10 +305,10 @@ const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: t
 /** Internal framebuffer scale vs fixed world size (W×H). Physics unchanged. */
 const RENDER_SCALE_KEY = 'asteroids_render_scale';
 const RENDER_SCALE_OPTS = [
-  { scale: 0.5, label: '420 × 240' },
-  { scale: 1, label: '840 × 480' },
-  { scale: 2, label: '1680 × 960' },
-  { scale: 3, label: '2520 × 1440' }
+  { scale: 0.5, label: '480 × 270' },
+  { scale: 1, label: '960 × 540' },
+  { scale: 2, label: '1920 × 1080' },
+  { scale: 3, label: '2880 × 1620' }
 ];
 let renderScale = 2;
 /** 'auto' | 0.5 | 1 | 2 | 3 — auto picks framebuffer from screen size; CSS stays 2×. */
@@ -346,7 +347,7 @@ function getCoverCssScaleCeil() {
 
 function pickAutoRenderScale() {
   // Prefer matching a dense framebuffer; bump to 3 on large screens, drop to 1 if tiny.
-  const fit = getCoverCssScaleCeil();
+  const fit = getFitCssScaleFloor();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   if (fit >= 3 || (fit >= 2 && dpr >= 2 && window.innerWidth >= W * 3)) return 3;
   if (fit >= 2) return 2;
@@ -399,9 +400,9 @@ function syncSettingsResolutionUi() {
   });
 }
 
-/** Fill the window with integer CSS scale (cover + crop). Even 1px grid, no side bars. */
+/** Fit canvas to the window — integer contain (16:9 world fills 16:9 screens exactly). */
 function fitCanvasIntegerScale() {
-  const scale = getCoverCssScaleCeil();
+  const scale = getFitCssScaleFloor();
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
   if (renderScaleMode === 'auto') {

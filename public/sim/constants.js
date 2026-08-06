@@ -2,7 +2,8 @@
 const PORT = Number(process.env.PORT) || 8765;
 const HOST = process.env.HOST || '0.0.0.0';
 const RES_SCALE = 2;
-const W = 420 * RES_SCALE, H = 240 * RES_SCALE;
+// 16:9 world (was 420×240 = 7:4). With RES_SCALE=2 → 960×540.
+const W = 480 * RES_SCALE, H = 270 * RES_SCALE;
 const TPS = 30;
 const TICK_MS = 1000 / TPS;
 /** Max WebSocket JSON messages accepted per second (token bucket refill). */
