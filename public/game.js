@@ -7315,11 +7315,27 @@ const ghostBullets = [];
 const GHOST_BULLET_MAX = 96;
 /** Input-lag probe: stamp Date.now() when a local shot projectile is created (SpaceT0 utc_ms). */
 let _lagProbeOwnBulletLeft = 0;
+/** Game-loop frames (LOCK_FPS steps) since boot — for keydown→spawn frame count. */
+let _loopGameFrame = 0;
+let _lagProbeKeyGameFrame = -1;
+let _lagProbeKeyPerf = 0;
 
 function logBulletAppearProbe() {
   const utcMs = Date.now();
-  console.log('BULLET utc_ms=' + utcMs);
-  conPrint('BULLET utc_ms=' + utcMs, 'info');
+  let extra = '';
+  if (_lagProbeKeyGameFrame >= 0) {
+    const frames = _loopGameFrame - _lagProbeKeyGameFrame;
+    const ms = performance.now() - _lagProbeKeyPerf;
+    extra = ' frames=' + frames + ' ms=' + ms.toFixed(1);
+  }
+  const line = 'BULLET utc_ms=' + utcMs + extra;
+  console.log(line);
+  conPrint(line, 'info');
+}
+
+function armShootLagProbe() {
+  _lagProbeKeyGameFrame = _loopGameFrame;
+  _lagProbeKeyPerf = performance.now();
 }
 
 function spawnGhostBullet(x, y, angle, speed, radius, type) {
@@ -12238,10 +12254,12 @@ addEventListener('keydown', e => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'Space' && !spaceLatch) {
     spaceLatch = true;
+    armShootLagProbe();
     triggerShoot();
   }
   if (e.code === 'Enter' && !enterLatch) {
     enterLatch = true;
+    armShootLagProbe();
     triggerShoot();
   }
 });
@@ -24956,6 +24974,10 @@ let fpsAccumMs = 0;
 let fpsFrameCount = 0;
 let fpsLastSample = performance.now();
 let fpsSmooth = 60;
+/** Loop probe: raw rAF vs locked game steps (printed to in-game console each second). */
+let _loopRafCount = 0;
+let _loopGameCount = 0;
+let _loopProbeLast = performance.now();
 
 function updateFpsHud(now) {
   if (!fpsHudEl) return;
@@ -24974,7 +24996,19 @@ function updateFpsHud(now) {
 
 function frame(now) {
   requestAnimationFrame(frame);
+  _loopRafCount++;
   if (now == null) now = performance.now();
+  const probeElapsed = now - _loopProbeLast;
+  if (probeElapsed >= 1000) {
+    const rafFps = Math.round((_loopRafCount * 1000) / probeElapsed);
+    const gameFps = Math.round((_loopGameCount * 1000) / probeElapsed);
+    const line = 'loop rAF=' + rafFps + ' game=' + gameFps;
+    console.log(line);
+    conPrint(line, 'info');
+    _loopRafCount = 0;
+    _loopGameCount = 0;
+    _loopProbeLast = now;
+  }
   if (!fpsPrevMs) fpsPrevMs = now;
   fpsAccumMs += now - fpsPrevMs;
   fpsPrevMs = now;
@@ -24982,6 +25016,8 @@ function frame(now) {
   if (fpsAccumMs > LOCK_FRAME_MS * 2) fpsAccumMs = LOCK_FRAME_MS;
   if (fpsAccumMs < LOCK_FRAME_MS) return;
   fpsAccumMs -= LOCK_FRAME_MS;
+  _loopGameCount++;
+  _loopGameFrame++;
 
   updateFpsHud(now);
   if (accountPanelEl && accountPanelEl.classList.contains('open')) {
