@@ -7313,25 +7313,46 @@ function emitLocalShootFx() {
 const GHOST_BULLET_COL = [1.0, 0.12, 0.08];
 const ghostBullets = [];
 const GHOST_BULLET_MAX = 96;
+/** Input-lag probe: stamp Date.now() on first draw of the next local bullet (SpaceT0 utc_ms). */
+let _lagProbeMarkNextGhost = false;
+let _lagProbeAwaitOwnBullet = false;
+
+function logBulletAppearProbe() {
+  const utcMs = Date.now();
+  console.log('BULLET utc_ms=' + utcMs);
+  conPrint('BULLET utc_ms=' + utcMs, 'info');
+}
 
 function spawnGhostBullet(x, y, angle, speed, radius, type) {
   if (ghostBullets.length >= GHOST_BULLET_MAX) ghostBullets.shift();
   const spd = Math.max(0.05, +speed || 0);
-  ghostBullets.push({
+  const g = {
     x: +x,
     y: +y,
     vx: Math.cos(angle) * spd,
     vy: Math.sin(angle) * spd,
     r: Math.max(0.8 * RES_SCALE, +radius || 2 * RES_SCALE),
     type: type || 'default'
-  });
+  };
+  if (_lagProbeMarkNextGhost) {
+    _lagProbeMarkNextGhost = false;
+    g.lagProbe = true;
+  }
+  ghostBullets.push(g);
 }
 
 /** Local predictive projectiles at muzzle/aim the instant a local shot FX fires. */
 function spawnGhostBulletsForLocalShot() {
-  if ((cv('cl_ghost_bullet') | 0) === 0) return;
+  if ((cv('cl_ghost_bullet') | 0) === 0) {
+    _lagProbeAwaitOwnBullet = true;
+    return;
+  }
+  _lagProbeMarkNextGhost = true;
   const name = currentWeaponName();
-  if (name === 'laser' || name === 'railgun' || name === 'asteroidgun') return;
+  if (name === 'laser' || name === 'railgun' || name === 'asteroidgun') {
+    _lagProbeMarkNextGhost = false;
+    return;
+  }
   const me = localView();
   const m = shipMuzzle(me.x, me.y, me.angle);
   const ang = me.angle;
@@ -7448,6 +7469,10 @@ function renderGhostBullets() {
   for (let i = 0; i < ghostBullets.length; i++) {
     const g = ghostBullets[i];
     if (g.x < 0 || g.x > W || g.y < 0 || g.y > H) continue;
+    if (g.lagProbe) {
+      g.lagProbe = false;
+      logBulletAppearProbe();
+    }
     const ang = Math.atan2(g.vy, g.vx);
     const type = g.type || 'default';
     const sizeOpts = (type === 'default' || type === 'voidcannon') ? { size: g.r } : null;
@@ -12229,10 +12254,6 @@ addEventListener('keydown', e => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'Space' && !spaceLatch) {
     spaceLatch = true;
-    // Input-lag probe: same clock as SpaceT0 utc_ms (Desktop/measure).
-    const utcMs = Date.now();
-    console.log('SPACE utc_ms=' + utcMs);
-    conPrint('SPACE utc_ms=' + utcMs, 'info');
     triggerShoot();
   }
   if (e.code === 'Enter' && !enterLatch) {
@@ -20894,6 +20915,13 @@ function renderBullets() {
         const vy = p.vy != null ? p.vy : b.vy;
         const ang = Math.atan2(vy, vx);
         if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) continue;
+        if (_lagProbeAwaitOwnBullet && (b.owner | 0) === (myId | 0)) {
+          const t = b.type || 'default';
+          if (t !== 'laser' && t !== 'railgun' && t !== 'thrust') {
+            _lagProbeAwaitOwnBullet = false;
+            logBulletAppearProbe();
+          }
+        }
         const sizeOpts = {};
         if (b.length != null) sizeOpts.length = b.length;
         if (b.width != null) sizeOpts.width = b.width;
