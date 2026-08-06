@@ -327,14 +327,26 @@ function getFitCssScale() {
   return Math.max(0.01, Math.min(sx, sy));
 }
 
-/** Whole-number fit used only for Auto framebuffer picking. */
+/** Smallest CSS scale that covers the window (may crop). */
+function getCoverCssScale() {
+  const sx = window.innerWidth / W;
+  const sy = window.innerHeight / H;
+  return Math.max(0.01, Math.max(sx, sy));
+}
+
+/** Whole-number contain fit (letterbox). */
 function getFitCssScaleFloor() {
-  return Math.max(1, Math.floor(getFitCssScale()));
+  return Math.max(1, Math.floor(getFitCssScale() + 1e-9));
+}
+
+/** Whole-number cover fit (fills screen, crops edges) — keeps 1px lines even. */
+function getCoverCssScaleCeil() {
+  return Math.max(1, Math.ceil(getCoverCssScale() - 1e-9));
 }
 
 function pickAutoRenderScale() {
   // Prefer matching a dense framebuffer; bump to 3 on large screens, drop to 1 if tiny.
-  const fit = getFitCssScaleFloor();
+  const fit = getCoverCssScaleCeil();
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   if (fit >= 3 || (fit >= 2 && dpr >= 2 && window.innerWidth >= W * 3)) return 3;
   if (fit >= 2) return 2;
@@ -387,10 +399,9 @@ function syncSettingsResolutionUi() {
   });
 }
 
-/** Fit canvas to the window (contain) — integer CSS scale so 1px grid lines stay even. */
+/** Fill the window with integer CSS scale (cover + crop). Even 1px grid, no side bars. */
 function fitCanvasIntegerScale() {
-  // Non-integer CSS scale makes 1px world lines render as 1px/2px unevenly after stretch.
-  const scale = getFitCssScaleFloor();
+  const scale = getCoverCssScaleCeil();
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
   if (renderScaleMode === 'auto') {
