@@ -180,9 +180,14 @@
     #rejoin-btn.hidden { display: none; }
     #rejoin-btn:hover { background: #3a3018; }
     #exit-btn {
+      position: fixed;
+      right: max(16px, env(safe-area-inset-right, 0px) + 12px);
+      bottom: max(16px, env(safe-area-inset-bottom, 0px) + 12px);
+      z-index: 8;
       border-color: #aa6a6a; background: #281818; color: #ffd0d0;
       box-shadow: 0 0 12px rgba(200, 80, 80, 0.15);
-      padding: 10px 28px; font-size: 14px;
+      padding: 10px 22px; font-size: 13px;
+      pointer-events: auto;
     }
     #exit-btn:hover { background: #3a2020; }
     #exit-btn.hidden { display: none; }
@@ -2140,9 +2145,9 @@
     <button id="settings-btn" type="button">Settings</button>
     <button id="account-btn" type="button">Account</button>
     <button id="leaderboard-btn" type="button">Leaderboards</button>
-    <button id="exit-btn" type="button" class="hidden">Exit</button>
   </div>
 </div>
+<button id="exit-btn" type="button" class="hidden">Exit</button>
 <div id="settings-panel" aria-hidden="true">
   <div class="sp-card">
     <div class="sp-head">
@@ -2350,6 +2355,6 @@
 <script src="music.js?v=6"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=85"></script>
-<script src="game.js?v=953"></script>
+<script src="game.js?v=954"></script>
 </body>
 </html>
