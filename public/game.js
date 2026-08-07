@@ -21153,24 +21153,59 @@ function stepMenuAsteroids() {
 function renderMenuBackdrop() {
 }
 
-/* ========== Menu title strip (3 layers) + HSV sat + per-layer bob ========== */
+/* ========== Menu title: flat ASTEROIDS/ARENA + spinning ONLINE cylinder ========== */
 const menuTitleWrap = document.getElementById('menu-title');
 const menuTitleCanvas = document.getElementById('menu-title-gl');
 let menuTitleGl = null;
 let menuTitleProg = null;
+let menuTitleCylProg = null;
 let menuTitleBuf = null;
+let menuTitleCylBuf = null;
+let menuTitleCylCount = 0;
 let menuTitleTex = null;
 let menuTitleReady = false;
 let menuTitleU = null;
+let menuTitleCylU = null;
 /** Last CSS pixel size we pushed to the title canvas. */
 let menuTitleCssW = 0;
 let menuTitleCssH = 0;
 /** Phase offsets (rad) so ASTEROIDS / ARENA / ONLINE bob out of sync. */
 const MENU_TITLE_BOB_PHASE = [0.0, 2.1, 4.2];
-/** Static Y shift in CSS px (positive = down): ASTEROIDS +10, ARENA -10, ONLINE 0. */
+/** Static Y shift in CSS px (positive = down): ASTEROIDS +10, ARENA -10, ONLINE -20. */
 const MENU_TITLE_BASE_Y_PX = [10, -10, -20];
 const MENU_TITLE_BOB_PX = 5;
 const MENU_TITLE_BOB_HZ = 1.7;
+const MENU_TITLE_CYL_SPIN = 1.35; // rad/s around X
+const MENU_TITLE_CYL_SEGS = 48;
+
+function buildMenuTitleCylinderMesh() {
+  // Axis along X; circumference in YZ. UV.x = around, UV.y = along axis (maps to strip frame 2).
+  const segs = MENU_TITLE_CYL_SEGS;
+  const halfLen = 0.42; // NDC half-width of ONLINE tube
+  const R = 0.11;
+  const floats = [];
+  for (let i = 0; i < segs; i++) {
+    const t0 = (i / segs) * Math.PI * 2;
+    const t1 = ((i + 1) / segs) * Math.PI * 2;
+    const c0 = Math.cos(t0), s0 = Math.sin(t0);
+    const c1 = Math.cos(t1), s1 = Math.sin(t1);
+    const u0 = i / segs;
+    const u1 = (i + 1) / segs;
+    // Two tris: (x,y,z,u,v,nx,ny,nz) — normal = (0, cos, sin) in local space before spin
+    const push = (x, y, z, u, v, nx, ny, nz) => {
+      floats.push(x, y, z, u, v, nx, ny, nz);
+    };
+    // quad: left-t0, right-t0, left-t1 / right-t0, right-t1, left-t1
+    push(-halfLen, R * c0, R * s0, u0, 0, 0, c0, s0);
+    push( halfLen, R * c0, R * s0, u0, 1, 0, c0, s0);
+    push(-halfLen, R * c1, R * s1, u1, 0, 0, c1, s1);
+
+    push( halfLen, R * c0, R * s0, u0, 1, 0, c0, s0);
+    push( halfLen, R * c1, R * s1, u1, 1, 0, c1, s1);
+    push(-halfLen, R * c1, R * s1, u1, 0, 0, c1, s1);
+  }
+  return new Float32Array(floats);
+}
 
 function initMenuTitleGl() {
   if (!menuTitleCanvas || menuTitleGl) return;
@@ -21191,18 +21226,24 @@ function initMenuTitleGl() {
     }
     return s;
   }
+  function tLink(prog) {
+    tgl.linkProgram(prog);
+    if (!tgl.getProgramParameter(prog, tgl.LINK_STATUS)) {
+      console.error(tgl.getProgramInfoLog(prog));
+    }
+  }
 
+  // ---- Flat layers (ASTEROIDS / ARENA) ----
   const vs = `
     attribute vec2 aPos;
     attribute vec2 aUV;
-    uniform vec2 uOffset; // NDC offset (x,y)
+    uniform vec2 uOffset;
     varying vec2 vUV;
     void main() {
       vUV = aUV;
       gl_Position = vec4(aPos + uOffset, 0.0, 1.0);
     }
   `;
-  // Value (HSV V) > 50%: per-scanline saturation oscillate ±0.25 around current S.
   const fs = `
     precision mediump float;
     uniform sampler2D uTex;
@@ -21247,11 +21288,7 @@ function initMenuTitleGl() {
   tgl.bindAttribLocation(prog, 1, 'aUV');
   tgl.attachShader(prog, tShader(tgl.VERTEX_SHADER, vs));
   tgl.attachShader(prog, tShader(tgl.FRAGMENT_SHADER, fs));
-  tgl.linkProgram(prog);
-  if (!tgl.getProgramParameter(prog, tgl.LINK_STATUS)) {
-    console.error(tgl.getProgramInfoLog(prog));
-    return;
-  }
+  tLink(prog);
   menuTitleProg = prog;
   menuTitleU = {
     tex: tgl.getUniformLocation(prog, 'uTex'),
@@ -21272,6 +21309,94 @@ function initMenuTitleGl() {
   menuTitleBuf = tgl.createBuffer();
   tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleBuf);
   tgl.bufferData(tgl.ARRAY_BUFFER, verts, tgl.STATIC_DRAW);
+
+  // ---- ONLINE spinning cylinder ----
+  const cylVS = `
+    attribute vec3 aPos;
+    attribute vec2 aUV;
+    attribute vec3 aNrm;
+    uniform float uSpin;
+    uniform vec2 uOffset;
+    uniform float uAspect; // width/height of canvas — keep tube round
+    varying vec2 vUV;
+    varying float vFacing;
+    void main() {
+      // Spin around X
+      float c = cos(uSpin), s = sin(uSpin);
+      vec3 p = vec3(aPos.x, aPos.y * c - aPos.z * s, aPos.y * s + aPos.z * c);
+      vec3 n = vec3(aNrm.x, aNrm.y * c - aNrm.z * s, aNrm.y * s + aNrm.z * c);
+      // Mild perspective
+      float persp = 1.0 / (1.0 + p.z * 0.85);
+      vec2 ndc = vec2(p.x * persp, p.y * persp * uAspect);
+      ndc += uOffset;
+      // Depth bias so tube sorts in front of clear
+      float z = -p.z * 0.15;
+      gl_Position = vec4(ndc, z, 1.0);
+      // Map circumference UV into strip frame 2 (ONLINE): u in [2/3, 1]
+      vUV = vec2(aUV.x / 3.0 + 2.0 / 3.0, aUV.y);
+      vFacing = max(0.0, n.z);
+    }
+  `;
+  const cylFS = `
+    precision mediump float;
+    uniform sampler2D uTex;
+    uniform float uTime;
+    varying vec2 vUV;
+    varying float vFacing;
+
+    vec3 rgb2hsv(vec3 c) {
+      vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+      vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+      vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+      float d = q.x - min(q.w, q.y);
+      float e = 1.0e-10;
+      return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+    }
+    vec3 hsv2rgb(vec3 c) {
+      vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+      vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+      return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    }
+
+    void main() {
+      vec4 c = texture2D(uTex, vUV);
+      if (c.a < 0.04) discard;
+      vec3 hsv = rgb2hsv(max(c.rgb, vec3(0.0)));
+      if (hsv.z > 0.5) {
+        float line = floor(vUV.y * 161.0);
+        float osc = sin(uTime * 3.2 - line * 0.35) * 0.25;
+        hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
+        c.rgb = hsv2rgb(hsv);
+      }
+      // Emissive: boost facing side + constant glow, keep alpha
+      float emit = 0.55 + 1.15 * vFacing;
+      c.rgb *= emit;
+      c.rgb += c.rgb * (0.25 + 0.45 * vFacing);
+      gl_FragColor = vec4(c.rgb, c.a);
+    }
+  `;
+
+  const cylProg = tgl.createProgram();
+  tgl.bindAttribLocation(cylProg, 0, 'aPos');
+  tgl.bindAttribLocation(cylProg, 1, 'aUV');
+  tgl.bindAttribLocation(cylProg, 2, 'aNrm');
+  tgl.attachShader(cylProg, tShader(tgl.VERTEX_SHADER, cylVS));
+  tgl.attachShader(cylProg, tShader(tgl.FRAGMENT_SHADER, cylFS));
+  tLink(cylProg);
+  menuTitleCylProg = cylProg;
+  menuTitleCylU = {
+    tex: tgl.getUniformLocation(cylProg, 'uTex'),
+    time: tgl.getUniformLocation(cylProg, 'uTime'),
+    spin: tgl.getUniformLocation(cylProg, 'uSpin'),
+    offset: tgl.getUniformLocation(cylProg, 'uOffset'),
+    aspect: tgl.getUniformLocation(cylProg, 'uAspect')
+  };
+
+  const cylMesh = buildMenuTitleCylinderMesh();
+  menuTitleCylCount = (cylMesh.length / 8) | 0;
+  menuTitleCylBuf = tgl.createBuffer();
+  tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleCylBuf);
+  tgl.bufferData(tgl.ARRAY_BUFFER, cylMesh, tgl.STATIC_DRAW);
 
   menuTitleTex = tgl.createTexture();
   const img = new Image();
@@ -21321,10 +21446,16 @@ function drawMenuTitleLogo(now) {
   tgl.clearColor(0, 0, 0, 0);
   tgl.clear(tgl.COLOR_BUFFER_BIT);
 
+  const hPx = Math.max(1, menuTitleCanvas.height);
+  const wPx = Math.max(1, menuTitleCanvas.width);
+  const ndcPerPxY = 2 / hPx;
+
+  // Flat ASTEROIDS + ARENA
   tgl.useProgram(menuTitleProg);
   tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleBuf);
   tgl.enableVertexAttribArray(0);
   tgl.enableVertexAttribArray(1);
+  tgl.disableVertexAttribArray(2);
   tgl.vertexAttribPointer(0, 2, tgl.FLOAT, false, 16, 0);
   tgl.vertexAttribPointer(1, 2, tgl.FLOAT, false, 16, 8);
   tgl.activeTexture(tgl.TEXTURE0);
@@ -21333,17 +21464,39 @@ function drawMenuTitleLogo(now) {
   tgl.uniform1f(menuTitleU.time, t);
   tgl.uniform1f(menuTitleU.frames, 3);
 
-  // ±5px Y bob in NDC (canvas Y up in clip space → flip sign for screen-down).
-  const hPx = Math.max(1, menuTitleCanvas.height);
-  const ndcPerPxY = 2 / hPx;
-
-  for (let frame = 0; frame < 3; frame++) {
+  for (let frame = 0; frame < 2; frame++) {
     const bobPx = Math.sin(t * MENU_TITLE_BOB_HZ + MENU_TITLE_BOB_PHASE[frame]) * MENU_TITLE_BOB_PX;
     const yPx = (MENU_TITLE_BASE_Y_PX[frame] || 0) + bobPx;
-    const bobNdc = -yPx * ndcPerPxY;
-    tgl.uniform2f(menuTitleU.offset, 0, bobNdc);
+    tgl.uniform2f(menuTitleU.offset, 0, -yPx * ndcPerPxY);
     tgl.uniform1f(menuTitleU.frame, frame);
     tgl.drawArrays(tgl.TRIANGLES, 0, 6);
+  }
+
+  // ONLINE on spinning emissive cylinder
+  if (menuTitleCylProg && menuTitleCylBuf && menuTitleCylCount > 0) {
+    tgl.enable(tgl.DEPTH_TEST);
+    tgl.depthFunc(tgl.LEQUAL);
+    tgl.clear(tgl.DEPTH_BUFFER_BIT);
+    tgl.useProgram(menuTitleCylProg);
+    tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleCylBuf);
+    tgl.enableVertexAttribArray(0);
+    tgl.enableVertexAttribArray(1);
+    tgl.enableVertexAttribArray(2);
+    const stride = 32;
+    tgl.vertexAttribPointer(0, 3, tgl.FLOAT, false, stride, 0);
+    tgl.vertexAttribPointer(1, 2, tgl.FLOAT, false, stride, 12);
+    tgl.vertexAttribPointer(2, 3, tgl.FLOAT, false, stride, 20);
+    tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
+    tgl.uniform1i(menuTitleCylU.tex, 0);
+    tgl.uniform1f(menuTitleCylU.time, t);
+    tgl.uniform1f(menuTitleCylU.spin, t * MENU_TITLE_CYL_SPIN);
+    tgl.uniform1f(menuTitleCylU.aspect, wPx / hPx);
+    const bobPx = Math.sin(t * MENU_TITLE_BOB_HZ + MENU_TITLE_BOB_PHASE[2]) * MENU_TITLE_BOB_PX;
+    const yPx = (MENU_TITLE_BASE_Y_PX[2] || 0) + bobPx;
+    tgl.uniform2f(menuTitleCylU.offset, 0, -yPx * ndcPerPxY);
+    tgl.drawArrays(tgl.TRIANGLES, 0, menuTitleCylCount);
+    tgl.disableVertexAttribArray(2);
+    tgl.disable(tgl.DEPTH_TEST);
   }
 
   tgl.disableVertexAttribArray(1);
