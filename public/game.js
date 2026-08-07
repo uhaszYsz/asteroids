@@ -21240,9 +21240,10 @@ function buildMenuTitleRoofMesh() {
 }
 
 function buildMenuTitleCylinderMesh() {
-  // Axis along X; circumference in YZ. UV.x = around, UV.y = along axis (maps to strip frame 2).
+  // Axis along X; circumference in YZ.
+  // UV.x = along length (text left→right), UV.y = around (letter height wraps the tube).
   const segs = MENU_TITLE_CYL_SEGS;
-  const halfLen = 0.42; // NDC half-width of ONLINE tube
+  const halfLen = 0.55; // NDC half-width of ONLINE tube
   const R = 0.11;
   const floats = [];
   for (let i = 0; i < segs; i++) {
@@ -21250,20 +21251,21 @@ function buildMenuTitleCylinderMesh() {
     const t1 = ((i + 1) / segs) * Math.PI * 2;
     const c0 = Math.cos(t0), s0 = Math.sin(t0);
     const c1 = Math.cos(t1), s1 = Math.sin(t1);
-    const u0 = i / segs;
-    const u1 = (i + 1) / segs;
+    const v0 = i / segs;
+    const v1 = (i + 1) / segs;
     // Two tris: (x,y,z,u,v,nx,ny,nz) — normal = (0, cos, sin) in local space before spin
     const push = (x, y, z, u, v, nx, ny, nz) => {
       floats.push(x, y, z, u, v, nx, ny, nz);
     };
-    // quad: left-t0, right-t0, left-t1 / right-t0, right-t1, left-t1
-    push(-halfLen, R * c0, R * s0, u0, 0, 0, c0, s0);
-    push( halfLen, R * c0, R * s0, u0, 1, 0, c0, s0);
-    push(-halfLen, R * c1, R * s1, u1, 0, 0, c1, s1);
+    // u: left (-halfLen)=0 … right (+halfLen)=1  → ONLINE reads left→right
+    // v: around the tube
+    push(-halfLen, R * c0, R * s0, 0, v0, 0, c0, s0);
+    push( halfLen, R * c0, R * s0, 1, v0, 0, c0, s0);
+    push(-halfLen, R * c1, R * s1, 0, v1, 0, c1, s1);
 
-    push( halfLen, R * c0, R * s0, u0, 1, 0, c0, s0);
-    push( halfLen, R * c1, R * s1, u1, 1, 0, c1, s1);
-    push(-halfLen, R * c1, R * s1, u1, 0, 0, c1, s1);
+    push( halfLen, R * c0, R * s0, 1, v0, 0, c0, s0);
+    push( halfLen, R * c1, R * s1, 1, v1, 0, c1, s1);
+    push(-halfLen, R * c1, R * s1, 0, v1, 0, c1, s1);
   }
   return new Float32Array(floats);
 }
@@ -21398,7 +21400,7 @@ function initMenuTitleGl() {
       // Depth bias so tube sorts in front of clear
       float z = -p.z * 0.15;
       gl_Position = vec4(ndc, z, 1.0);
-      // Map circumference UV into strip frame 2 (ONLINE): u in [2/3, 1]
+      // aUV.x along length → strip frame 2 U; aUV.y around → V
       vUV = vec2(aUV.x / 3.0 + 2.0 / 3.0, aUV.y);
       vFacing = max(0.0, n.z);
     }
