@@ -152,17 +152,25 @@
     }
     #menu.hidden { display: none; }
     #menu-title {
-      display: block;
+      position: relative;
       width: min(560px, 86vw);
-      height: auto;
+      aspect-ratio: 394 / 133;
       max-height: min(200px, 28vh);
-      object-fit: contain;
       pointer-events: none;
       user-select: none;
-      -webkit-user-drag: none;
-      filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
       flex-shrink: 0;
+      filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
     }
+    #menu-title .menu-title-layer {
+      position: absolute;
+      inset: 0;
+      background-image: url(sprites/Title.png);
+      background-repeat: no-repeat;
+      /* Strip is 2 frames wide — scale so one frame fills the box. */
+      background-size: 200% 100%;
+    }
+    #menu-title .menu-title-layer[data-frame="0"] { background-position: 0% 0; }
+    #menu-title .menu-title-layer[data-frame="1"] { background-position: 100% 0; }
     #menu .menu-bottom {
       margin-top: auto;
       display: flex; flex-direction: column; align-items: center; gap: 14px;
@@ -2143,7 +2151,10 @@
 </div>
 <div id="glow-panel" aria-hidden="true" hidden></div>
 <div id="menu">
-  <img id="menu-title" src="sprites/Title.png" alt="Asteroids Arena Online" width="394" height="133" draggable="false" />
+  <div id="menu-title" role="img" aria-label="Asteroids Arena Online">
+    <span class="menu-title-layer" data-frame="0"></span>
+    <span class="menu-title-layer" data-frame="1"></span>
+  </div>
   <div class="menu-bottom">
   <div id="team-box" class="hidden">
     <div class="tb-title">Team</div>
