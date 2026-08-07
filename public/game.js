@@ -21269,8 +21269,8 @@ function initMenuTitleGl() {
     tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
     tgl.pixelStorei(tgl.UNPACK_FLIP_Y_WEBGL, 0);
     tgl.texImage2D(tgl.TEXTURE_2D, 0, tgl.RGBA, tgl.RGBA, tgl.UNSIGNED_BYTE, img);
-    tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_MIN_FILTER, tgl.LINEAR);
-    tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_MAG_FILTER, tgl.LINEAR);
+    tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_MIN_FILTER, tgl.NEAREST);
+    tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_MAG_FILTER, tgl.NEAREST);
     tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_WRAP_S, tgl.CLAMP_TO_EDGE);
     tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_WRAP_T, tgl.CLAMP_TO_EDGE);
     menuTitleReady = true;
