@@ -159,12 +159,11 @@
       pointer-events: none;
       user-select: none;
       flex-shrink: 0;
-      /* Do NOT put CSS filter on this wrapper — it freezes child WebGL canvas frames. */
+      /* Invisible spacer — logo is drawn on baked grid strokes (see game.js). */
+      visibility: hidden;
     }
     #menu-title-gl {
-      display: block;
-      width: 100%;
-      height: 100%;
+      display: none;
     }
     #menu .menu-bottom {
       margin-top: auto;
@@ -2422,7 +2421,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=85');
-      await loadScript('game.js?v=995');
+      await loadScript('game.js?v=996');
     } catch (err) {
       console.error(err);
     }

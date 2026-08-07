@@ -3231,6 +3231,12 @@ const gridBakeFS = `
   uniform highp vec2 uRes;
   uniform vec2 uWorldOrigin;
   uniform vec2 uWorldSize;
+  // Menu title strip (2 frames) — fill grid strokes like nebula, only inside title rect.
+  uniform float uTitleOn;
+  uniform sampler2D uTitle;
+  uniform vec2 uTitleMin;
+  uniform vec2 uTitleMax;
+  uniform float uTitleTime;
   uniform float uRippleWidths[8];
   uniform vec4 uRipples[8]; // xy = center (world), z = radius, w = strength (0 = off)
   uniform vec4 uBooms[12]; // xy = center, z = radius, w = alpha (0 = off)
@@ -3302,6 +3308,20 @@ const gridBakeFS = `
     return vis * vis * (3.0 - 2.0 * vis);
   }
 
+  vec3 titleRgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    float e = 1.0e-10;
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+  }
+  vec3 titleHsv2rgb(vec3 c) {
+    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+  }
+
   void main() {
     vec4 c = texture2D(uTex, vUV);
     if (c.a < 0.04) discard;
@@ -3325,6 +3345,27 @@ const gridBakeFS = `
       // Scrolling nebula fill on grid strokes only (discard already killed background).
       vec2 nuv = (world + uNebulaScroll) * uNebulaScale;
       rgb = texture2D(uNebula, nuv).rgb;
+    }
+    // Menu: Title.png strip fills strokes inside the on-screen title rect (nebula elsewhere).
+    if (uTitleOn > 0.5) {
+      vec2 tSpan = max(uTitleMax - uTitleMin, vec2(1.0));
+      vec2 tUV = (vWorld - uTitleMin) / tSpan;
+      if (tUV.x >= 0.0 && tUV.x <= 1.0 && tUV.y >= 0.0 && tUV.y <= 1.0) {
+        vec4 L0 = texture2D(uTitle, vec2(tUV.x * 0.5, tUV.y));
+        vec4 L1 = texture2D(uTitle, vec2(tUV.x * 0.5 + 0.5, tUV.y));
+        vec3 tRgb = L0.rgb * (1.0 - L1.a) + L1.rgb * L1.a;
+        float tA = L0.a + L1.a * (1.0 - L0.a);
+        if (tA > 0.04) {
+          vec3 hsv = titleRgb2hsv(max(tRgb, vec3(0.0)));
+          if (hsv.z > 0.5) {
+            float line = floor(tUV.y * 133.0);
+            float osc = sin(uTitleTime * 3.2 - line * 0.35) * 0.25;
+            hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
+            tRgb = titleHsv2rgb(hsv);
+          }
+          rgb = mix(rgb, tRgb, clamp(tA, 0.0, 1.0));
+        }
+      }
     }
     float boomBoost = 0.0;
     for (int i = 0; i < 12; i++) {
@@ -3452,6 +3493,11 @@ const gbUNebulaOn = gl.getUniformLocation(gridBakeProg, 'uNebulaOn');
 const gbUNebulaScroll = gl.getUniformLocation(gridBakeProg, 'uNebulaScroll');
 const gbUNebulaScale = gl.getUniformLocation(gridBakeProg, 'uNebulaScale');
 const gbUAlpha = gl.getUniformLocation(gridBakeProg, 'uAlpha');
+const gbUTitleOn = gl.getUniformLocation(gridBakeProg, 'uTitleOn');
+const gbUTitle = gl.getUniformLocation(gridBakeProg, 'uTitle');
+const gbUTitleMin = gl.getUniformLocation(gridBakeProg, 'uTitleMin');
+const gbUTitleMax = gl.getUniformLocation(gridBakeProg, 'uTitleMax');
+const gbUTitleTime = gl.getUniformLocation(gridBakeProg, 'uTitleTime');
 const gbUWorldOrigin = gl.getUniformLocation(gridBakeProg, 'uWorldOrigin');
 const gbUWorldSize = gl.getUniformLocation(gridBakeProg, 'uWorldSize');
 const gbURippleWidths = gl.getUniformLocation(gridBakeProg, 'uRippleWidths[0]');
@@ -3482,6 +3528,41 @@ let gridBakeOriginX = 0;
 let gridBakeOriginY = 0;
 let gridBakeWorldW = 1;
 let gridBakeWorldH = 1;
+
+/** Menu title strip on main GL — fills baked grid strokes (same idea as nebula). */
+let menuTitleGridTex = null;
+let menuTitleGridReady = false;
+(function loadMenuTitleGridTex() {
+  const img = new Image();
+  img.onload = () => {
+    menuTitleGridTex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, menuTitleGridTex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 0);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    menuTitleGridReady = true;
+  };
+  img.onerror = () => console.warn('Title.png (grid bake) failed to load');
+  img.src = 'sprites/Title.png';
+})();
+
+/** Map #menu-title screen box → game world (W×H) for stroke fill. */
+function menuTitleWorldRect() {
+  const el = document.getElementById('menu-title');
+  if (!el || !canvas) return null;
+  const cr = canvas.getBoundingClientRect();
+  const tr = el.getBoundingClientRect();
+  if (cr.width < 2 || cr.height < 2 || tr.width < 2 || tr.height < 2) return null;
+  return {
+    x0: ((tr.left - cr.left) / cr.width) * W,
+    y0: ((tr.top - cr.top) / cr.height) * H,
+    x1: ((tr.right - cr.left) / cr.width) * W,
+    y1: ((tr.bottom - cr.top) / cr.height) * H
+  };
+}
 
 /** Waves/practice: nebula sampled on grid lines only; scrolls slowly in a random direction. */
 let gridNebulaStripImg = null;
@@ -4438,6 +4519,25 @@ function drawGridBaked() {
   if (gbUNebulaOn) gl.uniform1f(gbUNebulaOn, useNebula ? 1 : 0);
   if (gbUNebulaScroll) gl.uniform2f(gbUNebulaScroll, gridNebulaScrollX, gridNebulaScrollY);
   if (gbUNebulaScale) gl.uniform1f(gbUNebulaScale, 1 / GRID_NEBULA_TILE);
+  // Title logo on menu: same stroke mask as nebula, sampled inside the title screen rect.
+  const titleRect = (!inGame && menuTitleGridReady) ? menuTitleWorldRect() : null;
+  const titleOn = !!(titleRect && menuTitleGridTex);
+  if (gbUTitleOn) gl.uniform1f(gbUTitleOn, titleOn ? 1 : 0);
+  if (gbUTitle && menuTitleGridTex) {
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, menuTitleGridTex);
+    gl.uniform1i(gbUTitle, 2);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+  if (titleOn) {
+    if (gbUTitleMin) gl.uniform2f(gbUTitleMin, titleRect.x0, titleRect.y0);
+    if (gbUTitleMax) gl.uniform2f(gbUTitleMax, titleRect.x1, titleRect.y1);
+    if (gbUTitleTime) gl.uniform1f(gbUTitleTime, performance.now() * 0.001);
+  } else if (gbUTitleMin) {
+    gl.uniform2f(gbUTitleMin, 0, 0);
+    if (gbUTitleMax) gl.uniform2f(gbUTitleMax, 1, 1);
+    if (gbUTitleTime) gl.uniform1f(gbUTitleTime, 0);
+  }
   gl.uniform1f(gbUAlpha, Math.max(0, Math.min(1, Number(cv('cl_grid_alpha')))));
   gl.uniform2f(gbURes, W, H);
   gl.uniform2f(gbUWorldOrigin, gridBakeOriginX, gridBakeOriginY);
@@ -21294,50 +21394,11 @@ function syncMenuTitleCanvasSize() {
 }
 
 function drawMenuTitleLogo(now) {
-  const menuEl = document.getElementById('menu');
-  if (!menuTitleWrap || !menuTitleCanvas) return;
-  if (menuEl && menuEl.classList.contains('hidden')) return;
-  if (!menuTitleGl) initMenuTitleGl();
-  if (!menuTitleGl || !menuTitleProg || !menuTitleReady) return;
-  syncMenuTitleCanvasSize();
-
-  const tgl = menuTitleGl;
-  tgl.disable(tgl.DEPTH_TEST);
-  tgl.enable(tgl.BLEND);
-  tgl.blendFunc(tgl.SRC_ALPHA, tgl.ONE_MINUS_SRC_ALPHA);
-  tgl.clearColor(0, 0, 0, 0);
-  tgl.clear(tgl.COLOR_BUFFER_BIT);
-
-  tgl.useProgram(menuTitleProg);
-  tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleBuf);
-  tgl.enableVertexAttribArray(0);
-  tgl.enableVertexAttribArray(1);
-  tgl.vertexAttribPointer(0, 2, tgl.FLOAT, false, 16, 0);
-  tgl.vertexAttribPointer(1, 2, tgl.FLOAT, false, 16, 8);
-  tgl.activeTexture(tgl.TEXTURE0);
-  tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
-  tgl.uniform1i(menuTitleU.tex, 0);
-  tgl.uniform1f(menuTitleU.time, (now != null ? now : performance.now()) * 0.001);
-
-  // Layer 0 (ASTEROIDS ARENA), then layer 1 (ONLINE) on top — same destination.
-  for (let frame = 0; frame < 2; frame++) {
-    tgl.uniform1f(menuTitleU.frame, frame);
-    tgl.drawArrays(tgl.TRIANGLES, 0, 6);
-  }
-
-  tgl.disableVertexAttribArray(1);
+  // Logo is baked onto the main grid strokes now — no separate canvas draw.
 }
 
-/** Own rAF so title keeps pulsing even if the game frame-lock skips a render. */
-let menuTitleRaf = 0;
-function tickMenuTitleLogo(now) {
-  menuTitleRaf = requestAnimationFrame(tickMenuTitleLogo);
-  drawMenuTitleLogo(now);
-}
-function ensureMenuTitleAnim() {
-  if (!menuTitleRaf) menuTitleRaf = requestAnimationFrame(tickMenuTitleLogo);
-}
-ensureMenuTitleAnim();
+/** Own rAF retired; title rides drawGridBaked each frame. */
+function ensureMenuTitleAnim() {}
 
 /** Match server BULLET_TYPES collision extents for cl_hitbox debug. */
 const BULLET_HIT_DEBUG = {
