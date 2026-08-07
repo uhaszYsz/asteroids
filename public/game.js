@@ -21211,6 +21211,7 @@ function initMenuTitleGl() {
     uniform sampler2D uTex;
     uniform float uTime;
     uniform float uFrame;
+    uniform float uFrames;
     varying vec2 vUV;
 
     vec3 rgb2hsv(vec3 c) {
@@ -21228,13 +21229,15 @@ function initMenuTitleGl() {
     }
 
     void main() {
-      vec2 uv = vec2(vUV.x * 0.5 + uFrame * 0.5, vUV.y);
+      float frames = max(1.0, uFrames);
+      float fw = 1.0 / frames;
+      vec2 uv = vec2(vUV.x * fw + uFrame * fw, vUV.y);
       vec4 c = texture2D(uTex, uv);
       if (c.a < 0.04) discard;
       vec3 hsv = rgb2hsv(max(c.rgb, vec3(0.0)));
       if (hsv.z > 0.5) {
-        // Discrete horizontal lines (matches ~133px frame height) — wave rolls top→bottom.
-        float line = floor(vUV.y * 133.0);
+        // Discrete horizontal lines — wave rolls top→bottom.
+        float line = floor(vUV.y * 161.0);
         float osc = sin(uTime * 3.2 - line * 0.35) * 0.25;
         hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
         c.rgb = hsv2rgb(hsv);
@@ -21257,7 +21260,8 @@ function initMenuTitleGl() {
   menuTitleU = {
     tex: tgl.getUniformLocation(prog, 'uTex'),
     time: tgl.getUniformLocation(prog, 'uTime'),
-    frame: tgl.getUniformLocation(prog, 'uFrame')
+    frame: tgl.getUniformLocation(prog, 'uFrame'),
+    frames: tgl.getUniformLocation(prog, 'uFrames')
   };
 
   // Fullscreen quad: pos.xy, uv.xy
@@ -21458,9 +21462,10 @@ function drawMenuTitleLogo(now) {
   tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
   tgl.uniform1i(menuTitleU.tex, 0);
   tgl.uniform1f(menuTitleU.time, t);
+  tgl.uniform1f(menuTitleU.frames, 3);
 
-  // Layer 0 (ASTEROIDS ARENA), then layer 1 (ONLINE) on top — same destination.
-  for (let frame = 0; frame < 2; frame++) {
+  // 3-frame strip layered at the same destination (ASTEROIDS / ARENA / ONLINE).
+  for (let frame = 0; frame < 3; frame++) {
     tgl.uniform1f(menuTitleU.frame, frame);
     tgl.drawArrays(tgl.TRIANGLES, 0, 6);
   }
