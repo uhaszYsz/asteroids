@@ -1202,6 +1202,11 @@ const CVARS = {
     def: 0,
     help: '1 = reverse layered underlay nebula scroll only (grid stroke nebula unchanged).'
   },
+  cl_bg: {
+    value: 0,
+    def: 0,
+    help: 'Impulse: cl_bg (or cl_bg 1) = new random space nebula. Optional 0–3 = force strip frame.'
+  },
   cl_grid_alpha: {
     value: 0.5,
     def: 0.5,
@@ -1351,6 +1356,12 @@ function setCvar(name, raw) {
     // When set to 1, spam one shock per animation frame for 10 seconds.
     // drawSynthGrid() will reset this cvar back to 0 after the window ends.
     if (n !== 0) gridTestUntilMs = performance.now() + 10000;
+    return true;
+  }
+  if (name === 'cl_bg') {
+    // Impulse cvar: any non-zero set picks a new random nebula (console can pass a frame).
+    if (n !== 0) rerollNebulaBackground(-1);
+    c.value = 0;
     return true;
   }
   if (name === 'cl_grid') {
@@ -3460,9 +3471,11 @@ let gridBakeWorldW = 1;
 let gridBakeWorldH = 1;
 
 /** Waves/practice: nebula sampled on grid lines only; scrolls slowly in a random direction. */
+let gridNebulaStripImg = null;
 let gridNebulaImg = null;
 let gridNebulaReady = false;
 let gridNebulaGL = null;
+let gridNebulaFrame = -1;
 let gridNebulaScrollX = 0;
 let gridNebulaScrollY = 0;
 let gridNebulaVelX = 0;
@@ -3511,6 +3524,43 @@ function ensureNebulaGLTexture() {
   return true;
 }
 
+/** Upload current frame canvas into the live nebula GL texture (create if needed). */
+function uploadNebulaGLTexture() {
+  if (!gridNebulaReady || !gridNebulaImg) return false;
+  if (!gridNebulaGL) return ensureNebulaGLTexture();
+  gl.bindTexture(gl.TEXTURE_2D, gridNebulaGL);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, gridNebulaImg);
+  return true;
+}
+
+/**
+ * Pick a new space nebula at runtime (grid stroke fill + underlay).
+ * frameIndex < 0 = random (prefers a different frame). Bake mask unchanged;
+ * nebula is sampled live in the shader — no deformation reset needed.
+ */
+function rerollNebulaBackground(frameIndex) {
+  if (!gridNebulaStripImg) return false;
+  const frames = Math.max(1, GRID_NEBULA_FRAMES | 0);
+  let fi;
+  if (frameIndex != null && frameIndex >= 0) {
+    fi = (frameIndex | 0) % frames;
+  } else if (frames > 1) {
+    do {
+      fi = (Math.random() * frames) | 0;
+    } while (fi === gridNebulaFrame);
+  } else {
+    fi = 0;
+  }
+  gridNebulaFrame = fi;
+  gridNebulaImg = sliceNebulaFrame(gridNebulaStripImg, fi);
+  gridNebulaReady = true;
+  uploadNebulaGLTexture();
+  pickNebulaScrollDir();
+  gridNebulaScrollX = 0;
+  gridNebulaScrollY = 0;
+  return true;
+}
+
 function tickNebulaScroll(dt) {
   if (!gridNebulaReady) return;
   const d = dt > 0 ? dt : 0.016;
@@ -3522,14 +3572,13 @@ function tickNebulaScroll(dt) {
 (function loadGridNebula() {
   const img = new Image();
   img.onload = () => {
+    gridNebulaStripImg = img;
     const frame = (Math.random() * GRID_NEBULA_FRAMES) | 0;
+    gridNebulaFrame = frame;
     // One native frame — world tile (GRID_NEBULA_TILE) + NEAREST stretch/loop.
     gridNebulaImg = sliceNebulaFrame(img, frame);
     gridNebulaReady = true;
-    if (gridNebulaGL) {
-      gl.bindTexture(gl.TEXTURE_2D, gridNebulaGL);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, gridNebulaImg);
-    }
+    uploadNebulaGLTexture();
     invalidateGridBake();
   };
   img.onerror = () => {
@@ -25112,9 +25161,28 @@ function runConsole(line) {
     conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');
+    conPrint('cl_bg [0-3]  — new random space nebula (optional strip frame)', 'info');
     conPrint('cl_allToDefault 1  — reset all cl_ cvars to defaults', 'info');
     conPrint(`admin: ${consoleAdmin ? 'yes' : 'no'}`, 'info');
     conListCvars(args[0] || (cmdName === 'find' ? '' : 'cl_'));
+    return;
+  }
+  if (cmdName === 'cl_bg') {
+    let frame = -1;
+    if (args.length >= 1) {
+      const n = Number(args[0]);
+      if (!Number.isFinite(n)) {
+        conPrint('usage: cl_bg [0-3]', 'err');
+        return;
+      }
+      const fi = n | 0;
+      if (fi >= 0 && fi < GRID_NEBULA_FRAMES) frame = fi;
+    }
+    if (!rerollNebulaBackground(frame)) {
+      conPrint('nebula strip not loaded yet', 'err');
+      return;
+    }
+    conPrint(`cl_bg → nebula frame ${gridNebulaFrame} (scroll rerolled)`, 'info');
     return;
   }
   if (cmdName === 'record') {
