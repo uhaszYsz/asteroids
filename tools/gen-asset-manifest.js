@@ -10,7 +10,8 @@ const crypto = require('crypto');
 const { execSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const PUBLIC = path.join(ROOT, 'public');
+const REPO_PUBLIC = 'public';
+const PUBLIC = path.join(ROOT, REPO_PUBLIC);
 const OUT = path.join(PUBLIC, 'asset-manifest.json');
 
 const INCLUDE_DIRS = [
@@ -33,10 +34,26 @@ const INCLUDE_EXTS = new Set([
 
 const SKIP_DIR = /(?:^|[/\\])(?:node_modules|desktop|\.git|tools|test|demos)(?:[/\\]|$)/i;
 
+function sha256buf(buf) {
+  return crypto.createHash('sha256').update(buf).digest('hex');
+}
+
 function sha256file(fp) {
-  const h = crypto.createHash('sha256');
-  h.update(fs.readFileSync(fp));
-  return h.digest('hex');
+  return sha256buf(fs.readFileSync(fp));
+}
+
+/** Hash the git blob (LF) when tracked — avoids Windows CRLF poisoning CDN hashes. */
+function sha256rel(rel) {
+  try {
+    const blob = execSync(`git show HEAD:${REPO_PUBLIC}/${rel}`, {
+      cwd: ROOT,
+      encoding: 'buffer',
+      maxBuffer: 32 * 1024 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    if (blob && blob.length) return sha256buf(blob);
+  } catch (_) { /* untracked or missing */ }
+  return sha256file(path.join(PUBLIC, rel));
 }
 
 function walk(dir, out) {
@@ -78,7 +95,7 @@ for (const f of INCLUDE_ROOT_FILES) {
 files.sort();
 const map = {};
 for (const rel of files) {
-  map[rel] = sha256file(path.join(PUBLIC, rel));
+  map[rel] = sha256rel(rel);
 }
 
 const manifest = {

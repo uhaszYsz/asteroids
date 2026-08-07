@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&family=Press+Start+2P&display=swap" rel="stylesheet">
   <script>
-    // Hash-keyed asset cache: GitHub/jsDelivr first, VPS fallback (see sw.js).
+    // Hash-keyed asset cache: origin-first, then GitHub/jsDelivr (see sw.js).
     // Register relative to this page so /asteroids/ and Neutralino both resolve correctly.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
@@ -16,7 +16,7 @@
         var dir = /\/[^/]+\.[a-zA-Z0-9]+$/.test(path)
           ? path.replace(/\/[^/]+$/, '/')
           : (path.endsWith('/') ? path : path + '/');
-        navigator.serviceWorker.register(dir + 'sw.js', { scope: dir }).then(function (reg) {
+        navigator.serviceWorker.register(dir + 'sw.js?v=2', { scope: dir }).then(function (reg) {
           function sync() {
             var w = navigator.serviceWorker.controller || (reg.active);
             if (w) w.postMessage({ type: 'SYNC_ASSETS' });
@@ -2369,6 +2369,6 @@
 <script src="music.js?v=7"></script>
 <script src="config.js?v=36"></script>
 <script src="sim/local-server.js?v=85"></script>
-<script src="game.js?v=989"></script>
+<script src="game.js?v=990"></script>
 </body>
 </html>

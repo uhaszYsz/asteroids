@@ -1,15 +1,17 @@
-/* Asteroids asset service worker: hash-keyed forever cache, GitHub/jsDelivr first, origin fallback. */
+/* Asteroids asset service worker: hash-keyed forever cache, origin-first + CDN fallback. */
 /* eslint-disable no-restricted-globals */
 
-const META_CACHE = 'asteroids-meta-v1';
-const ASSET_CACHE = 'asteroids-assets-v1';
+const META_CACHE = 'asteroids-meta-v2';
+const ASSET_CACHE = 'asteroids-assets-v2';
+const OLD_CACHES = ['asteroids-meta-v1', 'asteroids-assets-v1'];
 /** Repo path prefix for client files (browser URLs omit this; CDN needs it). */
 const REPO_PUBLIC = 'public';
-const MANIFEST_URLS = (repo, ref) => ([
-  `https://cdn.jsdelivr.net/gh/${repo}@${ref}/${REPO_PUBLIC}/asset-manifest.json`,
+const MANIFEST_URLS = (repo, ref, originManifest) => ([
+  // Origin first — VPS `npm run manifest` must win over stale jsDelivr @main.
+  originManifest,
   `https://raw.githubusercontent.com/${repo}/${ref}/${REPO_PUBLIC}/asset-manifest.json`,
-  './asset-manifest.json'
-]);
+  `https://cdn.jsdelivr.net/gh/${repo}@${ref}/${REPO_PUBLIC}/asset-manifest.json`
+].filter(Boolean));
 
 let manifest = null; // { repo, ref, files: { path: hash } }
 
@@ -22,6 +24,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
+    await Promise.all(OLD_CACHES.map((n) => caches.delete(n)));
     await refreshManifest();
     await pruneStaleAssets();
     await self.clients.claim();
@@ -44,6 +47,14 @@ function scopePath() {
     return new URL(self.registration.scope).pathname || '/';
   } catch (_) {
     return '/';
+  }
+}
+
+function scopeUrl(rel) {
+  try {
+    return new URL(rel.split('/').map(encodeURIComponent).join('/'), self.registration.scope).href;
+  } catch (_) {
+    return self.location.origin + '/' + rel.split('/').map(encodeURIComponent).join('/');
   }
 }
 
@@ -90,12 +101,12 @@ async function handleAsset(req, rel) {
   const hit = await cache.match(key);
   if (hit) return hit;
 
-  const body = await fetchAssetBody(rel, manifest.repo, manifest.ref);
+  const body = await fetchAssetBody(rel, hash, manifest.repo, manifest.ref);
   if (!body) {
     // Last resort: original request (origin + query).
     return fetch(req);
   }
-  // Cache forever under content hash (immutable).
+  // Cache forever under content hash (immutable) — only after hash verify.
   await cache.put(key, body.clone());
   return body;
 }
@@ -104,29 +115,33 @@ function assetCacheRequest(rel, hash) {
   return new Request(`https://asteroids-asset-cache.local/${hash}/${rel}`);
 }
 
-function cdnUrls(rel, repo, ref) {
+function assetFetchUrls(rel, repo, ref) {
   const enc = rel.split('/').map(encodeURIComponent).join('/');
   return [
-    `https://cdn.jsdelivr.net/gh/${repo}@${ref}/${REPO_PUBLIC}/${enc}`,
-    `https://raw.githubusercontent.com/${repo}/${ref}/${REPO_PUBLIC}/${enc}`
+    // Origin first so a VPS deploy is not blocked by stale jsDelivr @main.
+    scopeUrl(rel),
+    `https://raw.githubusercontent.com/${repo}/${ref}/${REPO_PUBLIC}/${enc}`,
+    `https://cdn.jsdelivr.net/gh/${repo}@${ref}/${REPO_PUBLIC}/${enc}`
   ];
 }
 
-async function fetchAssetBody(rel, repo, ref) {
-  const urls = cdnUrls(rel, repo || 'uhaszYsz/asteroids', ref || 'main');
-  // Origin fallback under SW scope (works for / and /asteroids/).
-  try {
-    urls.push(new URL(rel.split('/').map(encodeURIComponent).join('/'), self.registration.scope).href);
-  } catch (_) {
-    urls.push(self.location.origin + '/' + rel.split('/').map(encodeURIComponent).join('/'));
-  }
+async function sha256hex(buf) {
+  const dig = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(dig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function fetchAssetBody(rel, expectedHash, repo, ref) {
+  const urls = assetFetchUrls(rel, repo || 'uhaszYsz/asteroids', ref || 'main');
 
   for (const u of urls) {
     try {
       const res = await fetch(u, { mode: 'cors', credentials: 'omit', cache: 'no-cache' });
       if (!res.ok) continue;
-      // Re-wrap so we always expose a same-origin-ish response to the page.
       const buf = await res.arrayBuffer();
+      if (expectedHash) {
+        const got = await sha256hex(buf);
+        if (got !== expectedHash) continue; // stale CDN / wrong body
+      }
       const ctype = res.headers.get('Content-Type') || guessMime(rel);
       return new Response(buf, {
         status: 200,
@@ -168,13 +183,7 @@ async function refreshManifest() {
     }
   } catch (_) { /* ignore */ }
 
-  const candidates = MANIFEST_URLS(repo, ref);
-  // Also try origin under SW scope for brand-new deploys where CDN may lag.
-  try {
-    candidates.push(new URL('asset-manifest.json', self.registration.scope).href);
-  } catch (_) {
-    candidates.push(self.location.origin + '/asset-manifest.json');
-  }
+  const candidates = MANIFEST_URLS(repo, ref, scopeUrl('asset-manifest.json'));
 
   for (const u of candidates) {
     try {
