@@ -21170,9 +21170,11 @@ let menuTitleFxCtx = null;
 let menuTitleFxCssW = 0;
 let menuTitleFxCssH = 0;
 let menuTitleFxLastMs = 0;
-/** Embers / sparks under the logo. */
+/** Void-cannon style wisps swirling behind / through the logo. */
 const menuTitleParts = [];
-const MENU_TITLE_PART_CAP = 70;
+const MENU_TITLE_PART_CAP = 110;
+const MENU_TITLE_VOID = [0.55, 0.25, 1.0];
+const MENU_TITLE_VOID_DARK = [0.55 * 0.45, 0.25 * 0.35, 1.0 * 0.7];
 
 function initMenuTitleGl() {
   if (!menuTitleCanvas || menuTitleGl) return;
@@ -21322,24 +21324,44 @@ function syncMenuTitleFxSize() {
 
 function spawnMenuTitleParticle(w, h) {
   if (menuTitleParts.length >= MENU_TITLE_PART_CAP) return;
-  const pink = Math.random() < 0.35;
+  // Several vortex hubs across the logo (covers ASTEROIDS / ARENA / ONLINE).
+  const hubs = 5;
+  const hub = (Math.random() * hubs) | 0;
+  const cx = w * (0.14 + (hub + 0.5) * (0.72 / hubs) + (Math.random() - 0.5) * 0.04);
+  const cy = h * (0.38 + Math.random() * 0.28);
+  const R = Math.min(w, h) * (0.22 + Math.random() * 0.18);
+  const a = Math.random() * Math.PI * 2;
+  const rad = (0.2 + Math.random() * 0.8) * R;
+  const suck = Math.random() < 0.32;
+  const tang = a + Math.PI * 0.5 + (Math.random() - 0.5) * 0.4;
+  const dir = suck ? a + Math.PI : tang;
+  const spd = suck
+    ? (10 + Math.random() * 22) * (w / 480)
+    : (16 + Math.random() * 40) * (w / 480);
+  const dark = Math.random() < 0.45 || suck;
+  const c = dark ? MENU_TITLE_VOID_DARK : MENU_TITLE_VOID;
+  const life = suck ? 0.35 + Math.random() * 0.3 : 0.28 + Math.random() * 0.4;
   menuTitleParts.push({
-    x: w * (0.12 + Math.random() * 0.76),
-    y: h * (0.55 + Math.random() * 0.4),
-    vx: (Math.random() - 0.5) * 18 * (w / 400),
-    vy: -(12 + Math.random() * 28) * (h / 160),
-    life: 0.55 + Math.random() * 0.85,
-    max: 0.55 + Math.random() * 0.85,
-    size: (1 + Math.random() * 2.4) * (w / 400),
-    spin: (Math.random() - 0.5) * 6,
-    ang: Math.random() * Math.PI * 2,
-    pink,
-    star: Math.random() < 0.28
+    x: cx + Math.cos(a) * rad,
+    y: cy + Math.sin(a) * rad,
+    vx: Math.cos(dir) * spd,
+    vy: Math.sin(dir) * spd,
+    cx, cy,
+    life,
+    max: life,
+    size: (suck ? 2.2 + Math.random() * 3.2 : 1.6 + Math.random() * 3.8) * (w / 480),
+    scaleY: 1.35,
+    wiggle: 0.2 + Math.random() * 0.15,
+    wiggleT: Math.random() * Math.PI * 2,
+    drag: suck ? 2.1 : 1.55,
+    r: c[0], g: c[1], b: c[2],
+    suck
   });
 }
 
 function tickMenuTitleParticles(dt, w, h) {
-  const spawnN = Math.min(3, 1 + ((dt * 40) | 0));
+  // Density like a living void orb field under the type.
+  const spawnN = Math.min(8, 2 + ((dt * 90) | 0));
   for (let i = 0; i < spawnN; i++) spawnMenuTitleParticle(w, h);
   for (let i = menuTitleParts.length - 1; i >= 0; i--) {
     const p = menuTitleParts[i];
@@ -21348,11 +21370,18 @@ function tickMenuTitleParticles(dt, w, h) {
       menuTitleParts.splice(i, 1);
       continue;
     }
-    p.vy += 8 * dt * (h / 160); // slight gravity so they arc
+    // Keep tangential swirl / suck; light pull toward hub for orbit feel.
+    const dx = p.cx - p.x;
+    const dy = p.cy - p.y;
+    const pull = p.suck ? 28 : 10;
+    p.vx += dx * pull * dt / Math.max(40, Math.hypot(dx, dy));
+    p.vy += dy * pull * dt / Math.max(40, Math.hypot(dx, dy));
+    const damp = Math.exp(-p.drag * dt);
+    p.vx *= damp;
+    p.vy *= damp;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-    p.ang += p.spin * dt;
-    p.vx *= 0.99;
+    p.wiggleT += dt * 10;
   }
 }
 
@@ -21368,33 +21397,32 @@ function drawMenuTitleParticles(now) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, w, h);
   ctx.imageSmoothingEnabled = false;
+  // Additive-ish purple bloom behind logo (depth: under GL title).
+  ctx.globalCompositeOperation = 'lighter';
   for (let i = 0; i < menuTitleParts.length; i++) {
     const p = menuTitleParts[i];
-    const a = Math.max(0, p.life / p.max);
-    const s = p.size * (0.65 + 0.55 * a);
+    const a = Math.max(0, p.life / Math.max(0.001, p.max));
+    const wig = 1 + Math.sin(p.wiggleT) * p.wiggle;
+    const s = p.size * wig * (0.7 + 0.5 * a);
+    const sy = s * p.scaleY;
+    const ang = Math.atan2(p.vy, p.vx);
     ctx.save();
     ctx.translate(p.x, p.y);
-    ctx.rotate(p.ang);
-    ctx.globalAlpha = a * a;
-    if (p.pink) {
-      ctx.fillStyle = '#ff3ec8';
-      ctx.shadowColor = 'rgba(255, 80, 200, 0.85)';
-    } else {
-      ctx.fillStyle = a > 0.55 ? '#ffd978' : '#ff8a2a';
-      ctx.shadowColor = 'rgba(255, 160, 40, 0.75)';
-    }
-    ctx.shadowBlur = 6 * (w / 400);
-    if (p.star) {
-      // Tiny plus / spark
-      ctx.fillRect(-s * 1.6, -s * 0.35, s * 3.2, s * 0.7);
-      ctx.fillRect(-s * 0.35, -s * 1.6, s * 0.7, s * 3.2);
-    } else {
-      ctx.fillRect(-s, -s, s * 2, s * 2);
-    }
+    ctx.rotate(ang);
+    ctx.globalAlpha = 0.35 + 0.55 * a * a;
+    ctx.fillStyle = 'rgb(' + ((p.r * 255) | 0) + ',' + ((p.g * 255) | 0) + ',' + ((p.b * 255) | 0) + ')';
+    // Soft elongated mote (void orb particle look).
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s * 1.6, sy * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha *= 0.55;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s * 0.7, sy * 0.35, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
+  ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
 }
 
 function drawMenuTitleLogo(now) {
