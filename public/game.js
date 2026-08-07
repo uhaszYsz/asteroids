@@ -21156,6 +21156,7 @@ function renderMenuBackdrop() {
 /* ========== Menu title strip (2 layers) + HSV sat oscillate ========== */
 const menuTitleWrap = document.getElementById('menu-title');
 const menuTitleCanvas = document.getElementById('menu-title-gl');
+const menuTitleFxCanvas = document.getElementById('menu-title-fx');
 let menuTitleGl = null;
 let menuTitleProg = null;
 let menuTitleBuf = null;
@@ -21165,6 +21166,13 @@ let menuTitleU = null;
 /** Last CSS pixel size we pushed to the title canvas. */
 let menuTitleCssW = 0;
 let menuTitleCssH = 0;
+let menuTitleFxCtx = null;
+let menuTitleFxCssW = 0;
+let menuTitleFxCssH = 0;
+let menuTitleFxLastMs = 0;
+/** Embers / sparks under the logo. */
+const menuTitleParts = [];
+const MENU_TITLE_PART_CAP = 70;
 
 function initMenuTitleGl() {
   if (!menuTitleCanvas || menuTitleGl) return;
@@ -21293,10 +21301,114 @@ function syncMenuTitleCanvasSize() {
   menuTitleGl.viewport(0, 0, menuTitleCanvas.width, menuTitleCanvas.height);
 }
 
+function syncMenuTitleFxSize() {
+  if (!menuTitleFxCanvas || !menuTitleWrap) return null;
+  if (!menuTitleFxCtx) {
+    menuTitleFxCtx = menuTitleFxCanvas.getContext('2d');
+    if (!menuTitleFxCtx) return null;
+  }
+  const rect = menuTitleFxCanvas.getBoundingClientRect();
+  const cssW = Math.max(1, Math.round(rect.width));
+  const cssH = Math.max(1, Math.round(rect.height));
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (cssW !== menuTitleFxCssW || cssH !== menuTitleFxCssH) {
+    menuTitleFxCssW = cssW;
+    menuTitleFxCssH = cssH;
+    menuTitleFxCanvas.width = Math.max(1, Math.round(cssW * dpr));
+    menuTitleFxCanvas.height = Math.max(1, Math.round(cssH * dpr));
+  }
+  return { w: menuTitleFxCanvas.width, h: menuTitleFxCanvas.height, dpr, ctx: menuTitleFxCtx };
+}
+
+function spawnMenuTitleParticle(w, h) {
+  if (menuTitleParts.length >= MENU_TITLE_PART_CAP) return;
+  const pink = Math.random() < 0.35;
+  menuTitleParts.push({
+    x: w * (0.12 + Math.random() * 0.76),
+    y: h * (0.55 + Math.random() * 0.4),
+    vx: (Math.random() - 0.5) * 18 * (w / 400),
+    vy: -(12 + Math.random() * 28) * (h / 160),
+    life: 0.55 + Math.random() * 0.85,
+    max: 0.55 + Math.random() * 0.85,
+    size: (1 + Math.random() * 2.4) * (w / 400),
+    spin: (Math.random() - 0.5) * 6,
+    ang: Math.random() * Math.PI * 2,
+    pink,
+    star: Math.random() < 0.28
+  });
+}
+
+function tickMenuTitleParticles(dt, w, h) {
+  const spawnN = Math.min(3, 1 + ((dt * 40) | 0));
+  for (let i = 0; i < spawnN; i++) spawnMenuTitleParticle(w, h);
+  for (let i = menuTitleParts.length - 1; i >= 0; i--) {
+    const p = menuTitleParts[i];
+    p.life -= dt;
+    if (p.life <= 0) {
+      menuTitleParts.splice(i, 1);
+      continue;
+    }
+    p.vy += 8 * dt * (h / 160); // slight gravity so they arc
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.ang += p.spin * dt;
+    p.vx *= 0.99;
+  }
+}
+
+function drawMenuTitleParticles(now) {
+  const sz = syncMenuTitleFxSize();
+  if (!sz) return;
+  const { w, h, ctx } = sz;
+  const t = now != null ? now : performance.now();
+  const dt = menuTitleFxLastMs ? Math.min(0.05, (t - menuTitleFxLastMs) / 1000) : 0.016;
+  menuTitleFxLastMs = t;
+  tickMenuTitleParticles(dt, w, h);
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = false;
+  for (let i = 0; i < menuTitleParts.length; i++) {
+    const p = menuTitleParts[i];
+    const a = Math.max(0, p.life / p.max);
+    const s = p.size * (0.65 + 0.55 * a);
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.ang);
+    ctx.globalAlpha = a * a;
+    if (p.pink) {
+      ctx.fillStyle = '#ff3ec8';
+      ctx.shadowColor = 'rgba(255, 80, 200, 0.85)';
+    } else {
+      ctx.fillStyle = a > 0.55 ? '#ffd978' : '#ff8a2a';
+      ctx.shadowColor = 'rgba(255, 160, 40, 0.75)';
+    }
+    ctx.shadowBlur = 6 * (w / 400);
+    if (p.star) {
+      // Tiny plus / spark
+      ctx.fillRect(-s * 1.6, -s * 0.35, s * 3.2, s * 0.7);
+      ctx.fillRect(-s * 0.35, -s * 1.6, s * 0.7, s * 3.2);
+    } else {
+      ctx.fillRect(-s, -s, s * 2, s * 2);
+    }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+}
+
 function drawMenuTitleLogo(now) {
   const menuEl = document.getElementById('menu');
   if (!menuTitleWrap || !menuTitleCanvas) return;
   if (menuEl && menuEl.classList.contains('hidden')) return;
+
+  const t = (now != null ? now : performance.now()) * 0.001;
+  // Gentle bob — transform only (safe with WebGL child).
+  const bob = Math.sin(t * 1.55) * 10;
+  menuTitleWrap.style.transform = 'translateY(' + bob.toFixed(2) + 'px)';
+
+  drawMenuTitleParticles(now);
+
   if (!menuTitleGl) initMenuTitleGl();
   if (!menuTitleGl || !menuTitleProg || !menuTitleReady) return;
   syncMenuTitleCanvasSize();
@@ -21317,7 +21429,7 @@ function drawMenuTitleLogo(now) {
   tgl.activeTexture(tgl.TEXTURE0);
   tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
   tgl.uniform1i(menuTitleU.tex, 0);
-  tgl.uniform1f(menuTitleU.time, (now != null ? now : performance.now()) * 0.001);
+  tgl.uniform1f(menuTitleU.time, t);
 
   // Layer 0 (ASTEROIDS ARENA), then layer 1 (ONLINE) on top — same destination.
   for (let frame = 0; frame < 2; frame++) {
