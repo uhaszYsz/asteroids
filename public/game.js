@@ -21195,7 +21195,7 @@ function initMenuTitleGl() {
       gl_Position = vec4(aPos, 0.0, 1.0);
     }
   `;
-  // Value (HSV V) > 50%: oscillate saturation ±0.10 around the texel’s current S.
+  // Value (HSV V) > 50%: per-scanline saturation oscillate ±0.25 around current S.
   const fs = `
     precision mediump float;
     uniform sampler2D uTex;
@@ -21223,8 +21223,9 @@ function initMenuTitleGl() {
       if (c.a < 0.04) discard;
       vec3 hsv = rgb2hsv(max(c.rgb, vec3(0.0)));
       if (hsv.z > 0.5) {
-        // ±10 saturation points on 0–100 scale (= ±0.10 in 0–1 HSV).
-        float osc = sin(uTime * 3.2) * 0.10;
+        // Discrete horizontal lines (matches ~133px frame height) — wave rolls top→bottom.
+        float line = floor(vUV.y * 133.0);
+        float osc = sin(uTime * 3.2 - line * 0.35) * 0.25;
         hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
         c.rgb = hsv2rgb(hsv);
       }
