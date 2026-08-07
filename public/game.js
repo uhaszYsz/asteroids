@@ -21217,24 +21217,24 @@ function buildMenuTitleRoofMesh() {
     push(c[0], c[1], c[2], u0, v1, -nx, -ny, -nz);
   };
 
+  // Tips fold toward +Z (was -Z — read upside-down after top-view tip).
   // Left plane → ASTEROIDS (strip frame 0): u ∈ [0, 1/3]
-  // Normal points somewhat +Z / -Y (outward from roof valley).
   pushQuad(
     [halfL, 0, 0],
-    [halfL, -wingY, -drop],
-    [-halfL, -wingY, -drop],
+    [halfL, -wingY, drop],
+    [-halfL, -wingY, drop],
     [-halfL, 0, 0],
     0, 1 / 3, 0, 1,
-    0, -sp, cp
+    0, -sp, -cp
   );
   // Right plane → ARENA (strip frame 1): u ∈ [1/3, 2/3]
   pushQuad(
     [halfL, 0, 0],
-    [halfL, wingY, -drop],
-    [-halfL, wingY, -drop],
+    [halfL, wingY, drop],
+    [-halfL, wingY, drop],
     [-halfL, 0, 0],
     1 / 3, 2 / 3, 0, 1,
-    0, sp, cp
+    0, sp, -cp
   );
   return new Float32Array(floats);
 }
@@ -21257,15 +21257,14 @@ function buildMenuTitleCylinderMesh() {
     const push = (x, y, z, u, v, nx, ny, nz) => {
       floats.push(x, y, z, u, v, nx, ny, nz);
     };
-    // u: left (-halfLen)=0 … right (+halfLen)=1  → ONLINE reads left→right
-    // v: around the tube
-    push(-halfLen, R * c0, R * s0, 0, v0, 0, c0, s0);
-    push( halfLen, R * c0, R * s0, 1, v0, 0, c0, s0);
-    push(-halfLen, R * c1, R * s1, 0, v1, 0, c1, s1);
+    // u flipped vs geometric left→right so the outward face reads ONLINE forward (not mirrored)
+    push(-halfLen, R * c0, R * s0, 1, v0, 0, c0, s0);
+    push( halfLen, R * c0, R * s0, 0, v0, 0, c0, s0);
+    push(-halfLen, R * c1, R * s1, 1, v1, 0, c1, s1);
 
-    push( halfLen, R * c0, R * s0, 1, v0, 0, c0, s0);
-    push( halfLen, R * c1, R * s1, 1, v1, 0, c1, s1);
-    push(-halfLen, R * c1, R * s1, 0, v1, 0, c1, s1);
+    push( halfLen, R * c0, R * s0, 0, v0, 0, c0, s0);
+    push( halfLen, R * c1, R * s1, 0, v1, 0, c1, s1);
+    push(-halfLen, R * c1, R * s1, 1, v1, 0, c1, s1);
   }
   return new Float32Array(floats);
 }
