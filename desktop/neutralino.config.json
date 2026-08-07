@@ -16,7 +16,8 @@
     "app.*",
     "window.*",
     "os.*",
-    "filesystem.*"
+    "filesystem.*",
+    "computer.*"
   ],
   "modes": {
     "window": {
@@ -25,17 +26,18 @@
       "height": 720,
       "minWidth": 640,
       "minHeight": 360,
-      "fullScreen": false,
-      "alwaysOnTop": false,
+      "fullScreen": true,
+      "alwaysOnTop": true,
       "icon": "/resources/icons/appIcon.png",
       "enableInspector": false,
+      "openInspectorOnStartup": false,
       "borderless": true,
-      "maximize": true,
+      "maximize": false,
       "hidden": false,
-      "resizable": true,
+      "resizable": false,
       "exitProcessOnClose": true,
-      "center": true,
-      "webviewArgs": "--disable-features=CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-ipc-flooding-protection --enable-gpu-rasterization --enable-zero-copy --ignore-gpu-blocklist"
+      "center": false,
+      "webviewArgs": "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-ipc-flooding-protection --enable-gpu --enable-gpu-rasterization --ignore-gpu-blocklist --use-angle=d3d11"
     }
   },
   "cli": {

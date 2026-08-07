@@ -68,6 +68,14 @@ function patchIndex(html) {
 (function () {
   if (typeof Neutralino === 'undefined') return;
   Neutralino.init();
+  // Block browser/WebView DevTools shortcuts in the shipped desktop shell.
+  document.addEventListener('keydown', function (e) {
+    var k = e.key || '';
+    if (k === 'F12' || (e.ctrlKey && e.shiftKey && (k === 'I' || k === 'i' || k === 'J' || k === 'j' || k === 'C' || k === 'c'))) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
   // Drop any SW that slipped in from a prior session.
   try {
     if (navigator.serviceWorker) {

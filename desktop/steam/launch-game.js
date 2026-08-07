@@ -49,16 +49,19 @@ if (process.platform !== 'win32') {
 process.env.STEAM_SESSION_OUT = SESSION_OUT;
 if (!process.env.STEAM_APP_ID) process.env.STEAM_APP_ID = '5069920';
 
-// Low-latency WebView2 hints (also set via neutralino.config.json webviewArgs on 6.2+).
+// Safer WebView2 flags (avoid disable-direct-composition / disable-software-rasterizer —
+// those can blank WebGL while leaving DOM UI visible).
 if (!process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS) {
   process.env.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = [
-    '--disable-features=CalculateNativeWinOcclusion',
+    '--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling',
     '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
     '--disable-ipc-flooding-protection',
+    '--enable-gpu',
     '--enable-gpu-rasterization',
-    '--enable-zero-copy',
-    '--ignore-gpu-blocklist'
+    '--ignore-gpu-blocklist',
+    '--use-angle=d3d11'
   ].join(' ');
 }
 
@@ -81,7 +84,13 @@ if (!fs.existsSync(SESSION_OUT)) {
 }
 
 console.log('Launching', path.basename(GAME_EXE), '…');
-const child = spawn(GAME_EXE, [], {
+// Never open WebView DevTools in the shipped exe (Neutralino defaults
+// openInspectorOnStartup=true whenever enableInspector slips on).
+const gameArgs = [
+  '--window-enable-inspector=false',
+  '--window-open-inspector-on-startup=false'
+];
+const child = spawn(GAME_EXE, gameArgs, {
   cwd: ROOT,
   detached: true,
   stdio: 'ignore',
