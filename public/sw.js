@@ -38,6 +38,24 @@ self.addEventListener('message', (event) => {
   })());
 });
 
+/** Scope path prefix (e.g. "/asteroids/" or "/"). */
+function scopePath() {
+  try {
+    return new URL(self.registration.scope).pathname || '/';
+  } catch (_) {
+    return '/';
+  }
+}
+
+/** Map request pathname → manifest-relative path (strip /asteroids/ etc.). */
+function pathToRel(pathname) {
+  const base = scopePath();
+  let p = String(pathname || '');
+  if (base && base !== '/' && p.startsWith(base)) p = p.slice(base.length);
+  else p = p.replace(/^\//, '');
+  return decodeURIComponent(p.replace(/^\//, ''));
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
@@ -45,9 +63,9 @@ self.addEventListener('fetch', (event) => {
   // Same-origin navigations / HTML: always network (keep deploys instant).
   if (req.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html')) return;
   // Never touch API-ish endpoints (also /asteroids/health behind nginx).
-  if (url.pathname === '/sw.js' || /\/health\/?$/.test(url.pathname)) return;
+  if (url.pathname.endsWith('/sw.js') || /\/health\/?$/.test(url.pathname)) return;
 
-  const rel = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  const rel = pathToRel(url.pathname);
   if (!rel || rel.includes('..')) return;
 
   event.respondWith(handleAsset(req, rel));
@@ -96,8 +114,12 @@ function cdnUrls(rel, repo, ref) {
 
 async function fetchAssetBody(rel, repo, ref) {
   const urls = cdnUrls(rel, repo || 'uhaszYsz/asteroids', ref || 'main');
-  // Origin fallback (same path, no query).
-  urls.push(self.location.origin + '/' + rel.split('/').map(encodeURIComponent).join('/'));
+  // Origin fallback under SW scope (works for / and /asteroids/).
+  try {
+    urls.push(new URL(rel.split('/').map(encodeURIComponent).join('/'), self.registration.scope).href);
+  } catch (_) {
+    urls.push(self.location.origin + '/' + rel.split('/').map(encodeURIComponent).join('/'));
+  }
 
   for (const u of urls) {
     try {
@@ -147,8 +169,12 @@ async function refreshManifest() {
   } catch (_) { /* ignore */ }
 
   const candidates = MANIFEST_URLS(repo, ref);
-  // Also try origin first for brand-new deploys where CDN may lag.
-  candidates.push(self.location.origin + '/asset-manifest.json');
+  // Also try origin under SW scope for brand-new deploys where CDN may lag.
+  try {
+    candidates.push(new URL('asset-manifest.json', self.registration.scope).href);
+  } catch (_) {
+    candidates.push(self.location.origin + '/asset-manifest.json');
+  }
 
   for (const u of candidates) {
     try {
