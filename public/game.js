@@ -21153,10 +21153,9 @@ function stepMenuAsteroids() {
 function renderMenuBackdrop() {
 }
 
-/* ========== Menu title strip (2 layers) + HSV sat oscillate ========== */
+/* ========== Menu title strip (3 layers) + HSV sat + per-layer bob ========== */
 const menuTitleWrap = document.getElementById('menu-title');
 const menuTitleCanvas = document.getElementById('menu-title-gl');
-const menuTitleFxCanvas = document.getElementById('menu-title-fx');
 let menuTitleGl = null;
 let menuTitleProg = null;
 let menuTitleBuf = null;
@@ -21166,15 +21165,10 @@ let menuTitleU = null;
 /** Last CSS pixel size we pushed to the title canvas. */
 let menuTitleCssW = 0;
 let menuTitleCssH = 0;
-let menuTitleFxCtx = null;
-let menuTitleFxCssW = 0;
-let menuTitleFxCssH = 0;
-let menuTitleFxLastMs = 0;
-/** Void-cannon style wisps swirling behind / through the logo. */
-const menuTitleParts = [];
-const MENU_TITLE_PART_CAP = 110;
-const MENU_TITLE_VOID = [0.55, 0.25, 1.0];
-const MENU_TITLE_VOID_DARK = [0.55 * 0.45, 0.25 * 0.35, 1.0 * 0.7];
+/** Phase offsets (rad) so ASTEROIDS / ARENA / ONLINE bob out of sync. */
+const MENU_TITLE_BOB_PHASE = [0.0, 2.1, 4.2];
+const MENU_TITLE_BOB_PX = 5;
+const MENU_TITLE_BOB_HZ = 1.7;
 
 function initMenuTitleGl() {
   if (!menuTitleCanvas || menuTitleGl) return;
@@ -21199,10 +21193,11 @@ function initMenuTitleGl() {
   const vs = `
     attribute vec2 aPos;
     attribute vec2 aUV;
+    uniform vec2 uOffset; // NDC offset (x,y)
     varying vec2 vUV;
     void main() {
       vUV = aUV;
-      gl_Position = vec4(aPos, 0.0, 1.0);
+      gl_Position = vec4(aPos + uOffset, 0.0, 1.0);
     }
   `;
   // Value (HSV V) > 50%: per-scanline saturation oscillate ±0.25 around current S.
@@ -21236,7 +21231,6 @@ function initMenuTitleGl() {
       if (c.a < 0.04) discard;
       vec3 hsv = rgb2hsv(max(c.rgb, vec3(0.0)));
       if (hsv.z > 0.5) {
-        // Discrete horizontal lines — wave rolls top→bottom.
         float line = floor(vUV.y * 161.0);
         float osc = sin(uTime * 3.2 - line * 0.35) * 0.25;
         hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
@@ -21261,10 +21255,10 @@ function initMenuTitleGl() {
     tex: tgl.getUniformLocation(prog, 'uTex'),
     time: tgl.getUniformLocation(prog, 'uTime'),
     frame: tgl.getUniformLocation(prog, 'uFrame'),
-    frames: tgl.getUniformLocation(prog, 'uFrames')
+    frames: tgl.getUniformLocation(prog, 'uFrames'),
+    offset: tgl.getUniformLocation(prog, 'uOffset')
   };
 
-  // Fullscreen quad: pos.xy, uv.xy
   const verts = new Float32Array([
     -1, -1, 0, 1,
      1, -1, 1, 1,
@@ -21307,144 +21301,17 @@ function syncMenuTitleCanvasSize() {
   menuTitleGl.viewport(0, 0, menuTitleCanvas.width, menuTitleCanvas.height);
 }
 
-function syncMenuTitleFxSize() {
-  if (!menuTitleFxCanvas || !menuTitleWrap) return null;
-  if (!menuTitleFxCtx) {
-    menuTitleFxCtx = menuTitleFxCanvas.getContext('2d');
-    if (!menuTitleFxCtx) return null;
-  }
-  const rect = menuTitleFxCanvas.getBoundingClientRect();
-  const cssW = Math.max(1, Math.round(rect.width));
-  const cssH = Math.max(1, Math.round(rect.height));
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  if (cssW !== menuTitleFxCssW || cssH !== menuTitleFxCssH) {
-    menuTitleFxCssW = cssW;
-    menuTitleFxCssH = cssH;
-    menuTitleFxCanvas.width = Math.max(1, Math.round(cssW * dpr));
-    menuTitleFxCanvas.height = Math.max(1, Math.round(cssH * dpr));
-  }
-  return { w: menuTitleFxCanvas.width, h: menuTitleFxCanvas.height, dpr, ctx: menuTitleFxCtx };
-}
-
-function spawnMenuTitleParticle(w, h) {
-  if (menuTitleParts.length >= MENU_TITLE_PART_CAP) return;
-  // Several vortex hubs across the logo (covers ASTEROIDS / ARENA / ONLINE).
-  const hubs = 5;
-  const hub = (Math.random() * hubs) | 0;
-  const cx = w * (0.14 + (hub + 0.5) * (0.72 / hubs) + (Math.random() - 0.5) * 0.04);
-  const cy = h * (0.38 + Math.random() * 0.28);
-  const R = Math.min(w, h) * (0.22 + Math.random() * 0.18);
-  const a = Math.random() * Math.PI * 2;
-  const rad = (0.2 + Math.random() * 0.8) * R;
-  const suck = Math.random() < 0.32;
-  const tang = a + Math.PI * 0.5 + (Math.random() - 0.5) * 0.4;
-  const dir = suck ? a + Math.PI : tang;
-  const spd = suck
-    ? (10 + Math.random() * 22) * (w / 480)
-    : (16 + Math.random() * 40) * (w / 480);
-  const dark = Math.random() < 0.45 || suck;
-  const c = dark ? MENU_TITLE_VOID_DARK : MENU_TITLE_VOID;
-  const life = suck ? 0.35 + Math.random() * 0.3 : 0.28 + Math.random() * 0.4;
-  menuTitleParts.push({
-    x: cx + Math.cos(a) * rad,
-    y: cy + Math.sin(a) * rad,
-    vx: Math.cos(dir) * spd,
-    vy: Math.sin(dir) * spd,
-    cx, cy,
-    life,
-    max: life,
-    size: (suck ? 2.2 + Math.random() * 3.2 : 1.6 + Math.random() * 3.8) * (w / 480),
-    scaleY: 1.35,
-    wiggle: 0.2 + Math.random() * 0.15,
-    wiggleT: Math.random() * Math.PI * 2,
-    drag: suck ? 2.1 : 1.55,
-    r: c[0], g: c[1], b: c[2],
-    suck
-  });
-}
-
-function tickMenuTitleParticles(dt, w, h) {
-  // Density like a living void orb field under the type.
-  const spawnN = Math.min(8, 2 + ((dt * 90) | 0));
-  for (let i = 0; i < spawnN; i++) spawnMenuTitleParticle(w, h);
-  for (let i = menuTitleParts.length - 1; i >= 0; i--) {
-    const p = menuTitleParts[i];
-    p.life -= dt;
-    if (p.life <= 0) {
-      menuTitleParts.splice(i, 1);
-      continue;
-    }
-    // Keep tangential swirl / suck; light pull toward hub for orbit feel.
-    const dx = p.cx - p.x;
-    const dy = p.cy - p.y;
-    const pull = p.suck ? 28 : 10;
-    p.vx += dx * pull * dt / Math.max(40, Math.hypot(dx, dy));
-    p.vy += dy * pull * dt / Math.max(40, Math.hypot(dx, dy));
-    const damp = Math.exp(-p.drag * dt);
-    p.vx *= damp;
-    p.vy *= damp;
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    p.wiggleT += dt * 10;
-  }
-}
-
-function drawMenuTitleParticles(now) {
-  const sz = syncMenuTitleFxSize();
-  if (!sz) return;
-  const { w, h, ctx } = sz;
-  const t = now != null ? now : performance.now();
-  const dt = menuTitleFxLastMs ? Math.min(0.05, (t - menuTitleFxLastMs) / 1000) : 0.016;
-  menuTitleFxLastMs = t;
-  tickMenuTitleParticles(dt, w, h);
-
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  ctx.imageSmoothingEnabled = false;
-  // Additive-ish purple bloom behind logo (depth: under GL title).
-  ctx.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < menuTitleParts.length; i++) {
-    const p = menuTitleParts[i];
-    const a = Math.max(0, p.life / Math.max(0.001, p.max));
-    const wig = 1 + Math.sin(p.wiggleT) * p.wiggle;
-    const s = p.size * wig * (0.7 + 0.5 * a);
-    const sy = s * p.scaleY;
-    const ang = Math.atan2(p.vy, p.vx);
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    ctx.rotate(ang);
-    ctx.globalAlpha = 0.35 + 0.55 * a * a;
-    ctx.fillStyle = 'rgb(' + ((p.r * 255) | 0) + ',' + ((p.g * 255) | 0) + ',' + ((p.b * 255) | 0) + ')';
-    // Soft elongated mote (void orb particle look).
-    ctx.beginPath();
-    ctx.ellipse(0, 0, s * 1.6, sy * 0.7, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha *= 0.55;
-    ctx.beginPath();
-    ctx.ellipse(0, 0, s * 0.7, sy * 0.35, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
-}
-
 function drawMenuTitleLogo(now) {
   const menuEl = document.getElementById('menu');
   if (!menuTitleWrap || !menuTitleCanvas) return;
   if (menuEl && menuEl.classList.contains('hidden')) return;
-
-  const t = (now != null ? now : performance.now()) * 0.001;
-  // Gentle bob — transform only (safe with WebGL child).
-  const bob = Math.sin(t * 1.55) * 10;
-  menuTitleWrap.style.transform = 'translateY(' + bob.toFixed(2) + 'px)';
-
-  drawMenuTitleParticles(now);
+  menuTitleWrap.style.transform = '';
 
   if (!menuTitleGl) initMenuTitleGl();
   if (!menuTitleGl || !menuTitleProg || !menuTitleReady) return;
   syncMenuTitleCanvasSize();
 
+  const t = (now != null ? now : performance.now()) * 0.001;
   const tgl = menuTitleGl;
   tgl.disable(tgl.DEPTH_TEST);
   tgl.enable(tgl.BLEND);
@@ -21464,8 +21331,14 @@ function drawMenuTitleLogo(now) {
   tgl.uniform1f(menuTitleU.time, t);
   tgl.uniform1f(menuTitleU.frames, 3);
 
-  // 3-frame strip layered at the same destination (ASTEROIDS / ARENA / ONLINE).
+  // ±5px Y bob in NDC (canvas Y up in clip space → flip sign for screen-down).
+  const hPx = Math.max(1, menuTitleCanvas.height);
+  const ndcPerPxY = 2 / hPx;
+
   for (let frame = 0; frame < 3; frame++) {
+    const bobPx = Math.sin(t * MENU_TITLE_BOB_HZ + MENU_TITLE_BOB_PHASE[frame]) * MENU_TITLE_BOB_PX;
+    const bobNdc = -bobPx * ndcPerPxY;
+    tgl.uniform2f(menuTitleU.offset, 0, bobNdc);
     tgl.uniform1f(menuTitleU.frame, frame);
     tgl.drawArrays(tgl.TRIANGLES, 0, 6);
   }

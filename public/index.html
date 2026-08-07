@@ -159,25 +159,13 @@
       pointer-events: none;
       user-select: none;
       flex-shrink: 0;
-      /* transform bob set from JS — never use filter here (freezes WebGL). */
-      will-change: transform;
       overflow: visible;
-    }
-    #menu-title-fx {
-      position: absolute;
-      left: -18%;
-      top: -25%;
-      width: 136%;
-      height: 150%;
-      pointer-events: none;
-      z-index: 0;
     }
     #menu-title-gl {
       position: relative;
       display: block;
       width: 100%;
       height: 100%;
-      z-index: 1;
     }
     #menu .menu-bottom {
       margin-top: auto;
@@ -2160,7 +2148,6 @@
 <div id="glow-panel" aria-hidden="true" hidden></div>
 <div id="menu">
   <div id="menu-title" role="img" aria-label="Asteroids Arena Online">
-    <canvas id="menu-title-fx" width="480" height="180" aria-hidden="true"></canvas>
     <canvas id="menu-title-gl" width="412" height="161"></canvas>
   </div>
   <div class="menu-bottom">
@@ -2436,7 +2423,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=85');
-      await loadScript('game.js?v=1000');
+      await loadScript('game.js?v=1001');
     } catch (err) {
       console.error(err);
     }
