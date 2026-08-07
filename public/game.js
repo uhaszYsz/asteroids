@@ -11946,7 +11946,7 @@ function effectiveLocalWeapon(name) {
     if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.7));
   } else if (n === 'shotgun') {
     if (lvl >= 2) w.ammo += 1;
-    if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
+    if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 1;
   } else if (n === 'laser') {
     // L2 = wide dual-ray (server). L3 = +25% dmg (server).
   } else if (n === 'plasma') {
