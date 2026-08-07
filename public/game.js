@@ -1207,7 +1207,7 @@ const CVARS = {
     def: 0,
     help: 'Impulse: cl_bg = new random space nebula. Optional 0–3 = force strip frame.'
   },
-  cl_bgAuto: {
+  cl_bg_auto: {
     value: 0,
     def: 0,
     help: '1 = pick a new random space nebula each wave. Off by default.'
@@ -5841,7 +5841,7 @@ function startWaveBanner(n) {
   clearWaveBanner();
   const wave = Math.max(1, n | 0);
   soloWave = wave;
-  if ((cv('cl_bgAuto') | 0) !== 0) rerollNebulaBackground(-1);
+  if ((cv('cl_bg_auto') | 0) !== 0) rerollNebulaBackground(-1);
   const titleCol = [1.0, 0.92, 0.45];
   const subCol = [0.55, 0.95, 1.0];
   waveBanner = {
