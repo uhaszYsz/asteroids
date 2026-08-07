@@ -1205,7 +1205,12 @@ const CVARS = {
   cl_bg: {
     value: 0,
     def: 0,
-    help: 'Impulse: cl_bg (or cl_bg 1) = new random space nebula. Optional 0–3 = force strip frame.'
+    help: 'Impulse: cl_bg = new random space nebula. Optional 0–3 = force strip frame.'
+  },
+  cl_bgAuto: {
+    value: 0,
+    def: 0,
+    help: '1 = pick a new random space nebula each wave. Off by default.'
   },
   cl_grid_alpha: {
     value: 0.5,
