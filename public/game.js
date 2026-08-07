@@ -21167,6 +21167,8 @@ let menuTitleCssW = 0;
 let menuTitleCssH = 0;
 /** Phase offsets (rad) so ASTEROIDS / ARENA / ONLINE bob out of sync. */
 const MENU_TITLE_BOB_PHASE = [0.0, 2.1, 4.2];
+/** Static Y shift in CSS px (positive = down): ASTEROIDS +10, ARENA -10, ONLINE 0. */
+const MENU_TITLE_BASE_Y_PX = [10, -10, 0];
 const MENU_TITLE_BOB_PX = 5;
 const MENU_TITLE_BOB_HZ = 1.7;
 
@@ -21337,7 +21339,8 @@ function drawMenuTitleLogo(now) {
 
   for (let frame = 0; frame < 3; frame++) {
     const bobPx = Math.sin(t * MENU_TITLE_BOB_HZ + MENU_TITLE_BOB_PHASE[frame]) * MENU_TITLE_BOB_PX;
-    const bobNdc = -bobPx * ndcPerPxY;
+    const yPx = (MENU_TITLE_BASE_Y_PX[frame] || 0) + bobPx;
+    const bobNdc = -yPx * ndcPerPxY;
     tgl.uniform2f(menuTitleU.offset, 0, bobNdc);
     tgl.uniform1f(menuTitleU.frame, frame);
     tgl.drawArrays(tgl.TRIANGLES, 0, 6);
