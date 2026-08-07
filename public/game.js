@@ -625,6 +625,40 @@ function sfxTryPlay(a) {
   } catch (_) {}
 }
 
+function sfxMasterScale() {
+  return Math.max(0, Math.min(100, cv('cl_sfx'))) / 100;
+}
+
+function sfxScaledVol(vol) {
+  return Math.max(0, Math.min(1, (vol != null ? vol : 0.7) * sfxMasterScale()));
+}
+
+function applyMusicVolumeFromCvar() {
+  const v = Math.max(0, Math.min(100, cv('cl_music'))) / 100;
+  try {
+    if (window.Music) {
+      window.Music.volume = v;
+      if (typeof window.Music.applyVolume === 'function') window.Music.applyVolume();
+    }
+  } catch (_) {}
+}
+
+function applySfxVolumeFromCvar() {
+  const scale = sfxMasterScale();
+  for (const a of sfxHolds.values()) {
+    if (!a || a._sfxBaseVol == null) continue;
+    try { a.volume = Math.max(0, Math.min(1, a._sfxBaseVol * scale)); } catch (_) {}
+  }
+  for (const entry of sfxPools.values()) {
+    if (!entry || !entry.list) continue;
+    for (const a of entry.list) {
+      if (!a || a._sfxBaseVol == null) continue;
+      if (a.paused || a.ended) continue;
+      try { a.volume = Math.max(0, Math.min(1, a._sfxBaseVol * scale)); } catch (_) {}
+    }
+  }
+}
+
 /** One-shot SFX. `src` may be a string or an array (picks one at random). */
 function playSfx(src, opts) {
   if (Array.isArray(src)) {
@@ -640,7 +674,8 @@ function playSfx(src, opts) {
     const poolSize = opts.pool != null ? (opts.pool | 0) : SFX_DEFAULT_POOL;
     const a = sfxPoolVoice(src, poolSize > 0 ? poolSize : SFX_DEFAULT_POOL);
     try { a.pause(); } catch (_) {}
-    a.volume = vol;
+    a._sfxBaseVol = vol;
+    a.volume = sfxScaledVol(vol);
     try { a.currentTime = 0; } catch (_) {}
     sfxTryPlay(a);
     return a;
@@ -684,7 +719,9 @@ function playSfxLoop(key, src, opts) {
     unlockSfx();
     const a = sfxHold(key, src);
     a.loop = !!opts.loop;
-    a.volume = opts.vol != null ? opts.vol : 0.7;
+    const vol = opts.vol != null ? opts.vol : 0.7;
+    a._sfxBaseVol = vol;
+    a.volume = sfxScaledVol(vol);
     try { a.pause(); } catch (_) {}
     try { a.currentTime = 0; } catch (_) {}
     const p = a.play();
@@ -853,7 +890,8 @@ function syncLaserSfx(on) {
     unlockSfx();
     const a = sfxHold('laser', SFX.laser);
     a.loop = true;
-    a.volume = 0.55;
+    a._sfxBaseVol = 0.55;
+    a.volume = sfxScaledVol(0.55);
     if (on) {
       try { a.currentTime = 0; } catch (_) {}
       const p = a.play();
@@ -988,6 +1026,16 @@ const CVARS = {
     value: 0,
     def: 0,
     help: '1 = show on-screen touch controls (left/right turn + tap empty to shoot). 0 = hide.'
+  },
+  cl_music: {
+    value: 30,
+    def: 30,
+    help: 'Music volume 0–100.'
+  },
+  cl_sfx: {
+    value: 100,
+    def: 100,
+    help: 'SFX volume 0–100.'
   },
   cl_server_pose: {
     value: 0,
@@ -1279,6 +1327,8 @@ function resetAllClCvars() {
   syncSettingsBakeQualityUi();
   invalidateGridBake();
   syncTouchControls();
+  applyMusicVolumeFromCvar();
+  applySfxVolumeFromCvar();
 }
 
 function setCvar(name, raw) {
@@ -1316,6 +1366,14 @@ function setCvar(name, raw) {
     c.value = (n | 0) !== 0 ? 1 : 0;
   }
   if (name === 'cl_touch') syncTouchControls();
+  if (name === 'cl_music') {
+    c.value = Math.max(0, Math.min(100, Math.round(n)));
+    applyMusicVolumeFromCvar();
+  }
+  if (name === 'cl_sfx') {
+    c.value = Math.max(0, Math.min(100, Math.round(n)));
+    applySfxVolumeFromCvar();
+  }
   if (name === 'sv_send_asteroids') syncGetAsteroidsCvar();
   if (name === 'sv_predict_shoot_step' || name === 'sv_predict_shoot_angle') {
     syncPredictShootCvars();

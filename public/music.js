@@ -105,8 +105,12 @@ window.Music = {
 
   init() {
     if (this.isInitialized) return;
-    this.volume = 0.3;
-    this.saveVolume();
+    // Prefer cl_music when game.js has already defined cv(); else keep default.
+    if (typeof cv === 'function') {
+      this.volume = Math.max(0, Math.min(1, (cv('cl_music') | 0) / 100));
+    } else {
+      this.loadVolume();
+    }
     this.isInitialized = true;
     this._buildPlayerAdapter();
     this.applyVolume();
