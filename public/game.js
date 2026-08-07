@@ -12758,6 +12758,10 @@ const FIXDRONE_SPAWN_BACK = 35;
 const FIXDRONE_SPAWN_WIDTH = 45;
 /** Chase ship pose from this many render frames ago. */
 const FIXDRONE_LAG_FRAMES = 5;
+/** Hide repair beam beyond this distance from the ship. */
+const FIXDRONE_BEAM_MAX_DIST = 64;
+/** Snap back to the ship beyond this distance. */
+const FIXDRONE_TELEPORT_DIST = 100;
 /** ownerId → { repairing, spawned, x, y, trail } */
 const fixdroneFx = new Map();
 
@@ -12777,6 +12781,13 @@ function drawFixBeamSeg(x0, y0, x1, y1, alpha) {
   const mx = x1;
   const my = y1;
   drawThickSegment(mx - 1, my, mx + 1, my, 2, col, 0.7 * a, true);
+}
+
+function fixdroneSpawnBehind(st, x, y, cs, sn) {
+  const side = (Math.random() - 0.5) * FIXDRONE_SPAWN_WIDTH;
+  st.x = x - cs * FIXDRONE_SPAWN_BACK - sn * side;
+  st.y = y - sn * FIXDRONE_SPAWN_BACK + cs * side;
+  st.spawned = true;
 }
 
 function drawFixDrones(x, y, ownerId, shipAngle, dt) {
@@ -12811,12 +12822,7 @@ function drawFixDrones(x, y, ownerId, shipAngle, dt) {
   st.trail.push({ x: x, y: y, angle: ang });
   while (st.trail.length > FIXDRONE_LAG_FRAMES + 3) st.trail.shift();
 
-  if (!st.spawned) {
-    const side = (Math.random() - 0.5) * FIXDRONE_SPAWN_WIDTH;
-    st.x = x - cs * FIXDRONE_SPAWN_BACK - sn * side;
-    st.y = y - sn * FIXDRONE_SPAWN_BACK + cs * side;
-    st.spawned = true;
-  }
+  if (!st.spawned) fixdroneSpawnBehind(st, x, y, cs, sn);
 
   // Target = where the ship was ~5 frames ago (falls back to oldest / current).
   const lagIdx = Math.max(0, st.trail.length - 1 - FIXDRONE_LAG_FRAMES);
@@ -12826,6 +12832,12 @@ function drawFixDrones(x, y, ownerId, shipAngle, dt) {
   const k = 1 - Math.exp(-7.5 * step);
   st.x += (lag.x - st.x) * k;
   st.y += (lag.y - st.y) * k;
+
+  let dist = Math.hypot(st.x - x, st.y - y);
+  if (dist > FIXDRONE_TELEPORT_DIST) {
+    fixdroneSpawnBehind(st, x, y, cs, sn);
+    dist = Math.hypot(st.x - x, st.y - y);
+  }
 
   const opt = getShipOptionById(FIXDRONE_SPRITE_ID);
   const canSprite = !!(opt && opt.kind === 'sprite' && opt.sprite
@@ -12848,7 +12860,7 @@ function drawFixDrones(x, y, ownerId, shipAngle, dt) {
       drawThickSegment(dxPos - r, dyPos, dxPos + r, dyPos, 2, COL.powerDrone, 0.9, true);
       drawThickSegment(dxPos, dyPos - r, dxPos, dyPos + r, 2, COL.powerDrone, 0.9, true);
     }
-    if (hp < MAX_HP) {
+    if (hp < MAX_HP && dist <= FIXDRONE_BEAM_MAX_DIST) {
       const inset = 6 * RES_SCALE;
       const bx = x + Math.cos(face + Math.PI) * inset;
       const by = y + Math.sin(face + Math.PI) * inset;
