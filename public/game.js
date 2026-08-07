@@ -9,6 +9,14 @@ const scoreFoeEl = document.getElementById('score-foe');
 const scoreLimitEl = document.getElementById('score-limit');
 /** First-to-N round wins (server authoritative; welcome/over may override). */
 let scoreToWin = 10;
+/** Hoisted early — WebView2 can fire image onload / key handlers before late `let` lines run (TDZ). */
+let waitingOnlineQueue = null;
+let onlineQueueWaiting = 0;
+let onlineQueueNeed = 2;
+let remoteWs = null;
+let usingLocalSolo = false;
+let shipPrevUnitCached = 0;
+let consoleOpen = false;
 /** id -> callsign */
 const rosterNames = new Map();
 const matchIntroEl = document.getElementById('match-intro');
@@ -22721,13 +22729,13 @@ function handleWsMessage(e) {
 }
 
 /** Remote dedicated-server socket (lobby / PvP / coop). */
-let remoteWs = null;
+remoteWs = null;
 /** True while playing on the in-browser local host (offline solo). */
-let usingLocalSolo = false;
+usingLocalSolo = false;
 /** 'pvp' | 'coop' while queued online and playing local wait-waves. */
-let waitingOnlineQueue = null;
-let onlineQueueWaiting = 0;
-let onlineQueueNeed = 2;
+waitingOnlineQueue = null;
+onlineQueueWaiting = 0;
+onlineQueueNeed = 2;
 
 function localSoloAvailable() {
   return !!(typeof AsteroidsLocal !== 'undefined' && AsteroidsLocal);
@@ -23139,7 +23147,7 @@ const shipPreviewSlots = [];
 /** Largest preview edge (px); all ships share one scale from real sprite pixels. */
 const SHIP_PREV_MAX_EDGE = 132;
 const SHIP_PREV_MESH_SIZE = 72;
-let shipPrevUnitCached = 0;
+shipPrevUnitCached = 0;
 /** path -> { img, ready } for F1 textured-mesh thumbnails */
 const shipPreviewImgByPath = new Map();
 
