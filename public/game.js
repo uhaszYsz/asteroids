@@ -21153,6 +21153,179 @@ function stepMenuAsteroids() {
 function renderMenuBackdrop() {
 }
 
+/* ========== Menu title strip (2 layers) + HSV sat oscillate ========== */
+const menuTitleWrap = document.getElementById('menu-title');
+const menuTitleCanvas = document.getElementById('menu-title-gl');
+let menuTitleGl = null;
+let menuTitleProg = null;
+let menuTitleBuf = null;
+let menuTitleTex = null;
+let menuTitleReady = false;
+let menuTitleU = null;
+/** Last CSS pixel size we pushed to the title canvas. */
+let menuTitleCssW = 0;
+let menuTitleCssH = 0;
+
+function initMenuTitleGl() {
+  if (!menuTitleCanvas || menuTitleGl) return;
+  const tgl = menuTitleCanvas.getContext('webgl', {
+    alpha: true,
+    premultipliedAlpha: false,
+    antialias: true
+  });
+  if (!tgl) return;
+  menuTitleGl = tgl;
+
+  function tShader(type, src) {
+    const s = tgl.createShader(type);
+    tgl.shaderSource(s, src);
+    tgl.compileShader(s);
+    if (!tgl.getShaderParameter(s, tgl.COMPILE_STATUS)) {
+      console.error(tgl.getShaderInfoLog(s));
+    }
+    return s;
+  }
+
+  const vs = `
+    attribute vec2 aPos;
+    attribute vec2 aUV;
+    varying vec2 vUV;
+    void main() {
+      vUV = aUV;
+      gl_Position = vec4(aPos, 0.0, 1.0);
+    }
+  `;
+  // Value (HSV V) > 50%: oscillate saturation ±0.10 around the texel’s current S.
+  const fs = `
+    precision mediump float;
+    uniform sampler2D uTex;
+    uniform float uTime;
+    uniform float uFrame;
+    varying vec2 vUV;
+
+    vec3 rgb2hsv(vec3 c) {
+      vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+      vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+      vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+      float d = q.x - min(q.w, q.y);
+      float e = 1.0e-10;
+      return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+    }
+    vec3 hsv2rgb(vec3 c) {
+      vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+      vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+      return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    }
+
+    void main() {
+      vec2 uv = vec2(vUV.x * 0.5 + uFrame * 0.5, vUV.y);
+      vec4 c = texture2D(uTex, uv);
+      if (c.a < 0.04) discard;
+      vec3 hsv = rgb2hsv(max(c.rgb, vec3(0.0)));
+      if (hsv.z > 0.5) {
+        float osc = sin(uTime * 2.4) * 0.10;
+        hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
+        c.rgb = hsv2rgb(hsv);
+      }
+      gl_FragColor = c;
+    }
+  `;
+
+  const prog = tgl.createProgram();
+  tgl.bindAttribLocation(prog, 0, 'aPos');
+  tgl.bindAttribLocation(prog, 1, 'aUV');
+  tgl.attachShader(prog, tShader(tgl.VERTEX_SHADER, vs));
+  tgl.attachShader(prog, tShader(tgl.FRAGMENT_SHADER, fs));
+  tgl.linkProgram(prog);
+  if (!tgl.getProgramParameter(prog, tgl.LINK_STATUS)) {
+    console.error(tgl.getProgramInfoLog(prog));
+    return;
+  }
+  menuTitleProg = prog;
+  menuTitleU = {
+    tex: tgl.getUniformLocation(prog, 'uTex'),
+    time: tgl.getUniformLocation(prog, 'uTime'),
+    frame: tgl.getUniformLocation(prog, 'uFrame')
+  };
+
+  // Fullscreen quad: pos.xy, uv.xy
+  const verts = new Float32Array([
+    -1, -1, 0, 1,
+     1, -1, 1, 1,
+    -1,  1, 0, 0,
+    -1,  1, 0, 0,
+     1, -1, 1, 1,
+     1,  1, 1, 0
+  ]);
+  menuTitleBuf = tgl.createBuffer();
+  tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleBuf);
+  tgl.bufferData(tgl.ARRAY_BUFFER, verts, tgl.STATIC_DRAW);
+
+  menuTitleTex = tgl.createTexture();
+  const img = new Image();
+  img.onload = () => {
+    tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
+    tgl.pixelStorei(tgl.UNPACK_FLIP_Y_WEBGL, 0);
+    tgl.texImage2D(tgl.TEXTURE_2D, 0, tgl.RGBA, tgl.RGBA, tgl.UNSIGNED_BYTE, img);
+    tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_MIN_FILTER, tgl.LINEAR);
+    tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_MAG_FILTER, tgl.LINEAR);
+    tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_WRAP_S, tgl.CLAMP_TO_EDGE);
+    tgl.texParameteri(tgl.TEXTURE_2D, tgl.TEXTURE_WRAP_T, tgl.CLAMP_TO_EDGE);
+    menuTitleReady = true;
+  };
+  img.onerror = () => console.warn('menu title texture failed');
+  img.src = 'sprites/Title.png';
+}
+
+function syncMenuTitleCanvasSize() {
+  if (!menuTitleCanvas || !menuTitleWrap || !menuTitleGl) return;
+  const rect = menuTitleWrap.getBoundingClientRect();
+  const cssW = Math.max(1, Math.round(rect.width));
+  const cssH = Math.max(1, Math.round(rect.height));
+  if (cssW === menuTitleCssW && cssH === menuTitleCssH) return;
+  menuTitleCssW = cssW;
+  menuTitleCssH = cssH;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  menuTitleCanvas.width = Math.max(1, Math.round(cssW * dpr));
+  menuTitleCanvas.height = Math.max(1, Math.round(cssH * dpr));
+  menuTitleGl.viewport(0, 0, menuTitleCanvas.width, menuTitleCanvas.height);
+}
+
+function drawMenuTitleLogo(now) {
+  if (!menuTitleWrap || menuTitleWrap.offsetParent === null) return;
+  const menuEl = document.getElementById('menu');
+  if (menuEl && menuEl.classList.contains('hidden')) return;
+  if (!menuTitleGl) initMenuTitleGl();
+  if (!menuTitleGl || !menuTitleProg || !menuTitleReady) return;
+  syncMenuTitleCanvasSize();
+
+  const tgl = menuTitleGl;
+  tgl.disable(tgl.DEPTH_TEST);
+  tgl.enable(tgl.BLEND);
+  tgl.blendFunc(tgl.SRC_ALPHA, tgl.ONE_MINUS_SRC_ALPHA);
+  tgl.clearColor(0, 0, 0, 0);
+  tgl.clear(tgl.COLOR_BUFFER_BIT);
+
+  tgl.useProgram(menuTitleProg);
+  tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleBuf);
+  tgl.enableVertexAttribArray(0);
+  tgl.enableVertexAttribArray(1);
+  tgl.vertexAttribPointer(0, 2, tgl.FLOAT, false, 16, 0);
+  tgl.vertexAttribPointer(1, 2, tgl.FLOAT, false, 16, 8);
+  tgl.activeTexture(tgl.TEXTURE0);
+  tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
+  tgl.uniform1i(menuTitleU.tex, 0);
+  tgl.uniform1f(menuTitleU.time, now * 0.001);
+
+  // Layer 0 (ASTEROIDS ARENA), then layer 1 (ONLINE) on top — same destination.
+  for (let frame = 0; frame < 2; frame++) {
+    tgl.uniform1f(menuTitleU.frame, frame);
+    tgl.drawArrays(tgl.TRIANGLES, 0, 6);
+  }
+
+  tgl.disableVertexAttribArray(1);
+}
+
 /** Match server BULLET_TYPES collision extents for cl_hitbox debug. */
 const BULLET_HIT_DEBUG = {
   default: { col: 'circle', size: 2 * RES_SCALE },
@@ -21305,6 +21478,7 @@ function render() {
     syncThrustSfx(false);
     syncLaserSfx(false);
     renderMenuBackdrop();
+    drawMenuTitleLogo(nowBg);
     drawCanvasCredits(nowBg);
     return;
   }

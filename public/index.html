@@ -161,16 +161,11 @@
       flex-shrink: 0;
       filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
     }
-    #menu-title .menu-title-layer {
-      position: absolute;
-      inset: 0;
-      background-image: url(sprites/Title.png);
-      background-repeat: no-repeat;
-      /* Strip is 2 frames wide — scale so one frame fills the box. */
-      background-size: 200% 100%;
+    #menu-title-gl {
+      display: block;
+      width: 100%;
+      height: 100%;
     }
-    #menu-title .menu-title-layer[data-frame="0"] { background-position: 0% 0; }
-    #menu-title .menu-title-layer[data-frame="1"] { background-position: 100% 0; }
     #menu .menu-bottom {
       margin-top: auto;
       display: flex; flex-direction: column; align-items: center; gap: 14px;
@@ -2152,8 +2147,7 @@
 <div id="glow-panel" aria-hidden="true" hidden></div>
 <div id="menu">
   <div id="menu-title" role="img" aria-label="Asteroids Arena Online">
-    <span class="menu-title-layer" data-frame="0"></span>
-    <span class="menu-title-layer" data-frame="1"></span>
+    <canvas id="menu-title-gl" width="394" height="133"></canvas>
   </div>
   <div class="menu-bottom">
   <div id="team-box" class="hidden">
@@ -2428,7 +2422,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=85');
-      await loadScript('game.js?v=991');
+      await loadScript('game.js?v=992');
     } catch (err) {
       console.error(err);
     }
