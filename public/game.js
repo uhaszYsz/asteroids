@@ -21153,121 +21153,24 @@ function stepMenuAsteroids() {
 function renderMenuBackdrop() {
 }
 
-/* ========== Menu title: 2-plane roof (ASTEROIDS/ARENA) + ONLINE cylinder ========== */
+/* ========== Menu title strip (3 layers) + HSV sat + per-layer bob ========== */
 const menuTitleWrap = document.getElementById('menu-title');
 const menuTitleCanvas = document.getElementById('menu-title-gl');
 let menuTitleGl = null;
-let menuTitleRoofProg = null;
-let menuTitleCylProg = null;
-let menuTitleRoofBuf = null;
-let menuTitleRoofCount = 0;
-let menuTitleCylBuf = null;
-let menuTitleCylCount = 0;
+let menuTitleProg = null;
+let menuTitleBuf = null;
 let menuTitleTex = null;
 let menuTitleReady = false;
-let menuTitleRoofU = null;
-let menuTitleCylU = null;
+let menuTitleU = null;
 /** Last CSS pixel size we pushed to the title canvas. */
 let menuTitleCssW = 0;
 let menuTitleCssH = 0;
-/** Phase offsets (rad) so roof / ONLINE bob out of sync. */
+/** Phase offsets (rad) so ASTEROIDS / ARENA / ONLINE bob out of sync. */
 const MENU_TITLE_BOB_PHASE = [0.0, 2.1, 4.2];
-/** Static Y shift in CSS px (positive = down): roof avg, ONLINE -20. */
-const MENU_TITLE_BASE_Y_PX = [0, 0, -20];
+/** Static Y shift in CSS px (positive = down): ASTEROIDS +10, ARENA -10, ONLINE 0. */
+const MENU_TITLE_BASE_Y_PX = [10, -10, -20];
 const MENU_TITLE_BOB_PX = 5;
 const MENU_TITLE_BOB_HZ = 1.7;
-const MENU_TITLE_CYL_SPIN = 1.35; // rad/s around X
-const MENU_TITLE_CYL_SEGS = 48;
-/** Same house-roof pitch as UFO / sprite ships. */
-const MENU_TITLE_ROOF_PITCH = 0.58;
-/** Tip around X so we look down onto both planes. */
-const MENU_TITLE_ROOF_TIP = 0.95;
-/** Oscillation around length (+X), rad amplitude / Hz. */
-const MENU_TITLE_ROOF_OSC_AMP = 0.55;
-const MENU_TITLE_ROOF_OSC_HZ = 1.15;
-const MENU_TITLE_ROOF_SCALE = 0.78;
-
-function buildMenuTitleRoofMesh() {
-  // UFO-style roof: ridge on +X length, tips fold down in Z. Plane L = frame 0, R = frame 1.
-  const pitch = MENU_TITLE_ROOF_PITCH;
-  const halfL = 0.95;
-  const halfW = 0.52;
-  const cp = Math.cos(pitch);
-  const sp = Math.sin(pitch);
-  const wingY = halfW * cp;
-  const drop = halfW * sp;
-  const floats = [];
-  const push = (x, y, z, u, v, nx, ny, nz) => {
-    floats.push(x, y, z, u, v, nx, ny, nz);
-  };
-  const pushQuad = (a, b, c, d, u0, u1, v0, v1, nx, ny, nz) => {
-    // a=ridge+X, b=tip+X, c=tip-X, d=ridge-X — U along length, V ridge→tip
-    push(a[0], a[1], a[2], u1, v0, nx, ny, nz);
-    push(b[0], b[1], b[2], u1, v1, nx, ny, nz);
-    push(c[0], c[1], c[2], u0, v1, nx, ny, nz);
-    push(a[0], a[1], a[2], u1, v0, nx, ny, nz);
-    push(c[0], c[1], c[2], u0, v1, nx, ny, nz);
-    push(d[0], d[1], d[2], u0, v0, nx, ny, nz);
-    // Opposite winding (double-sided while oscillating)
-    push(a[0], a[1], a[2], u1, v0, -nx, -ny, -nz);
-    push(c[0], c[1], c[2], u0, v1, -nx, -ny, -nz);
-    push(b[0], b[1], b[2], u1, v1, -nx, -ny, -nz);
-    push(a[0], a[1], a[2], u1, v0, -nx, -ny, -nz);
-    push(d[0], d[1], d[2], u0, v0, -nx, -ny, -nz);
-    push(c[0], c[1], c[2], u0, v1, -nx, -ny, -nz);
-  };
-
-  // Tips fold toward +Z (was -Z — read upside-down after top-view tip).
-  // Left plane → ASTEROIDS (strip frame 0): u ∈ [0, 1/3]
-  pushQuad(
-    [halfL, 0, 0],
-    [halfL, -wingY, drop],
-    [-halfL, -wingY, drop],
-    [-halfL, 0, 0],
-    0, 1 / 3, 0, 1,
-    0, -sp, -cp
-  );
-  // Right plane → ARENA (strip frame 1): u ∈ [1/3, 2/3]
-  pushQuad(
-    [halfL, 0, 0],
-    [halfL, wingY, drop],
-    [-halfL, wingY, drop],
-    [-halfL, 0, 0],
-    1 / 3, 2 / 3, 0, 1,
-    0, sp, -cp
-  );
-  return new Float32Array(floats);
-}
-
-function buildMenuTitleCylinderMesh() {
-  // Axis along X; circumference in YZ.
-  // UV.x = along length (text left→right), UV.y = around (letter height wraps the tube).
-  const segs = MENU_TITLE_CYL_SEGS;
-  const halfLen = 0.55; // NDC half-width of ONLINE tube
-  const R = 0.11;
-  const floats = [];
-  for (let i = 0; i < segs; i++) {
-    const t0 = (i / segs) * Math.PI * 2;
-    const t1 = ((i + 1) / segs) * Math.PI * 2;
-    const c0 = Math.cos(t0), s0 = Math.sin(t0);
-    const c1 = Math.cos(t1), s1 = Math.sin(t1);
-    const v0 = i / segs;
-    const v1 = (i + 1) / segs;
-    // Two tris: (x,y,z,u,v,nx,ny,nz) — normal = (0, cos, sin) in local space before spin
-    const push = (x, y, z, u, v, nx, ny, nz) => {
-      floats.push(x, y, z, u, v, nx, ny, nz);
-    };
-    // u flipped vs geometric left→right so the outward face reads ONLINE forward (not mirrored)
-    push(-halfLen, R * c0, R * s0, 1, v0, 0, c0, s0);
-    push( halfLen, R * c0, R * s0, 0, v0, 0, c0, s0);
-    push(-halfLen, R * c1, R * s1, 1, v1, 0, c1, s1);
-
-    push( halfLen, R * c0, R * s0, 0, v0, 0, c0, s0);
-    push( halfLen, R * c1, R * s1, 0, v1, 0, c1, s1);
-    push(-halfLen, R * c1, R * s1, 1, v1, 0, c1, s1);
-  }
-  return new Float32Array(floats);
-}
 
 function initMenuTitleGl() {
   if (!menuTitleCanvas || menuTitleGl) return;
@@ -21288,42 +21191,25 @@ function initMenuTitleGl() {
     }
     return s;
   }
-  function tLink(prog) {
-    tgl.linkProgram(prog);
-    if (!tgl.getProgramParameter(prog, tgl.LINK_STATUS)) {
-      console.error(tgl.getProgramInfoLog(prog));
-    }
-  }
 
-  // ---- Two-plane roof (ASTEROIDS / ARENA), view from top, osc around length ----
-  const roofVS = `
-    attribute vec3 aPos;
+  const vs = `
+    attribute vec2 aPos;
     attribute vec2 aUV;
-    attribute vec3 aNrm;
-    uniform float uRoll;   // tip + length-axis oscillation
-    uniform vec2 uOffset;
-    uniform float uAspect;
-    uniform float uScale;
+    uniform vec2 uOffset; // NDC offset (x,y)
     varying vec2 vUV;
-    varying float vFacing;
     void main() {
-      float c = cos(uRoll), s = sin(uRoll);
-      vec3 p = vec3(aPos.x, aPos.y * c - aPos.z * s, aPos.y * s + aPos.z * c);
-      vec3 n = vec3(aNrm.x, aNrm.y * c - aNrm.z * s, aNrm.y * s + aNrm.z * c);
-      float persp = 1.0 / (1.0 + p.z * 0.65);
-      vec2 ndc = vec2(p.x * persp, p.y * persp * uAspect) * uScale;
-      ndc += uOffset;
-      gl_Position = vec4(ndc, -p.z * 0.12, 1.0);
       vUV = aUV;
-      vFacing = max(0.15, n.z * 0.5 + 0.5);
+      gl_Position = vec4(aPos + uOffset, 0.0, 1.0);
     }
   `;
-  const roofFS = `
+  // Value (HSV V) > 50%: per-scanline saturation oscillate ±0.25 around current S.
+  const fs = `
     precision mediump float;
     uniform sampler2D uTex;
     uniform float uTime;
+    uniform float uFrame;
+    uniform float uFrames;
     varying vec2 vUV;
-    varying float vFacing;
 
     vec3 rgb2hsv(vec3 c) {
       vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -21340,7 +21226,10 @@ function initMenuTitleGl() {
     }
 
     void main() {
-      vec4 c = texture2D(uTex, vUV);
+      float frames = max(1.0, uFrames);
+      float fw = 1.0 / frames;
+      vec2 uv = vec2(vUV.x * fw + uFrame * fw, vUV.y);
+      vec4 c = texture2D(uTex, uv);
       if (c.a < 0.04) discard;
       vec3 hsv = rgb2hsv(max(c.rgb, vec3(0.0)));
       if (hsv.z > 0.5) {
@@ -21349,121 +21238,40 @@ function initMenuTitleGl() {
         hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
         c.rgb = hsv2rgb(hsv);
       }
-      c.rgb *= 0.75 + 0.55 * vFacing;
       gl_FragColor = c;
     }
   `;
 
-  const roofProg = tgl.createProgram();
-  tgl.bindAttribLocation(roofProg, 0, 'aPos');
-  tgl.bindAttribLocation(roofProg, 1, 'aUV');
-  tgl.bindAttribLocation(roofProg, 2, 'aNrm');
-  tgl.attachShader(roofProg, tShader(tgl.VERTEX_SHADER, roofVS));
-  tgl.attachShader(roofProg, tShader(tgl.FRAGMENT_SHADER, roofFS));
-  tLink(roofProg);
-  menuTitleRoofProg = roofProg;
-  menuTitleRoofU = {
-    tex: tgl.getUniformLocation(roofProg, 'uTex'),
-    time: tgl.getUniformLocation(roofProg, 'uTime'),
-    roll: tgl.getUniformLocation(roofProg, 'uRoll'),
-    offset: tgl.getUniformLocation(roofProg, 'uOffset'),
-    aspect: tgl.getUniformLocation(roofProg, 'uAspect'),
-    scale: tgl.getUniformLocation(roofProg, 'uScale')
+  const prog = tgl.createProgram();
+  tgl.bindAttribLocation(prog, 0, 'aPos');
+  tgl.bindAttribLocation(prog, 1, 'aUV');
+  tgl.attachShader(prog, tShader(tgl.VERTEX_SHADER, vs));
+  tgl.attachShader(prog, tShader(tgl.FRAGMENT_SHADER, fs));
+  tgl.linkProgram(prog);
+  if (!tgl.getProgramParameter(prog, tgl.LINK_STATUS)) {
+    console.error(tgl.getProgramInfoLog(prog));
+    return;
+  }
+  menuTitleProg = prog;
+  menuTitleU = {
+    tex: tgl.getUniformLocation(prog, 'uTex'),
+    time: tgl.getUniformLocation(prog, 'uTime'),
+    frame: tgl.getUniformLocation(prog, 'uFrame'),
+    frames: tgl.getUniformLocation(prog, 'uFrames'),
+    offset: tgl.getUniformLocation(prog, 'uOffset')
   };
 
-  const roofMesh = buildMenuTitleRoofMesh();
-  menuTitleRoofCount = (roofMesh.length / 8) | 0;
-  menuTitleRoofBuf = tgl.createBuffer();
-  tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleRoofBuf);
-  tgl.bufferData(tgl.ARRAY_BUFFER, roofMesh, tgl.STATIC_DRAW);
-
-  // ---- ONLINE spinning cylinder ----
-  const cylVS = `
-    attribute vec3 aPos;
-    attribute vec2 aUV;
-    attribute vec3 aNrm;
-    uniform float uSpin;
-    uniform vec2 uOffset;
-    uniform float uAspect; // width/height of canvas — keep tube round
-    varying vec2 vUV;
-    varying float vFacing;
-    void main() {
-      // Spin around X
-      float c = cos(uSpin), s = sin(uSpin);
-      vec3 p = vec3(aPos.x, aPos.y * c - aPos.z * s, aPos.y * s + aPos.z * c);
-      vec3 n = vec3(aNrm.x, aNrm.y * c - aNrm.z * s, aNrm.y * s + aNrm.z * c);
-      // Mild perspective
-      float persp = 1.0 / (1.0 + p.z * 0.85);
-      vec2 ndc = vec2(p.x * persp, p.y * persp * uAspect);
-      ndc += uOffset;
-      // Depth bias so tube sorts in front of clear
-      float z = -p.z * 0.15;
-      gl_Position = vec4(ndc, z, 1.0);
-      // aUV.x along length → strip frame 2 U; aUV.y around → V
-      vUV = vec2(aUV.x / 3.0 + 2.0 / 3.0, aUV.y);
-      vFacing = max(0.0, n.z);
-    }
-  `;
-  const cylFS = `
-    precision mediump float;
-    uniform sampler2D uTex;
-    uniform float uTime;
-    varying vec2 vUV;
-    varying float vFacing;
-
-    vec3 rgb2hsv(vec3 c) {
-      vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
-      vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
-      vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
-      float d = q.x - min(q.w, q.y);
-      float e = 1.0e-10;
-      return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
-    }
-    vec3 hsv2rgb(vec3 c) {
-      vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
-      vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-      return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
-    }
-
-    void main() {
-      vec4 c = texture2D(uTex, vUV);
-      if (c.a < 0.04) discard;
-      vec3 hsv = rgb2hsv(max(c.rgb, vec3(0.0)));
-      if (hsv.z > 0.5) {
-        float line = floor(vUV.y * 161.0);
-        float osc = sin(uTime * 3.2 - line * 0.35) * 0.25;
-        hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
-        c.rgb = hsv2rgb(hsv);
-      }
-      // Emissive: boost facing side + constant glow, keep alpha
-      float emit = 0.55 + 1.15 * vFacing;
-      c.rgb *= emit;
-      c.rgb += c.rgb * (0.25 + 0.45 * vFacing);
-      gl_FragColor = vec4(c.rgb, c.a);
-    }
-  `;
-
-  const cylProg = tgl.createProgram();
-  tgl.bindAttribLocation(cylProg, 0, 'aPos');
-  tgl.bindAttribLocation(cylProg, 1, 'aUV');
-  tgl.bindAttribLocation(cylProg, 2, 'aNrm');
-  tgl.attachShader(cylProg, tShader(tgl.VERTEX_SHADER, cylVS));
-  tgl.attachShader(cylProg, tShader(tgl.FRAGMENT_SHADER, cylFS));
-  tLink(cylProg);
-  menuTitleCylProg = cylProg;
-  menuTitleCylU = {
-    tex: tgl.getUniformLocation(cylProg, 'uTex'),
-    time: tgl.getUniformLocation(cylProg, 'uTime'),
-    spin: tgl.getUniformLocation(cylProg, 'uSpin'),
-    offset: tgl.getUniformLocation(cylProg, 'uOffset'),
-    aspect: tgl.getUniformLocation(cylProg, 'uAspect')
-  };
-
-  const cylMesh = buildMenuTitleCylinderMesh();
-  menuTitleCylCount = (cylMesh.length / 8) | 0;
-  menuTitleCylBuf = tgl.createBuffer();
-  tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleCylBuf);
-  tgl.bufferData(tgl.ARRAY_BUFFER, cylMesh, tgl.STATIC_DRAW);
+  const verts = new Float32Array([
+    -1, -1, 0, 1,
+     1, -1, 1, 1,
+    -1,  1, 0, 0,
+    -1,  1, 0, 0,
+     1, -1, 1, 1,
+     1,  1, 1, 0
+  ]);
+  menuTitleBuf = tgl.createBuffer();
+  tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleBuf);
+  tgl.bufferData(tgl.ARRAY_BUFFER, verts, tgl.STATIC_DRAW);
 
   menuTitleTex = tgl.createTexture();
   const img = new Image();
@@ -21502,74 +21310,43 @@ function drawMenuTitleLogo(now) {
   menuTitleWrap.style.transform = '';
 
   if (!menuTitleGl) initMenuTitleGl();
-  if (!menuTitleGl || !menuTitleRoofProg || !menuTitleReady) return;
+  if (!menuTitleGl || !menuTitleProg || !menuTitleReady) return;
   syncMenuTitleCanvasSize();
 
   const t = (now != null ? now : performance.now()) * 0.001;
   const tgl = menuTitleGl;
-  tgl.disable(tgl.CULL_FACE);
+  tgl.disable(tgl.DEPTH_TEST);
   tgl.enable(tgl.BLEND);
   tgl.blendFunc(tgl.SRC_ALPHA, tgl.ONE_MINUS_SRC_ALPHA);
   tgl.clearColor(0, 0, 0, 0);
-  tgl.clear(tgl.COLOR_BUFFER_BIT | tgl.DEPTH_BUFFER_BIT);
+  tgl.clear(tgl.COLOR_BUFFER_BIT);
 
+  tgl.useProgram(menuTitleProg);
+  tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleBuf);
+  tgl.enableVertexAttribArray(0);
+  tgl.enableVertexAttribArray(1);
+  tgl.vertexAttribPointer(0, 2, tgl.FLOAT, false, 16, 0);
+  tgl.vertexAttribPointer(1, 2, tgl.FLOAT, false, 16, 8);
+  tgl.activeTexture(tgl.TEXTURE0);
+  tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
+  tgl.uniform1i(menuTitleU.tex, 0);
+  tgl.uniform1f(menuTitleU.time, t);
+  tgl.uniform1f(menuTitleU.frames, 3);
+
+  // ±5px Y bob in NDC (canvas Y up in clip space → flip sign for screen-down).
   const hPx = Math.max(1, menuTitleCanvas.height);
-  const wPx = Math.max(1, menuTitleCanvas.width);
   const ndcPerPxY = 2 / hPx;
-  const stride = 32;
 
-  // ASTEROIDS + ARENA on UFO-style roof planes (top view + length-axis osc)
-  if (menuTitleRoofBuf && menuTitleRoofCount > 0) {
-    tgl.enable(tgl.DEPTH_TEST);
-    tgl.depthFunc(tgl.LEQUAL);
-    tgl.useProgram(menuTitleRoofProg);
-    tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleRoofBuf);
-    tgl.enableVertexAttribArray(0);
-    tgl.enableVertexAttribArray(1);
-    tgl.enableVertexAttribArray(2);
-    tgl.vertexAttribPointer(0, 3, tgl.FLOAT, false, stride, 0);
-    tgl.vertexAttribPointer(1, 2, tgl.FLOAT, false, stride, 12);
-    tgl.vertexAttribPointer(2, 3, tgl.FLOAT, false, stride, 20);
-    tgl.activeTexture(tgl.TEXTURE0);
-    tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
-    tgl.uniform1i(menuTitleRoofU.tex, 0);
-    tgl.uniform1f(menuTitleRoofU.time, t);
-    const osc = Math.sin(t * Math.PI * 2 * MENU_TITLE_ROOF_OSC_HZ) * MENU_TITLE_ROOF_OSC_AMP;
-    tgl.uniform1f(menuTitleRoofU.roll, MENU_TITLE_ROOF_TIP + osc);
-    tgl.uniform1f(menuTitleRoofU.aspect, wPx / hPx);
-    tgl.uniform1f(menuTitleRoofU.scale, MENU_TITLE_ROOF_SCALE);
-    const bobPx = Math.sin(t * MENU_TITLE_BOB_HZ + MENU_TITLE_BOB_PHASE[0]) * MENU_TITLE_BOB_PX;
-    const yPx = (MENU_TITLE_BASE_Y_PX[0] || 0) + bobPx;
-    tgl.uniform2f(menuTitleRoofU.offset, 0, -yPx * ndcPerPxY);
-    tgl.drawArrays(tgl.TRIANGLES, 0, menuTitleRoofCount);
+  for (let frame = 0; frame < 3; frame++) {
+    const bobPx = Math.sin(t * MENU_TITLE_BOB_HZ + MENU_TITLE_BOB_PHASE[frame]) * MENU_TITLE_BOB_PX;
+    const yPx = (MENU_TITLE_BASE_Y_PX[frame] || 0) + bobPx;
+    const bobNdc = -yPx * ndcPerPxY;
+    tgl.uniform2f(menuTitleU.offset, 0, bobNdc);
+    tgl.uniform1f(menuTitleU.frame, frame);
+    tgl.drawArrays(tgl.TRIANGLES, 0, 6);
   }
 
-  // ONLINE on spinning emissive cylinder
-  if (menuTitleCylProg && menuTitleCylBuf && menuTitleCylCount > 0) {
-    tgl.enable(tgl.DEPTH_TEST);
-    tgl.depthFunc(tgl.LEQUAL);
-    tgl.useProgram(menuTitleCylProg);
-    tgl.bindBuffer(tgl.ARRAY_BUFFER, menuTitleCylBuf);
-    tgl.enableVertexAttribArray(0);
-    tgl.enableVertexAttribArray(1);
-    tgl.enableVertexAttribArray(2);
-    tgl.vertexAttribPointer(0, 3, tgl.FLOAT, false, stride, 0);
-    tgl.vertexAttribPointer(1, 2, tgl.FLOAT, false, stride, 12);
-    tgl.vertexAttribPointer(2, 3, tgl.FLOAT, false, stride, 20);
-    tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
-    tgl.uniform1i(menuTitleCylU.tex, 0);
-    tgl.uniform1f(menuTitleCylU.time, t);
-    tgl.uniform1f(menuTitleCylU.spin, t * MENU_TITLE_CYL_SPIN);
-    tgl.uniform1f(menuTitleCylU.aspect, wPx / hPx);
-    const bobPx = Math.sin(t * MENU_TITLE_BOB_HZ + MENU_TITLE_BOB_PHASE[2]) * MENU_TITLE_BOB_PX;
-    const yPx = (MENU_TITLE_BASE_Y_PX[2] || 0) + bobPx;
-    tgl.uniform2f(menuTitleCylU.offset, 0, -yPx * ndcPerPxY);
-    tgl.drawArrays(tgl.TRIANGLES, 0, menuTitleCylCount);
-  }
-
-  tgl.disableVertexAttribArray(2);
   tgl.disableVertexAttribArray(1);
-  tgl.disable(tgl.DEPTH_TEST);
 }
 
 /** Own rAF so title keeps pulsing even if the game frame-lock skips a render. */
