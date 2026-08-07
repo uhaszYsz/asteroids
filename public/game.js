@@ -21223,7 +21223,8 @@ function initMenuTitleGl() {
       if (c.a < 0.04) discard;
       vec3 hsv = rgb2hsv(max(c.rgb, vec3(0.0)));
       if (hsv.z > 0.5) {
-        float osc = sin(uTime * 2.4) * 0.10;
+        // ±10 saturation points on 0–100 scale (= ±0.10 in 0–1 HSV).
+        float osc = sin(uTime * 3.2) * 0.10;
         hsv.y = clamp(hsv.y + osc, 0.0, 1.0);
         c.rgb = hsv2rgb(hsv);
       }
@@ -21292,8 +21293,8 @@ function syncMenuTitleCanvasSize() {
 }
 
 function drawMenuTitleLogo(now) {
-  if (!menuTitleWrap || menuTitleWrap.offsetParent === null) return;
   const menuEl = document.getElementById('menu');
+  if (!menuTitleWrap || !menuTitleCanvas) return;
   if (menuEl && menuEl.classList.contains('hidden')) return;
   if (!menuTitleGl) initMenuTitleGl();
   if (!menuTitleGl || !menuTitleProg || !menuTitleReady) return;
@@ -21315,7 +21316,7 @@ function drawMenuTitleLogo(now) {
   tgl.activeTexture(tgl.TEXTURE0);
   tgl.bindTexture(tgl.TEXTURE_2D, menuTitleTex);
   tgl.uniform1i(menuTitleU.tex, 0);
-  tgl.uniform1f(menuTitleU.time, now * 0.001);
+  tgl.uniform1f(menuTitleU.time, (now != null ? now : performance.now()) * 0.001);
 
   // Layer 0 (ASTEROIDS ARENA), then layer 1 (ONLINE) on top — same destination.
   for (let frame = 0; frame < 2; frame++) {
@@ -21325,6 +21326,17 @@ function drawMenuTitleLogo(now) {
 
   tgl.disableVertexAttribArray(1);
 }
+
+/** Own rAF so title keeps pulsing even if the game frame-lock skips a render. */
+let menuTitleRaf = 0;
+function tickMenuTitleLogo(now) {
+  menuTitleRaf = requestAnimationFrame(tickMenuTitleLogo);
+  drawMenuTitleLogo(now);
+}
+function ensureMenuTitleAnim() {
+  if (!menuTitleRaf) menuTitleRaf = requestAnimationFrame(tickMenuTitleLogo);
+}
+ensureMenuTitleAnim();
 
 /** Match server BULLET_TYPES collision extents for cl_hitbox debug. */
 const BULLET_HIT_DEBUG = {
