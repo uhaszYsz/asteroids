@@ -29,7 +29,7 @@
       "fullScreen": true,
       "alwaysOnTop": true,
       "icon": "/resources/icons/appIcon.png",
-      "enableInspector": false,
+      "enableInspector": true,
       "openInspectorOnStartup": false,
       "borderless": true,
       "maximize": false,

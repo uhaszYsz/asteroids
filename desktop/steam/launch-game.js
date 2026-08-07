@@ -84,10 +84,9 @@ if (!fs.existsSync(SESSION_OUT)) {
 }
 
 console.log('Launching', path.basename(GAME_EXE), '…');
-// Never open WebView DevTools in the shipped exe (Neutralino defaults
-// openInspectorOnStartup=true whenever enableInspector slips on).
+// DevTools available on F12, but never auto-open on launch.
 const gameArgs = [
-  '--window-enable-inspector=false',
+  '--window-enable-inspector=true',
   '--window-open-inspector-on-startup=false'
 ];
 const child = spawn(GAME_EXE, gameArgs, {
