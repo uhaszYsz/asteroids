@@ -78,7 +78,28 @@ function patchIndex(html) {
   } catch (_) {}
   var covering = false;
   var coveredOnce = false;
+  // After F12, stay out of always-on-top / exclusive fullscreen so DevTools can appear.
+  var allowDevTools = false;
+  function peelForDevTools() {
+    allowDevTools = true;
+    coveredOnce = true;
+    return Promise.resolve()
+      .then(function () { return Neutralino.window.setAlwaysOnTop(false); })
+      .catch(function () {})
+      .then(function () { return Neutralino.window.setFullScreen(false); })
+      .catch(function () {});
+  }
+  document.addEventListener('keydown', function (e) {
+    var k = e.key || '';
+    var openDev =
+      k === 'F12' ||
+      (e.ctrlKey && e.shiftKey && (k === 'I' || k === 'i' || k === 'J' || k === 'j'));
+    if (!openDev) return;
+    // Peel AOT/fullscreen first; do NOT preventDefault — WebView2 handles F12/Ctrl+Shift+I.
+    peelForDevTools();
+  }, true);
   function coverDisplay(force) {
+    if (allowDevTools) return Promise.resolve();
     if (covering) return Promise.resolve();
     if (coveredOnce && !force) return Promise.resolve();
     covering = true;
@@ -116,6 +137,7 @@ function patchIndex(html) {
         } catch (_) {}
       })
       .then(function () {
+        if (allowDevTools) return;
         try { Neutralino.window.setAlwaysOnTop(true); } catch (_) {}
         coveredOnce = true;
       })
@@ -125,6 +147,7 @@ function patchIndex(html) {
   setTimeout(function () { coverDisplay(true); }, 300);
   try {
     Neutralino.events.on('windowRestore', function () {
+      if (allowDevTools) return;
       coveredOnce = false;
       setTimeout(function () { coverDisplay(true); }, 100);
     });
