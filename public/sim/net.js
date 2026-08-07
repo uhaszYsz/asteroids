@@ -324,7 +324,7 @@ function roomBroadcastBinary(room, buf) {
 
 function packBullet(b) {
   const row = [b.id, b.spawnX, b.spawnY, b.vx, b.vy, b.owner, b.spawnSt, b.type || 'default'];
-  if ((b.type || 'default') === 'rocket') {
+  if ((b.type || 'default') === 'rocket' || b.type === 'enemyRocket') {
     row.push(
       b.accel != null ? +b.accel : ROCKET_ACCEL_DEFAULT,
       b.maxSpeed != null ? +b.maxSpeed : 0,

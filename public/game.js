@@ -5841,6 +5841,7 @@ function startWaveBanner(n) {
   clearWaveBanner();
   const wave = Math.max(1, n | 0);
   soloWave = wave;
+  if ((cv('cl_bgAuto') | 0) !== 0) rerollNebulaBackground(-1);
   const titleCol = [1.0, 0.92, 0.45];
   const subCol = [0.55, 0.95, 1.0];
   waveBanner = {
@@ -16554,7 +16555,7 @@ const ROCKET_ACCEL_BOOST_MULT = 3;
 /** Server spawn + NTP age. */
 function bulletTrueAt(b) {
   const age = bulletAgeTicks(b);
-  if (b && b.type === 'rocket' && ((+b.accel || 0) > 0 || (+b.homing || 0) > 0)) {
+  if (b && (b.type === 'rocket' || b.type === 'enemyRocket') && ((+b.accel || 0) > 0 || (+b.homing || 0) > 0)) {
     let x = b.spawnX;
     let y = b.spawnY;
     let vx = b.vx;
@@ -16590,7 +16591,8 @@ function bulletTrueAt(b) {
       let spd = vx * c + vy * s;
       if (accel > 0) {
         let step = accel;
-        if ((b.owner | 0) > 0 && Math.abs(spd) >= ROCKET_ACCEL_BOOST_SPEED) {
+        const boostOwner = (b.owner | 0) > 0 || b.type === 'enemyRocket';
+        if (boostOwner && Math.abs(spd) >= ROCKET_ACCEL_BOOST_SPEED) {
           step = accel * ROCKET_ACCEL_BOOST_MULT;
         }
         spd += step;
@@ -16810,7 +16812,7 @@ function unpackBullet(row) {
     spawnSt: row[6],
     type: row[7] || 'default'
   };
-  if (b.type === 'rocket') {
+  if (b.type === 'rocket' || b.type === 'enemyRocket') {
     b.accel = row[8] != null ? +row[8] : 0;
     b.maxSpeed = row[9] != null ? +row[9] : 0;
     b.homing = row[10] != null ? +row[10] : 0;
@@ -22325,7 +22327,7 @@ function handleWsMessage(e) {
         b.vy = row[4];
         b.spawnSt = row[6];
         if (row[7]) b.type = row[7];
-        if (b.type === 'rocket') {
+        if (b.type === 'rocket' || b.type === 'enemyRocket') {
           if (row[8] != null) b.accel = +row[8];
           if (row[9] != null) b.maxSpeed = +row[9];
           if (row[10] != null) b.homing = +row[10];

@@ -1450,10 +1450,11 @@ function fireEnemyLineBullet(room, e, ang, spd, dmg, typeName) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
-/** UFO lead-aim rocket (tiny, skips asteroids). Spawn + aim from hull center — turrets visual only. */
-function fireEnemyRocket(room, e, ang, spd, dmg) {
-  const speed = spd != null ? spd : ENEMY_UFO_ROCKET_SPEED;
+/** UFO lead-aim rocket (tiny, skips asteroids). Same accel curve as player rockets
+ *  (launch 0 → ROCKET_ACCEL_* → WEAPONS.rocket.speed). Spawn + aim from hull center. */
+function fireEnemyRocket(room, e, ang, _spdIgnored, dmg) {
   const damage = dmg != null ? dmg : BULLET_TYPES.enemyRocket.dmg;
+  const maxSpd = (WEAPONS.rocket && WEAPONS.rocket.speed > 0) ? WEAPONS.rocket.speed : 15;
   const x = e.x;
   const y = e.y;
   const now = Date.now();
@@ -1467,8 +1468,14 @@ function fireEnemyRocket(room, e, ang, spd, dmg) {
     x, y,
     spawnX: x,
     spawnY: y,
-    vx: Math.cos(ang) * speed,
-    vy: Math.sin(ang) * speed,
+    // Kick 0 — accel in applyRocketFlight (same as player rockets).
+    vx: 0,
+    vy: 0,
+    accel: ROCKET_ACCEL_DEFAULT,
+    maxSpeed: maxSpd,
+    homing: 0,
+    flightAng: ang,
+    netLeft: ROCKET_NET_INTERVAL,
     spawnSt: now
   };
   room.bullets.push(b);
@@ -1523,12 +1530,14 @@ function enemyTryFire(room, e) {
   if ((e.fireCd | 0) > 0) return;
 
   if (e.kind === 'ufo') {
-    // Full 360° lead aim from hull — not clamped to turret arcs.
+    // Lead with cruise (max) speed — same flat intercept as constant-speed shots.
+    // Accel from 0 makes close-range hits slightly early; mid/long range stays solid.
+    const cruise = (WEAPONS.rocket && WEAPONS.rocket.speed > 0) ? WEAPONS.rocket.speed : 15;
     const ang = leadInterceptAngleFlat(
       e.x, e.y,
       target.x, target.y,
       target.vx || 0, target.vy || 0,
-      ENEMY_UFO_ROCKET_SPEED
+      cruise
     );
     fireEnemyRocket(room, e, ang);
     e.fireCd = ENEMY_UFO_RELOAD;
@@ -5676,9 +5685,9 @@ function rocketHomingTarget(room, b) {
 
 /** Accel + per-rocket homing (degrees/tick). Mutates vx/vy.
  *  Speed is signed along flightAng (or velocity heading) so launch can be reverse.
- *  Player rockets: base accel below boost speed, ×boost mult at/above it. */
+ *  Player + UFO rockets: base accel below boost speed, ×boost mult at/above it. */
 function applyRocketFlight(room, b) {
-  if (!b || b.type !== 'rocket') return;
+  if (!b || (b.type !== 'rocket' && b.type !== 'enemyRocket')) return;
   const accel = +b.accel || 0;
   const maxSpd = b.maxSpeed != null && +b.maxSpeed > 0 ? +b.maxSpeed : 0;
   let ang = b.flightAng != null && Number.isFinite(+b.flightAng)
@@ -5698,7 +5707,8 @@ function applyRocketFlight(room, b) {
   let spd = b.vx * c + b.vy * s;
   if (accel > 0) {
     let step = accel;
-    if ((b.owner | 0) > 0 && Math.abs(spd) >= ROCKET_ACCEL_BOOST_SPEED) {
+    const boostOwner = (b.owner | 0) > 0 || b.type === 'enemyRocket';
+    if (boostOwner && Math.abs(spd) >= ROCKET_ACCEL_BOOST_SPEED) {
       step = accel * ROCKET_ACCEL_BOOST_MULT;
     }
     spd += step;
@@ -5709,7 +5719,7 @@ function applyRocketFlight(room, b) {
 }
 
 function maybeResyncRocketNet(room, b) {
-  if (!b || b.type !== 'rocket') return;
+  if (!b || (b.type !== 'rocket' && b.type !== 'enemyRocket')) return;
   if (!(+b.accel > 0 || +b.homing > 0)) return;
   b.netLeft = (b.netLeft | 0) - 1;
   if ((b.netLeft | 0) > 0) return;
@@ -5727,7 +5737,7 @@ function updateBullets(room) {
     if (!b) continue;
     // Death sequence clears the bullet list mid-pass — stop cleanly.
     if (room.roundResetting) return;
-    if (b.type === 'rocket') applyRocketFlight(room, b);
+    if (b.type === 'rocket' || b.type === 'enemyRocket') applyRocketFlight(room, b);
     b.x += b.vx;
     b.y += b.vy;
 
@@ -5751,7 +5761,7 @@ function updateBullets(room) {
       continue;
     }
 
-    if (b.type === 'rocket') maybeResyncRocketNet(room, b);
+    if (b.type === 'rocket' || b.type === 'enemyRocket') maybeResyncRocketNet(room, b);
 
     if (b.type === 'voidcannon') {
       if (!b.voidTouch) b.voidTouch = new Map();

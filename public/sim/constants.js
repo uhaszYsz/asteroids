@@ -314,7 +314,7 @@ const BIG_SPAWN_DELAY_TICKS = Math.round(7 * TPS);
 const SOLO_WAVE_CLEAR_TICKS = Math.round(1.4 * TPS);
 /** Solo enemy line-bullet speed = player default base (15) × 0.7 — not linked to tuned player speed. */
 const ENEMY_BULLET_SPEED = 15 * 0.7;
-/** UFO micro-rocket: 15% slower than common enemy bullet speed. */
+/** UFO micro-rocket: legacy constant-speed value (UFO now uses player rocket accel/cruise). */
 const ENEMY_UFO_ROCKET_SPEED = ENEMY_BULLET_SPEED * 0.85;
 /** Common enemy spread shots: half that speed, 45 damage. */
 const ENEMY_COMMON_BULLET_SPEED = ENEMY_BULLET_SPEED * 0.5;
