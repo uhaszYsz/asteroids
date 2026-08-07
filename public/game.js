@@ -7870,7 +7870,7 @@ function emitLaserImpactFx(x, y, hitKind, withSfx, beamDir) {
     });
     pushFxRing(x, y, COL.laser, { r0: 3, r1: 24, life: 260 });
     const c = findImpactCenter(x, y, hitKind);
-    emitBulletImpactSparks(x, y, c.x, c.y, COL.laser, beamDir, 10);
+    emitBulletImpactSparks(x, y, c.x, c.y, COL.laser, beamDir, 10, 2);
     return;
   }
   if (hitKind === 1) {
@@ -7940,14 +7940,16 @@ function emitLaserImpactFx(x, y, hitKind, withSfx, beamDir) {
 }
 
 /** Outward spark spray from hit surface (asteroid-death spark feel, ±10°).
- *  dirFallback: used when hit ≈ center (common on small ships) — usually bullet travel dir. */
-function emitBulletImpactSparks(hx, hy, cx, cy, col, dirFallback, count) {
+ *  dirFallback: used when hit ≈ center (common on small ships) — usually bullet travel dir.
+ *  sizeMul: scale SPARK_SIZE / SPARK_SIZE_SPREAD (laser uses 2). */
+function emitBulletImpactSparks(hx, hy, cx, cy, col, dirFallback, count, sizeMul) {
   const dx = hx - cx;
   const dy = hy - cy;
   // Ships are tiny — hit often lands near center; need a few px for a stable outward dir.
   const dir = (dx * dx + dy * dy) > 16
     ? Math.atan2(dy, dx)
     : (dirFallback != null ? dirFallback : Math.random() * Math.PI * 2);
+  const sm = sizeMul != null && sizeMul > 0 ? +sizeMul : 1;
   emitParticles({
     x: hx, y: hy,
     count: count != null ? count : 20,
@@ -7955,8 +7957,8 @@ function emitBulletImpactSparks(hx, hy, cx, cy, col, dirFallback, count) {
     speedSpread: SPARK_SPEED_SPREAD,
     direction: dir,
     spread: (20 * Math.PI) / 180, // ±10°
-    size: SPARK_SIZE,
-    sizeSpread: SPARK_SIZE_SPREAD,
+    size: SPARK_SIZE * sm,
+    sizeSpread: SPARK_SIZE_SPREAD * sm,
     scaleY: 1,
     sizeWiggle: 0.35,
     sizeWiggleSpeed: 14,
@@ -16929,15 +16931,28 @@ function addLaser(row, hitKind, weaponName, rays) {
   const kind = hitKind != null ? (hitKind | 0) : 2;
   const beamDir = Math.atan2(y1 - y0, x1 - x0);
   const beamW = row[5] != null ? +row[5] : 0;
+  // Impact FX at the drawn tip: own laser tip is client-raycast from the ship;
+  // server lf endpoints can disagree (pose lag / different ray). Remotes use packet tip.
+  let ix = x1;
+  let iy = y1;
+  if ((owner | 0) === (myId | 0) && wpn === 'laser' && localLaserClip) {
+    const me = localView();
+    const m = shipMuzzle(me.x, me.y, me.angle);
+    const segs = localLaserSegments(m.x, m.y, m.c, m.s, localLaserClip.range);
+    if (segs && segs[0]) {
+      ix = segs[0][2];
+      iy = segs[0][3];
+    }
+  }
   if (wpn === 'thrust') {
     // No beam visual — melee reads as red thruster particles instead.
     noteThrustMeleeFx(owner);
-    if (kind > 0) emitLaserImpactFx(x1, y1, kind, false, beamDir);
+    if (kind > 0) emitLaserImpactFx(ix, iy, kind, false, beamDir);
     pushHitscanDebug(x0, y0, x1, y1, kind, wpn);
     return;
   }
   // Laser impact SFX + spark FX only for laser weapon hits (not miss).
-  emitLaserImpactFx(x1, y1, kind, wpn === 'laser' || wpn === 'wormLaser', beamDir);
+  emitLaserImpactFx(ix, iy, kind, wpn === 'laser' || wpn === 'wormLaser', beamDir);
   pushHitscanDebug(x0, y0, x1, y1, kind, wpn);
   if (wpn === 'laser' || wpn === 'wormLaser') pushGridShock(x0, y0, gridBlastLaserOpts(x0, y0, x1, y1));
   // Debug: worm / L2 laser sample rays (only with cl_hitbox).
@@ -16954,7 +16969,7 @@ function addLaser(row, hitKind, weaponName, rays) {
     }
     if (wormLaserDbg.length > 36) wormLaserDbg.splice(0, wormLaserDbg.length - 36);
   }
-  // Own laser beam is 100% local (ship pose + clip timer). Remotes use server len.
+  // Own laser beam is 100% local (ship pose + clip timer). Remotes use server segment.
   if (owner && owner !== (myId | 0)) {
     const linger = wpn === 'wormLaser'
       ? Math.round(1000 / TPS) * 2
@@ -17352,7 +17367,8 @@ function drawLaserBeams() {
     const col = ownerHasDamagePowerup(owner)
       ? damageRainbowColor()
       : (isLaser ? COL.laser : (owner < 0 ? COL.enemy : ownerShootColor(owner)));
-    if ((rl.wpn === 'wormLaser' || (rl.wpn === 'laser' && rl.width > width)) && rl.x0 != null) {
+    // Prefer absolute lf endpoints so the tip matches impact particles.
+    if (isLaser && rl.x0 != null && rl.y0 != null && rl.x1 != null && rl.y1 != null) {
       drawLaserBeamSeg(rl.x0, rl.y0, rl.x1, rl.y1, beamW, col);
       continue;
     }
@@ -17383,8 +17399,12 @@ function drawLaserBeams() {
   drawThrustBeams();
 }
 
-/** Temp: always draw worm's 3 damage raycasts. */
+/** Debug: worm / L2 laser damage raycasts (cl_hitbox only). */
 function drawWormLaserDebug() {
+  if (cv('cl_hitbox') <= 0) {
+    wormLaserDbg.length = 0;
+    return;
+  }
   if (!wormLaserDbg.length) return;
   const now = performance.now();
   for (let i = wormLaserDbg.length - 1; i >= 0; i--) {
