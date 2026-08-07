@@ -12556,17 +12556,17 @@ function bulletDrawColor(type, ownerId) {
 }
 /** Shield pickup: charge-noise 3D sphere around ship (no load embers). */
 function drawShieldFx(x, y, shipAngle) {
-  // 1 blink / second (500ms on, 500ms off).
-  if ((Math.floor(performance.now() / 500) & 1) !== 0) return;
   const now = performance.now();
   const tSec = now * 0.001;
   // Breathe at ±10% of size per second peak rate: r = base * exp(0.1 * sin(t)).
   const baseR = 14 * RES_SCALE;
   const radius = baseR * Math.exp(0.1 * Math.sin(tSec));
   const spin = now * 0.007;
+  // Alpha stays 0.4; light/emit blinks at 1 cycle per second.
   drawEnemyChargeSphere(x, y, radius, shipAngle || 0, spin, COL.powerShield, 0.4, {
     chargeT: 0.55,
-    noCore: true
+    noCore: true,
+    pulseHz: 1
   });
 }
 /** Match server turret projectile speed for visual lead aim. */
@@ -18687,8 +18687,10 @@ function drawEnemyChargeSphere(cx, cy, radius, yaw, spin, color, alpha, opts) {
   const base = color || COL_CHARGE_HOT;
   const fillA = alpha != null ? alpha : 0.6;
   const noCore = !!(opts && opts.noCore);
-  // Charge pulse: 5 Hz → 30 Hz as charge fills.
-  const pulseHz = 5 + 25 * Math.min(1, Math.max(0, chargeT));
+  // Charge pulse: 5 Hz → 30 Hz as charge fills (override via opts.pulseHz).
+  const pulseHz = (opts && opts.pulseHz != null && Number.isFinite(+opts.pulseHz))
+    ? Math.max(0, +opts.pulseHz)
+    : (5 + 25 * Math.min(1, Math.max(0, chargeT)));
   const pulse01 = 0.5 + 0.5 * Math.sin(performance.now() * 0.001 * pulseHz * Math.PI * 2);
   const pulseSoft = 0.88 + 0.22 * pulse01;
   const emitPow = (1.1 + 1.6 * chargeT) * (0.45 + 0.55 * pulse01);
