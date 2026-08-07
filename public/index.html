@@ -144,12 +144,30 @@
     }
     #menu {
       position: fixed; inset: 0; z-index: 3;
-      display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
       background: transparent; gap: 14px;
       pointer-events: none;
+      padding-top: max(18px, 4vh);
       padding-bottom: max(28px, 7vh);
     }
     #menu.hidden { display: none; }
+    #menu-title {
+      display: block;
+      width: min(560px, 86vw);
+      height: auto;
+      max-height: min(200px, 28vh);
+      object-fit: contain;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+      filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.55));
+      flex-shrink: 0;
+    }
+    #menu .menu-bottom {
+      margin-top: auto;
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+      pointer-events: none;
+    }
     #play-btn, #cancel-btn, #settings-btn, #account-btn, #leaderboard-btn, #rejoin-btn, #exit-btn {
       border: 1px solid #c44aaa; background: #2a1040; color: #f0d0ff;
       padding: 12px 36px; font: 16px Consolas, "Courier New", monospace;
@@ -2125,6 +2143,8 @@
 </div>
 <div id="glow-panel" aria-hidden="true" hidden></div>
 <div id="menu">
+  <img id="menu-title" src="sprites/Title.png" alt="Asteroids Arena Online" width="394" height="133" draggable="false" />
+  <div class="menu-bottom">
   <div id="team-box" class="hidden">
     <div class="tb-title">Team</div>
     <div id="team-members"></div>
@@ -2136,6 +2156,7 @@
     <button id="settings-btn" type="button">Settings</button>
     <button id="account-btn" type="button">Account</button>
     <button id="leaderboard-btn" type="button">Leaderboards</button>
+  </div>
   </div>
 </div>
 <button id="exit-btn" type="button" class="hidden">Exit</button>
