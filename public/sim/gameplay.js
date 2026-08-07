@@ -396,18 +396,19 @@ function mediumAsteroidCap(room) {
 /**
  * Solo wave composition:
  *   always 3 smalls
- *   bigs grow only on odd (no-enemy) waves: 2,2,3,3,4,4…
+ *   odd (no-enemy) waves: 2,3,4,5… bigs
  *   mediums = half of bigs (cap 8)
- *   even enemy / boss waves: half bigs/mediums (incl. worm wave 10)
+ *   even enemy / boss waves: half of the previous odd wave (min 1 big)
  */
 function soloWaveCounts(wave) {
   const n = Math.max(1, wave | 0);
-  // Odd waves add +1 big; even waves keep the previous odd count. Floor is 2 on wave 1.
-  let big = ((n + 1) >> 1) + 1;
+  // Count for the current-or-previous odd wave (1→2, 3→3, 5→4…).
+  const oddN = (n % 2 === 1) ? n : (n - 1);
+  let big = ((oddN + 1) >> 1) + 1;
   let medium = Math.min(SOLO_MEDIUM_CAP, big >> 1);
-  // Ease asteroid pressure on even enemy waves and worm boss.
+  // Enemy waves: half the previous odd wave — never floor a lone big to zero.
   if (n % 2 === 0) {
-    big = (big / 2) | 0;
+    big = Math.max(1, Math.ceil(big / 2));
     medium = (medium / 2) | 0;
   }
   return {
