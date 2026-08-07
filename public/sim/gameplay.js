@@ -941,7 +941,8 @@ function fireEnemyLaserBeam(room, e, ang) {
   e.lastLaserAng = ang;
 }
 
-/** Worm super-laser: thick beam + 3 parallel damage rays (center / ±70% of half-width). */
+/** Worm super-laser: thick beam + 3 parallel sample rays (center / ±70% of half-width).
+ *  Damage applies once per target id even if several rays hit the same thing. */
 function fireWormLaserBeam(room, e) {
   const ang = Number.isFinite(e.angle) ? e.angle : 0;
   const range = ENEMY_WORM_LASER.range;
@@ -963,6 +964,7 @@ function fireWormLaserBeam(room, e) {
   const now = Date.now();
   const owner = enemyFxOwner(e);
   const rays = [];
+  const damaged = new Set();
   let midHit = null;
   for (let i = 0; i < origins.length; i++) {
     const o = origins[i];
@@ -972,11 +974,15 @@ function fireWormLaserBeam(room, e) {
     const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : 2;
     rays.push([o.x, o.y, x1, y1, hitKind]);
     if (i === 0) midHit = hit;
-    if (hit) {
-      if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg);
-      else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, 0);
-      else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
-    }
+    if (!hit || !hit.target) continue;
+    const tid = hit.target.id != null ? (hit.target.id | 0) : null;
+    if (tid == null) continue;
+    const key = hit.kind + ':' + tid;
+    if (damaged.has(key)) continue;
+    damaged.add(key);
+    if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg);
+    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, 0);
+    else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
   }
   const x1 = midHit ? midHit.x : ox + dx * range;
   const y1 = midHit ? midHit.y : oy + dy * range;
