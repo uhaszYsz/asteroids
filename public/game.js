@@ -21168,7 +21168,7 @@ let menuTitleCssH = 0;
 /** Phase offsets (rad) so ASTEROIDS / ARENA / ONLINE bob out of sync. */
 const MENU_TITLE_BOB_PHASE = [0.0, 2.1, 4.2];
 /** Static Y shift in CSS px (positive = down): ASTEROIDS +10, ARENA -10, ONLINE 0. */
-const MENU_TITLE_BASE_Y_PX = [10, -10, 0];
+const MENU_TITLE_BASE_Y_PX = [10, -10, -20];
 const MENU_TITLE_BOB_PX = 5;
 const MENU_TITLE_BOB_HZ = 1.7;
 
