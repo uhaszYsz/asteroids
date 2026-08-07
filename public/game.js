@@ -12751,10 +12751,14 @@ function drawTurret3D(x, y, aimAng, color) {
 const FIXDRONE_SPRITE_ID = 'enemy_136';
 const FIXDRONE_COUNT = 1;
 const FIXDRONE_SCALE = 1 / 6;
-const FIXDRONE_ORBIT_R = 12 * RES_SCALE;
 const FIXDRONE_HP_FRAC = 0.9;
-const FIXDRONE_ORBIT_RAD_PER_SEC = 1.35;
-/** ownerId → { ang, repairing } */
+/** Spawn: this many px behind ship center. */
+const FIXDRONE_SPAWN_BACK = 35;
+/** Spawn: random lateral spread width (px) behind ship. */
+const FIXDRONE_SPAWN_WIDTH = 45;
+/** Chase ship pose from this many render frames ago. */
+const FIXDRONE_LAG_FRAMES = 5;
+/** ownerId → { repairing, spawned, x, y, trail } */
 const fixdroneFx = new Map();
 
 function ownerCurrentHp(ownerId) {
@@ -12775,7 +12779,7 @@ function drawFixBeamSeg(x0, y0, x1, y1, alpha) {
   drawThickSegment(mx - 1, my, mx + 1, my, 2, col, 0.7 * a, true);
 }
 
-function drawFixDrones(x, y, ownerId, dt) {
+function drawFixDrones(x, y, ownerId, shipAngle, dt) {
   if (!ownerHasPowerup(ownerId, 'drone')) {
     fixdroneFx.delete(ownerId);
     return;
@@ -12787,7 +12791,7 @@ function drawFixDrones(x, y, ownerId, dt) {
   }
   let st = fixdroneFx.get(ownerId);
   if (!st) {
-    st = { ang: (ownerId | 0) * 1.7, repairing: false };
+    st = { repairing: false, spawned: false, x: x, y: y, trail: [] };
     fixdroneFx.set(ownerId, st);
   }
   const thresh = Math.floor(MAX_HP * FIXDRONE_HP_FRAC);
@@ -12798,7 +12802,30 @@ function drawFixDrones(x, y, ownerId, dt) {
     fixdroneFx.delete(ownerId);
     return;
   }
-  st.ang += FIXDRONE_ORBIT_RAD_PER_SEC * Math.max(0.001, dt);
+
+  const ang = Number.isFinite(shipAngle) ? shipAngle : 0;
+  const cs = Math.cos(ang);
+  const sn = Math.sin(ang);
+  // Facing = (cs, sn); behind = (-cs, -sn); lateral = (-sn, cs).
+  if (!st.trail) st.trail = [];
+  st.trail.push({ x: x, y: y, angle: ang });
+  while (st.trail.length > FIXDRONE_LAG_FRAMES + 3) st.trail.shift();
+
+  if (!st.spawned) {
+    const side = (Math.random() - 0.5) * FIXDRONE_SPAWN_WIDTH;
+    st.x = x - cs * FIXDRONE_SPAWN_BACK - sn * side;
+    st.y = y - sn * FIXDRONE_SPAWN_BACK + cs * side;
+    st.spawned = true;
+  }
+
+  // Target = where the ship was ~5 frames ago (falls back to oldest / current).
+  const lagIdx = Math.max(0, st.trail.length - 1 - FIXDRONE_LAG_FRAMES);
+  const lag = st.trail[lagIdx] || { x: x, y: y };
+  const step = Math.max(0.001, dt || 0.016);
+  // Soft chase — keeps up without locking to the ship.
+  const k = 1 - Math.exp(-7.5 * step);
+  st.x += (lag.x - st.x) * k;
+  st.y += (lag.y - st.y) * k;
 
   const opt = getShipOptionById(FIXDRONE_SPRITE_ID);
   const canSprite = !!(opt && opt.kind === 'sprite' && opt.sprite
@@ -12806,12 +12833,8 @@ function drawFixDrones(x, y, ownerId, dt) {
     && spriteShipTexById.get(opt.sprite.id).ready);
 
   for (let i = 0; i < FIXDRONE_COUNT; i++) {
-    const ang = st.ang + (i * Math.PI * 2) / FIXDRONE_COUNT;
-    const bob = 1 + 0.06 * Math.sin(st.ang * 2.1 + i * 2.4);
-    const dx = Math.cos(ang) * FIXDRONE_ORBIT_R * bob;
-    const dy = Math.sin(ang) * FIXDRONE_ORBIT_R * bob;
-    const dxPos = x + dx;
-    const dyPos = y + dy;
+    const dxPos = st.x;
+    const dyPos = st.y;
     const face = Math.atan2(y - dyPos, x - dxPos);
     const droneId = 910000 + ((ownerId | 0) * 8 + i);
     if (canSprite) {
@@ -12836,7 +12859,7 @@ function drawFixDrones(x, y, ownerId, dt) {
 
 function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
   if (ownerHasPowerup(ownerId, 'shield')) drawShieldFx(x, y, shipAngle);
-  drawFixDrones(x, y, ownerId, dt);
+  drawFixDrones(x, y, ownerId, shipAngle, dt);
 }
 
 /** Bullet speed (px/tick) for the weapon currently held. */
