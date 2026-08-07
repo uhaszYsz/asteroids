@@ -11914,7 +11914,7 @@ function effectiveLocalWeapon(name) {
     if (lvl >= 2) w.ammo += 1;
     if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
   } else if (n === 'laser') {
-    if (lvl >= 3) w.ammo = Math.round(base.ammo * 1.25);
+    // L2 = wide dual-ray (server). L3 = +25% dmg (server).
   } else if (n === 'plasma') {
     // L2 = 7.5 dmg (server). L3 = 60 ammo.
     if (lvl >= 3) w.ammo = 60;
@@ -11970,10 +11970,13 @@ function tryStartLocalBurst() {
   if (selectedWeapon === 3) {
     const w = effectiveLocalWeapon(currentWeaponName());
     // Beam stays up while localShoot.bursting (ammo dump on sim ticks) — not wall-clock ms.
+    // L2+: worm-width beam (matches server ENEMY_WORM_LASER.width = 12*RES_SCALE).
+    const wideW = getLocalWeaponLevel('laser') >= 2 ? (12 * RES_SCALE) : 0;
     startLocalLaserClip(
       w.range != null ? w.range : LASER_RANGE,
       COL.laser,
-      true
+      true,
+      wideW
     );
   }
   if (currentWeaponName() === 'railgun') {
@@ -12084,12 +12087,13 @@ function laserKeyHeld() {
 }
 
 /** Arm local laser VFX for the current burst (ends with localShoot.bursting). */
-function startLocalLaserClip(range, color, hum) {
+function startLocalLaserClip(range, color, hum, beamWidth) {
   pulseSpriteShipAttack(myId);
   localLaserClip = {
     range: range != null ? range : LASER_RANGE,
     color: color || COL.laser,
-    hum: !!hum
+    hum: !!hum,
+    width: beamWidth != null && beamWidth > 0 ? +beamWidth : 0
   };
   syncLaserSfx(!!hum);
 }
@@ -16902,8 +16906,8 @@ function addLaser(row, hitKind, weaponName, rays) {
   emitLaserImpactFx(x1, y1, kind, wpn === 'laser' || wpn === 'wormLaser', beamDir);
   pushHitscanDebug(x0, y0, x1, y1, kind, wpn);
   if (wpn === 'laser' || wpn === 'wormLaser') pushGridShock(x0, y0, gridBlastLaserOpts(x0, y0, x1, y1));
-  // Temp debug: draw the 3 worm damage rays.
-  if (wpn === 'wormLaser' && rays && rays.length) {
+  // Temp debug: draw worm / L2 laser sample rays.
+  if ((wpn === 'wormLaser' || wpn === 'laser') && rays && rays.length) {
     const until = performance.now() + 90;
     for (let i = 0; i < rays.length; i++) {
       const r = rays[i];
@@ -17299,9 +17303,10 @@ function drawLaserBeams() {
     const me = localView();
     const m = shipMuzzle(me.x, me.y, me.angle);
     const segs = localLaserSegments(m.x, m.y, m.c, m.s, localLaserClip.range);
+    const beamW = localLaserClip.width > 0 ? localLaserClip.width : width;
     for (const s of segs) {
       const col = ownerHasDamagePowerup(myId) ? damageRainbowColor() : COL.laser;
-      drawLaserBeamSeg(s[0], s[1], s[2], s[3], width, col);
+      drawLaserBeamSeg(s[0], s[1], s[2], s[3], beamW, col);
     }
     syncLaserSfx(!!localLaserClip.hum);
   } else {
@@ -17313,7 +17318,7 @@ function drawLaserBeams() {
     const col = ownerHasDamagePowerup(owner)
       ? damageRainbowColor()
       : (isLaser ? COL.laser : (owner < 0 ? COL.enemy : ownerShootColor(owner)));
-    if (rl.wpn === 'wormLaser' && rl.x0 != null) {
+    if ((rl.wpn === 'wormLaser' || (rl.wpn === 'laser' && rl.width > width)) && rl.x0 != null) {
       drawLaserBeamSeg(rl.x0, rl.y0, rl.x1, rl.y1, beamW, col);
       continue;
     }

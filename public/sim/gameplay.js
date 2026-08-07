@@ -4821,34 +4821,76 @@ function fireLaser(room, p, weaponName) {
   const dx = Math.cos(pose.angle);
   const dy = Math.sin(pose.angle);
   const remaining = w.range || Math.hypot(W, H);
-  const width = 2 + (Math.random() * 4 | 0);
   const now = Date.now();
-  const hit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining);
-  if (!hit) {
+  const wide = getWeaponLevel(p, name) >= 2;
+
+  if (!wide) {
+    const width = 2 + (Math.random() * 4 | 0);
+    const hit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining);
+    if (!hit) {
+      roomBroadcast(room, {
+        t: 'lf',
+        l: [room.nextBulletId++, ox, oy, ox + dx * remaining, oy + dy * remaining, width, now, p.id],
+        hit: 0,
+        w: name
+      });
+      return;
+    }
+    const hitKind = hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
     roomBroadcast(room, {
       t: 'lf',
-      l: [room.nextBulletId++, ox, oy, ox + dx * remaining, oy + dy * remaining, width, now, p.id],
-      hit: 0,
+      l: [room.nextBulletId++, ox, oy, hit.x, hit.y, width, now, p.id],
+      hit: hitKind,
       w: name
     });
+    if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg, p.id);
+    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, p.id);
+    else if (hit.kind === 'enemy') damageEnemy(room, hit.target, dmg, p.id);
+    else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
     return;
   }
-  const hitKind = hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
+
+  // L2+: worm-style wide beam + 2 edge raycasts; damage once per target id.
+  const width = ENEMY_WORM_LASER.width;
+  const sideOff = width * 0.35;
+  const px = -dy;
+  const py = dx;
+  const origins = [
+    { x: ox + px * sideOff, y: oy + py * sideOff },
+    { x: ox - px * sideOff, y: oy - py * sideOff }
+  ];
+  const rays = [];
+  const damaged = new Set();
+  // Centerline only for visual beam end (not a damage sample).
+  const midHit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining);
+  for (let i = 0; i < origins.length; i++) {
+    const o = origins[i];
+    const hit = raycastFirst(room, p.id, o.x, o.y, dx, dy, remaining);
+    const x1 = hit ? hit.x : o.x + dx * remaining;
+    const y1 = hit ? hit.y : o.y + dy * remaining;
+    const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
+    rays.push([o.x, o.y, x1, y1, hitKind]);
+    if (!hit || !hit.target) continue;
+    const tid = hit.target.id != null ? (hit.target.id | 0) : null;
+    if (tid == null) continue;
+    const key = hit.kind + ':' + tid;
+    if (damaged.has(key)) continue;
+    damaged.add(key);
+    if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg, p.id);
+    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, p.id);
+    else if (hit.kind === 'enemy') damageEnemy(room, hit.target, dmg, p.id);
+    else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
+  }
+  const x1 = midHit ? midHit.x : ox + dx * remaining;
+  const y1 = midHit ? midHit.y : oy + dy * remaining;
+  const hitKind = !midHit ? 0 : midHit.kind === 'player' || midHit.kind === 'rocket' ? 1 : midHit.kind === 'enemy' ? 3 : 2;
   roomBroadcast(room, {
     t: 'lf',
-    l: [room.nextBulletId++, ox, oy, hit.x, hit.y, width, now, p.id],
+    l: [room.nextBulletId++, ox, oy, x1, y1, width, now, p.id],
     hit: hitKind,
-    w: name
+    w: name,
+    rays
   });
-  if (hit.kind === 'player') {
-    dealDamageToPlayer(room, hit.target, dmg, p.id);
-  } else if (hit.kind === 'asteroid') {
-    damageAsteroid(room, hit.target, dmg, p.id);
-  } else if (hit.kind === 'enemy') {
-    damageEnemy(room, hit.target, dmg, p.id);
-  } else if (hit.kind === 'rocket') {
-    damageRocket(room, hit.target, dmg);
-  }
 }
 
 /** Rear thruster hit — same range/dmg/width as old melee; drawn for now. */

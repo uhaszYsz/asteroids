@@ -175,7 +175,7 @@ function effectiveWeapon(p, name) {
     if (lvl >= 2) w.ammo += 1;
     if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
   } else if (n === 'laser') {
-    if (lvl >= 3) w.ammo = Math.round(base.ammo * 1.25);
+    // L2 = wide dual-ray beam (fireLaser). L3 = +25% dmg (effectiveBulletDmg).
   } else if (n === 'plasma') {
     // L2 = 7.5 dmg (effectiveBulletDmg). L3 = 60 ammo.
     if (lvl >= 3) w.ammo = 60;
@@ -195,7 +195,7 @@ function effectiveWeapon(p, name) {
 function effectiveBulletDmg(p, typeName) {
   const cfg = BULLET_TYPES[typeName] || BULLET_TYPES.default;
   let dmg = cfg.dmg;
-  if (typeName === 'laser' && getWeaponLevel(p, 'laser') >= 2) dmg *= 1.2;
+  if (typeName === 'laser' && getWeaponLevel(p, 'laser') >= 3) dmg *= 1.25;
   if (typeName === 'plasma' && getWeaponLevel(p, 'plasma') >= 2) dmg = 7.5;
   return dmg;
 }
@@ -409,6 +409,7 @@ const ENEMY_WORM_AST_CHECK = Math.round(0.2 * TPS);
 /**
  * Worm super-laser. Width is 3× typical player laser draw width
  * (~4×RES_SCALE mid of the 2..6 flicker band).
+ * Player laser L2+ uses the same width.
  */
 const ENEMY_WORM_LASER = {
   ammo: 230,
