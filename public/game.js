@@ -16940,8 +16940,8 @@ function addLaser(row, hitKind, weaponName, rays) {
   emitLaserImpactFx(x1, y1, kind, wpn === 'laser' || wpn === 'wormLaser', beamDir);
   pushHitscanDebug(x0, y0, x1, y1, kind, wpn);
   if (wpn === 'laser' || wpn === 'wormLaser') pushGridShock(x0, y0, gridBlastLaserOpts(x0, y0, x1, y1));
-  // Temp debug: draw worm / L2 laser sample rays.
-  if ((wpn === 'wormLaser' || wpn === 'laser') && rays && rays.length) {
+  // Debug: worm / L2 laser sample rays (only with cl_hitbox).
+  if (cv('cl_hitbox') > 0 && (wpn === 'wormLaser' || wpn === 'laser') && rays && rays.length) {
     const until = performance.now() + 90;
     for (let i = 0; i < rays.length; i++) {
       const r = rays[i];
