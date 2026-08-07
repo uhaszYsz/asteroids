@@ -4529,11 +4529,12 @@ function rocketHitR(b) {
   return Math.max(2, cfg.size || 7 * RES_SCALE);
 }
 
-/** Player-owned rockets (PvP hull) or NPC rockets (UFO / worm). Other bullets have no hull. */
+/** NPC rockets only (UFO / worm). Player rockets pass through shots — no shot-down / scramble. */
 function isHittableRocket(b) {
   if (!b) return false;
   if (b.type === 'enemyRocket') return true;
-  if (b.type === 'rocket') return true;
+  // Worm rockets share type 'rocket' but owner <= 0.
+  if (b.type === 'rocket' && (b.owner | 0) <= 0) return true;
   return false;
 }
 
