@@ -1,9 +1,11 @@
 /* Asteroids asset service worker: hash-keyed forever cache, origin-first + CDN fallback. */
 /* eslint-disable no-restricted-globals */
 
-const META_CACHE = 'asteroids-meta-v2';
-const ASSET_CACHE = 'asteroids-assets-v2';
-const OLD_CACHES = ['asteroids-meta-v1', 'asteroids-assets-v1'];
+const META_CACHE = 'asteroids-meta-v3';
+const ASSET_CACHE = 'asteroids-assets-v3';
+const OLD_CACHES = ['asteroids-meta-v1', 'asteroids-assets-v1', 'asteroids-meta-v2', 'asteroids-assets-v2'];
+/** Always hit network for these — forever-cache once poisoned the live game.js parse. */
+const NETWORK_ONLY = new Set(['game.js', 'config.js', 'music.js', 'sw.js', 'asset-manifest.json']);
 /** Repo path prefix for client files (browser URLs omit this; CDN needs it). */
 const REPO_PUBLIC = 'public';
 const MANIFEST_URLS = (repo, ref, originManifest) => ([
@@ -78,6 +80,8 @@ self.addEventListener('fetch', (event) => {
 
   const rel = pathToRel(url.pathname);
   if (!rel || rel.includes('..')) return;
+  // Critical JS / manifest: never serve from SW cache (query-bust + origin only).
+  if (NETWORK_ONLY.has(rel) || rel.endsWith('/sw.js')) return;
 
   event.respondWith(handleAsset(req, rel));
 });

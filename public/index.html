@@ -7,30 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;800&family=Press+Start+2P&display=swap" rel="stylesheet">
-  <script>
-    // Hash-keyed asset cache: origin-first, then GitHub/jsDelivr (see sw.js).
-    // Register relative to this page so /asteroids/ and Neutralino both resolve correctly.
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        var path = location.pathname;
-        var dir = /\/[^/]+\.[a-zA-Z0-9]+$/.test(path)
-          ? path.replace(/\/[^/]+$/, '/')
-          : (path.endsWith('/') ? path : path + '/');
-        navigator.serviceWorker.register(dir + 'sw.js?v=2', { scope: dir }).then(function (reg) {
-          function sync() {
-            var w = navigator.serviceWorker.controller || (reg.active);
-            if (w) w.postMessage({ type: 'SYNC_ASSETS' });
-          }
-          if (navigator.serviceWorker.controller) sync();
-          else navigator.serviceWorker.addEventListener('controllerchange', sync);
-          // Re-check hashes on every refresh once controlling.
-          sync();
-        }).catch(function (err) {
-          console.warn('SW register failed', err);
-        });
-      });
-    }
-  </script>
+  <!-- SW register + script boot is at end of body (must purge poisoned caches before game.js). -->
   <style>
     * { margin: 0; box-sizing: border-box; }
     body {
@@ -2365,10 +2342,69 @@
   <button type="button" id="touch-left" class="touch-btn" aria-label="Turn left">◀</button>
   <button type="button" id="touch-right" class="touch-btn" aria-label="Turn right">▶</button>
 </div>
-<script src="lib/bassoonplayer.js"></script>
-<script src="music.js?v=7"></script>
-<script src="config.js?v=36"></script>
-<script src="sim/local-server.js?v=85"></script>
-<script src="game.js?v=990"></script>
+<script>
+(function () {
+  var PURGE_FLAG = 'aa_sw_purge_v4';
+  var path = location.pathname;
+  var dir = /\/[^/]+\.[a-zA-Z0-9]+$/.test(path)
+    ? path.replace(/\/[^/]+$/, '/')
+    : (path.endsWith('/') ? path : path + '/');
+
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = function () { reject(new Error('Failed to load ' + src)); };
+      document.body.appendChild(s);
+    });
+  }
+
+  function registerSw() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register(dir + 'sw.js?v=3', { scope: dir }).then(function (reg) {
+      function sync() {
+        var w = navigator.serviceWorker.controller || reg.active;
+        if (w) w.postMessage({ type: 'SYNC_ASSETS' });
+      }
+      if (navigator.serviceWorker.controller) sync();
+      else navigator.serviceWorker.addEventListener('controllerchange', sync);
+      sync();
+    }).catch(function (err) {
+      console.warn('SW register failed', err);
+    });
+  }
+
+  async function boot() {
+    // One-shot: kill any SW still serving the broken duplicate-consoleOpen game.js.
+    if ('serviceWorker' in navigator && !sessionStorage.getItem(PURGE_FLAG)) {
+      sessionStorage.setItem(PURGE_FLAG, '1');
+      try {
+        var regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(function (r) { return r.unregister(); }));
+        if (window.caches) {
+          var keys = await caches.keys();
+          await Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        }
+      } catch (_) { /* ignore */ }
+      location.reload();
+      return;
+    }
+
+    try {
+      await loadScript('lib/bassoonplayer.js');
+      await loadScript('music.js?v=7');
+      await loadScript('config.js?v=36');
+      await loadScript('sim/local-server.js?v=85');
+      await loadScript('game.js?v=991');
+    } catch (err) {
+      console.error(err);
+    }
+    registerSw();
+  }
+
+  boot();
+})();
+</script>
 </body>
 </html>

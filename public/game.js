@@ -24098,7 +24098,6 @@ const conEl = document.getElementById('con');
 const conLogEl = document.getElementById('con-log');
 const conInputEl = document.getElementById('con-input');
 const conSuggestEl = document.getElementById('con-suggest');
-consoleOpen = false;
 const conHistory = [];
 let conHistIdx = -1;
 let conSuggestList = [];
