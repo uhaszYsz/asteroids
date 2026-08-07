@@ -4563,7 +4563,7 @@ function rocketBlastDamageAt(dist, radius, maxDmg) {
  */
 function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
   if (!room) return;
-  const R = ROCKET_BLAST_RADIUS;
+  const R = (opts && opts.radius > 0) ? +opts.radius : ROCKET_BLAST_RADIUS;
   let maxDmg = ROCKET_BLAST_DMG;
   const skipEnemyId = opts && opts.skipEnemyId != null ? (opts.skipEnemyId | 0) : 0;
 
@@ -4615,13 +4615,16 @@ function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
 function detonateRocket(room, b, hitKind, _applyDirectIgnored) {
   const x = b.x;
   const y = b.y;
-  roomBroadcast(room, { t: 'bd', id: b.id, hit: hitKind, x, y });
+  const blastR = b.noBlast ? 0
+    : ((b.blastR > 0) ? +b.blastR : ROCKET_BLAST_RADIUS);
+  roomBroadcast(room, { t: 'bd', id: b.id, hit: hitKind, x, y, br: blastR });
   if (room.roundResetting) return;
   if (b.noBlast) return;
   const preAids = new Set();
   for (const a of room.asteroids) preAids.add(a.aid);
   applyRocketBlast(room, b.owner | 0, x, y, preAids, {
-    skipEnemyId: b.enemyOwner | 0
+    skipEnemyId: b.enemyOwner | 0,
+    radius: blastR
   });
 }
 
@@ -4741,9 +4744,7 @@ function fireProjectile(room, p, typeName) {
   const x = pose.x + Math.cos(pose.angle) * MUZZLE;
   const y = pose.y + Math.sin(pose.angle) * MUZZLE;
   const isRocket = typeName === 'rocket';
-  const speed = isRocket
-    ? (w.launchSpeed != null ? +w.launchSpeed : ROCKET_LAUNCH_SPEED)
-    : w.speed;
+  const speed = isRocket ? ROCKET_LAUNCH_SPEED : w.speed;
   const vel = bulletVelocity(p, pose.angle, speed, !isRocket && !!w.relative);
   const b = {
     id: room.nextBulletId++,
@@ -4772,6 +4773,7 @@ function fireProjectile(room, p, typeName) {
     b.homing = ROCKET_HOMING_DEFAULT;
     b.flightAng = pose.angle;
     b.netLeft = ROCKET_NET_INTERVAL;
+    if (getWeaponLevel(p, 'rocket') >= 3) b.blastR = ROCKET_BLAST_RADIUS_L3;
   }
   room.bullets.push(b);
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });

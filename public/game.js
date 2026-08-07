@@ -7455,7 +7455,7 @@ function spawnGhostBulletsForLocalShot() {
       spawnGhostBullet(m.x, m.y, a, lo + (hi - lo) * t, 2 * RES_SCALE, 'shotgun');
     }
   } else if (name === 'rocket') {
-    const spd = w.launchSpeed != null ? w.launchSpeed : (w.speed || 15);
+    const spd = w.speed || 15;
     spawnGhostBullet(m.x, m.y, ang, spd, 4 * RES_SCALE, 'rocket');
   } else if (name === 'plasma') {
     spawnGhostBullet(m.x, m.y, ang, w.speed || (9 * RES_SCALE * 1.7), 3 * RES_SCALE, 'plasma');
@@ -7585,6 +7585,39 @@ function emitHitFx(x, y, color) {
 
 /** Expanding shock / feedback rings (death + pickup + impacts). */
 const deathRings = [];
+
+/** Rocket blast discs: filled circle, alpha 0.5 → −0.05 / sim tick, 7 frames. */
+const blastDiscs = [];
+
+function pushRocketBlastDisc(x, y, radius, color) {
+  const r = radius > 0 ? +radius : 32 * RES_SCALE;
+  blastDiscs.push({
+    x, y,
+    r,
+    color: color || COL.rocket,
+    born: performance.now(),
+    frames: 7,
+    alpha0: 0.5,
+    dAlpha: 0.05
+  });
+}
+
+function updateBlastDiscs(now) {
+  for (let i = blastDiscs.length - 1; i >= 0; i--) {
+    const age = Math.floor((now - blastDiscs[i].born) / TICK_MS);
+    if (age >= blastDiscs[i].frames) blastDiscs.splice(i, 1);
+  }
+}
+
+function drawBlastDiscs(now) {
+  for (const d of blastDiscs) {
+    const age = Math.floor((now - d.born) / TICK_MS);
+    if (age < 0 || age >= d.frames) continue;
+    const a = d.alpha0 - d.dAlpha * age;
+    if (!(a > 0)) continue;
+    drawFilledPoly(circleVerts(d.x, d.y, d.r, 48), d.color, a);
+  }
+}
 
 /** Expanding feedback ring (pickup, reload, godmode, impacts). */
 function pushFxRing(x, y, color, opts) {
@@ -8112,8 +8145,8 @@ function voidShakeOffset(kind, id) {
   };
 }
 
-/** Bullet impact by hit kind (0 edge, 1 player, 2 asteroid). */
-function emitBulletImpactFx(x, y, type, hitKind, bvx, bvy) {
+/** Bullet impact by hit kind (0 edge, 1 player, 2 asteroid). `blastR` = rocket AoE radius when present. */
+function emitBulletImpactFx(x, y, type, hitKind, bvx, bvy, blastR) {
   const col = type === 'rocket' || type === 'enemyRocket' ? (type === 'enemyRocket' ? COL.enemyUfo : COL.rocket)
     : type === 'plasma' ? COL.plasma
     : type === 'voidcannon' ? COL.voidcannon
@@ -8186,6 +8219,8 @@ function emitBulletImpactFx(x, y, type, hitKind, bvx, bvy) {
     }
   }
   if (isRocket) {
+    const br = blastR != null ? +blastR : 0;
+    if (br > 0) pushRocketBlastDisc(x, y, br, col);
     pushFxRing(x, y, COL.rocket, { r0: 6, r1: 48, life: 420 });
     pushGridShock(x, y, gridBlastRocketOpts());
     playAmbientExplosionEcho({ vol: 0.6 });
@@ -11907,9 +11942,8 @@ function effectiveLocalWeapon(name) {
     // L2 = 2× bullet size (server sets b.size). L3 = +1 ammo.
     if (lvl >= 3) w.ammo += 1;
   } else if (n === 'rocket') {
-    // L2 = faster reload. L3 = launch speed 10 (server fire).
+    // L2 = faster reload. L3 = double blast radius (server).
     if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.7));
-    if (lvl >= 3) w.launchSpeed = 10;
   } else if (n === 'shotgun') {
     if (lvl >= 2) w.ammo += 1;
     if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 2;
@@ -16853,16 +16887,16 @@ function addBullet(b, withMuzzle, liveFire) {
   }
 }
 
-function removeBullet(id, hitKind, hx, hy) {
+function removeBullet(id, hitKind, hx, hy, blastR) {
   const b = bullets.get(id);
   const kind = hitKind != null ? (hitKind | 0) : 2;
   if (b) {
     const p = (hx != null && hy != null) ? { x: hx, y: hy } : bulletAt(b);
-    emitBulletImpactFx(p.x, p.y, b.type || 'default', kind, b.vx, b.vy);
+    emitBulletImpactFx(p.x, p.y, b.type || 'default', kind, b.vx, b.vy, blastR);
     if (b.type === 'rocket' || b.type === 'enemyRocket') stopRocketTravelSfx(b.id);
     if (b.type === 'voidcannon') stopVoidTravelSfx(b.id);
   } else if (hx != null && hy != null) {
-    emitBulletImpactFx(hx, hy, 'default', kind);
+    emitBulletImpactFx(hx, hy, 'default', kind, null, null, blastR);
   }
   bullets.delete(id);
 }
@@ -21242,6 +21276,7 @@ function render() {
   emitEnemyDamageSmoke();
   updateParticles(dt);
   updateDeathRings(now);
+  updateBlastDiscs(now);
   decaySoftErr(dt);
   // Keep entity light uniforms in sync even if baked grid path did not run.
   updateDynamicLightState();
@@ -21249,6 +21284,7 @@ function render() {
   drawSceneLines(dt);
   renderBullets();
   drawDeathRings(now);
+  drawBlastDiscs(now);
   drawParticles();
   drawFxLabels(now);
   drawWaveBanner(now);
@@ -22236,7 +22272,7 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'bd' && inGame) {
-      removeBullet(msg.id, msg.hit, msg.x, msg.y);
+      removeBullet(msg.id, msg.hit, msg.x, msg.y, msg.br);
       return;
     }
     if (msg.t === 'lf' && inGame) {
@@ -24327,7 +24363,7 @@ function demoReplayEvent(ev) {
     return;
   }
   if (ev.t === 'bd') {
-    removeBullet(ev.id, ev.hit, ev.x, ev.y);
+    removeBullet(ev.id, ev.hit, ev.x, ev.y, ev.br);
     return;
   }
   if (ev.t === 'bu' && ev.b) {
