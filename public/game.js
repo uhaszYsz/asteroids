@@ -21033,7 +21033,7 @@ function renderMenuBackdrop() {
 /** Match server BULLET_TYPES collision extents for cl_hitbox debug. */
 const BULLET_HIT_DEBUG = {
   default: { col: 'circle', size: 2 * RES_SCALE },
-  rocket: { col: 'circle', size: 7 * RES_SCALE },
+  rocket: { col: 'circle', size: 3.5 * RES_SCALE },
   shotgun: { col: 'circle', size: 2 * RES_SCALE },
   plasma: { col: 'circle', size: 5 * RES_SCALE },
   voidcannon: { col: 'circle', size: 27 * RES_SCALE },
