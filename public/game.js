@@ -318,9 +318,10 @@ const RENDER_SCALE_OPTS = [
   { scale: 2, label: '1920 × 1080' },
   { scale: 3, label: '2880 × 1620' }
 ];
-let renderScale = 2;
-/** 'auto' | 0.5 | 1 | 2 | 3 — auto picks framebuffer from screen size; CSS stays 2×. */
-let renderScaleMode = 'auto';
+/** Default framebuffer: 960×540 (scale 1). */
+let renderScale = 1;
+/** Fixed scale from RENDER_SCALE_OPTS (no auto). */
+let renderScaleMode = 1;
 /** Set true when baked grid texture must be rebuilt (size/color/res). */
 let gridBakeDirty = true;
 function invalidateGridBake() { gridBakeDirty = true; }
@@ -353,44 +354,27 @@ function getCoverCssScaleCeil() {
   return Math.max(1, Math.ceil(getCoverCssScale() - 1e-9));
 }
 
-function pickAutoRenderScale() {
-  // Prefer matching a dense framebuffer; bump to 3 on large screens, drop to 1 if tiny.
-  const fit = getFitCssScale();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  if (fit >= 3 || (fit >= 2 && dpr >= 2 && window.innerWidth >= W * 3)) return 3;
-  if (fit >= 1.75) return 2;
-  return 1;
-}
-
 function applyRenderResolution(scale) {
-  if (scale === 0 || scale === 'auto' || scale === '0') {
-    renderScaleMode = 'auto';
-    renderScale = pickAutoRenderScale();
-  } else {
-    const s = Number(scale);
-    const opt = RENDER_SCALE_OPTS.find((o) => o.scale === s);
-    const use = opt ? opt.scale : 2;
-    renderScaleMode = use;
-    renderScale = use;
-  }
+  const s = Number(scale);
+  const opt = RENDER_SCALE_OPTS.find((o) => o.scale === s);
+  // Legacy localStorage 'auto' / 0 → default 960×540.
+  const use = opt ? opt.scale : 1;
+  renderScaleMode = use;
+  renderScale = use;
   canvas.width = Math.round(W * renderScale);
   canvas.height = Math.round(H * renderScale);
   try {
-    localStorage.setItem(
-      RENDER_SCALE_KEY,
-      renderScaleMode === 'auto' ? 'auto' : String(renderScale)
-    );
+    localStorage.setItem(RENDER_SCALE_KEY, String(renderScale));
   } catch (_) {}
   invalidateGridBake();
   syncSettingsResolutionUi();
 }
 
 function loadRenderResolution() {
-  let mode = 'auto';
+  let mode = 1;
   try {
     const raw = localStorage.getItem(RENDER_SCALE_KEY);
-    if (raw === 'auto' || raw === '0') mode = 'auto';
-    else if (raw != null && raw !== '') {
+    if (raw != null && raw !== '' && raw !== 'auto' && raw !== '0') {
       const n = Number(raw);
       if (RENDER_SCALE_OPTS.some((o) => o.scale === n)) mode = n;
     }
@@ -403,7 +387,7 @@ function syncSettingsResolutionUi() {
   if (!sel) return;
   // Don't touch the <select> while the user has it open — setting option.selected closes it.
   if (document.activeElement === sel) return;
-  const v = renderScaleMode === 'auto' ? '0' : String(renderScaleMode);
+  const v = String(renderScaleMode);
   sel.value = v;
   sel.querySelectorAll('option').forEach((opt) => {
     opt.selected = opt.value === v;
@@ -419,15 +403,6 @@ function fitCanvasIntegerScale() {
   const scale = getFitCssScale();
   canvas.style.width = (W * scale) + 'px';
   canvas.style.height = (H * scale) + 'px';
-  if (renderScaleMode === 'auto') {
-    const next = pickAutoRenderScale();
-    if (next !== renderScale) {
-      renderScale = next;
-      canvas.width = W * renderScale;
-      canvas.height = H * renderScale;
-      syncSettingsResolutionUi();
-    }
-  }
 }
 loadRenderResolution();
 fitCanvasIntegerScale();
@@ -14080,9 +14055,7 @@ if (settingsPanelEl) {
 }
 if (settingsResEl) {
   settingsResEl.addEventListener('change', () => {
-    const raw = String(settingsResEl.value);
-    if (raw === '0') applyRenderResolution('auto');
-    else applyRenderResolution(Number(raw));
+    applyRenderResolution(Number(settingsResEl.value));
     fitCanvasIntegerScale();
   });
 }
@@ -14113,15 +14086,11 @@ if (settingsBakeQualityEl) {
     if (!ev || !ev.target) return;
     setAimConeColor(ev.target.value);
   };
+  // F1 / settings color pickers removed from UI — keep handler if nodes reappear.
   const gpAim = document.getElementById('gp-aim-cone-color');
-  const spAim = document.getElementById('settings-aim-cone-color');
   if (gpAim) {
     gpAim.addEventListener('input', onAimColor);
     gpAim.addEventListener('change', onAimColor);
-  }
-  if (spAim) {
-    spAim.addEventListener('input', onAimColor);
-    spAim.addEventListener('change', onAimColor);
   }
   syncAimConeColorUi();
 })();

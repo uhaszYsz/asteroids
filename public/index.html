@@ -2134,14 +2134,6 @@
           <span class="gp-check-sub">Hide everything except what the flashlight lights on the grid</span>
         </span>
       </label>
-      <div class="gp-sec-head" style="margin-top:10px">
-        <div class="gp-sec-title">Aim cone color</div>
-      </div>
-      <p class="gp-hint">Precision aim light tint — saved locally only (not on account).</p>
-      <div class="gp-color-row">
-        <input type="color" id="gp-aim-cone-color" value="#FFFFFF" />
-        <span class="gp-color-hex" id="gp-aim-cone-color-hex">#FFFFFF</span>
-      </div>
     </div>
   </div>
 </div>
@@ -2174,18 +2166,11 @@
     </div>
     <label class="sp-label" for="settings-resolution">Resolution</label>
     <select id="settings-resolution">
-      <option value="0" selected>Auto (screen)</option>
       <option value="0.5">480 × 270</option>
-      <option value="1">960 × 540</option>
+      <option value="1" selected>960 × 540</option>
       <option value="2">1920 × 1080</option>
       <option value="3">2880 × 1620</option>
     </select>
-    <label class="sp-label" for="settings-aim-cone-color" style="margin-top:12px">Aim light cone</label>
-    <p class="sp-hint">Precision aim tint — local only, not saved to account.</p>
-    <div class="sp-color-row" style="display:flex;align-items:center;gap:10px;margin-top:6px">
-      <input id="settings-aim-cone-color" type="color" value="#FFFFFF" />
-      <span id="settings-aim-cone-color-hex" class="sp-hint" style="margin:0">#FFFFFF</span>
-    </div>
   </div>
 </div>
 <div id="account-panel" aria-hidden="true">
@@ -2423,7 +2408,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=85');
-      await loadScript('game.js?v=1008');
+      await loadScript('game.js?v=1009');
     } catch (err) {
       console.error(err);
     }
