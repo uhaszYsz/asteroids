@@ -4,6 +4,16 @@ function wrap(o) {
   if (o.y < 0) o.y += H; if (o.y > H) o.y -= H;
 }
 
+/** GameMaker lengthdir_x — offset X for length along direction (radians). */
+function lenDirX(len, dir) {
+  return Math.cos(dir) * len;
+}
+
+/** GameMaker lengthdir_y — offset Y for length along direction (radians). */
+function lenDirY(len, dir) {
+  return Math.sin(dir) * len;
+}
+
 function clampSpeed(o) {
   const cap = o.stunned ? STUN_MAX_SPEED : MAX_SPEED;
   const s = Math.hypot(o.vx, o.vy);

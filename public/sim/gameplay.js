@@ -753,6 +753,7 @@ function makeEnemy(kind, wave, weapon) {
     magnetMax: 0,
     magnetStartedAt: 0,
     magnetAstLeft: 0,
+    magnetPull: 0,
     lastHitBy: 0,
     // common1 post-shot flank (deg peak, ticks remaining / duration).
     flankDeg: 0,
@@ -1072,6 +1073,7 @@ function finishGunshipAttack(room, e) {
   e.magnetMax = 0;
   e.magnetStartedAt = 0;
   e.magnetAstLeft = 0;
+  e.magnetPull = 0;
   e.astCheckLeft = 0;
   e.wormAtk = ((e.wormAtk | 0) + 1) % 3;
   e.fireCd = Math.round(
@@ -1107,6 +1109,7 @@ function beginGunshipMagnetAttack(room, e) {
   e.magnetMax = ENEMY_GUNSHIP_MAGNET_TICKS;
   e.magnetLeft = ENEMY_GUNSHIP_MAGNET_TICKS;
   e.magnetStartedAt = Date.now();
+  e.magnetPull = 0;
   e.vx = 0;
   e.vy = 0;
   e.tx = e.x;
@@ -1196,6 +1199,34 @@ function gunshipMagnetAstAccelFor(a) {
   else if (a.size === 'big' || a.size === 'huge') frac = 1 / 3;
   else if (a.size !== 'small') frac = 0.5;
   return ENEMY_GUNSHIP_MAGNET_AST_ACCEL * frac;
+}
+
+/**
+ * Player magnet: position nudge via lenDir toward gunship.
+ * Does not touch vx/vy — thrust/physics stay normal.
+ */
+function applyGunshipMagnetToPlayer(room, p) {
+  if (!room || !room.practice || !room.enemies || !p) return;
+  if ((p.hp | 0) <= 0 || (p.godLeft | 0) > 0) return;
+  for (let i = 0; i < room.enemies.length; i++) {
+    const e = room.enemies[i];
+    if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4) continue;
+    const pull = +e.magnetPull || 0;
+    if (!(pull > 0)) return;
+    const dir = Math.atan2(e.y - p.y, e.x - p.x);
+    p.x += lenDirX(pull, dir);
+    p.y += lenDirY(pull, dir);
+    return;
+  }
+}
+
+/** Apply active gunship magnet lenDir pull to every living ship. */
+function applyGunshipMagnetToAllPlayers(room) {
+  if (!room || !room.players) return;
+  for (const p of room.players.values()) {
+    applyGunshipMagnetToPlayer(room, p);
+    if ((p.hp | 0) > 0) wrap(p);
+  }
 }
 
 function clampAsteroidVelMax(a) {
@@ -1331,6 +1362,7 @@ function updateGunshipAttack(room, e, target) {
       e.magnetLeft = 0;
       e.magnetStartedAt = 0;
       e.magnetAstLeft = 0;
+      e.magnetPull = 0;
       e.fireCd = Math.round(
         (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
       );
@@ -1375,8 +1407,9 @@ function updateGunshipAttack(room, e, target) {
     return;
   }
 
-  // —— Magnet (phase 4): asteroids only (player is never pulled) ——
+  // —— Magnet (phase 4): grow pullPower += 0.05/tick; asteroids + player lenDir ——
   if ((e.wormPhase | 0) === 4) {
+    e.magnetPull = (+e.magnetPull || 0) + ENEMY_GUNSHIP_MAGNET_PULL_GROW;
     e.magnetLeft = (e.magnetLeft | 0) - 1;
     const every = Math.max(1, ENEMY_GUNSHIP_MAGNET_AST_EVERY | 0);
     // Spawn on the cadence boundary (and when the attack ends at 0).
@@ -1404,6 +1437,7 @@ function interruptAllWormAttacks(room) {
     e.magnetLeft = 0;
     e.magnetMax = 0;
     e.magnetStartedAt = 0;
+    e.magnetPull = 0;
     e.astCheckLeft = 0;
     e.fireCd = Math.round(
       (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS

@@ -19277,6 +19277,40 @@ function activeGunshipMagnet() {
   return null;
 }
 
+/** GameMaker lengthdir_x / lengthdir_y (dir in radians). */
+function lenDirX(len, dir) {
+  return Math.cos(dir) * len;
+}
+function lenDirY(len, dir) {
+  return Math.sin(dir) * len;
+}
+
+/** Match server: pullPower grows +0.05 each magnet tick. */
+const GUNSHIP_MAGNET_PULL_GROW = 0.05;
+
+function gunshipMagnetPullPowerClient(e) {
+  if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4) return 0;
+  const ch = enemyCharges.get(e.id | 0);
+  if (ch && ch.kind === 'gunship') {
+    const ticks = Math.max(0, Math.floor((performance.now() - ch.start) / TICK_MS));
+    return ticks * GUNSHIP_MAGNET_PULL_GROW;
+  }
+  const t = gunshipMagnetProgress(e);
+  return Math.floor(t * (10 * TPS)) * GUNSHIP_MAGNET_PULL_GROW;
+}
+
+/** Position nudge toward gunship — does not touch vx/vy. */
+function applyLocalGunshipMagnetPull(o) {
+  const e = activeGunshipMagnet();
+  if (!e || !o || (o.hp | 0) <= 0 || (o.godLeft | 0) > 0) return;
+  const pull = gunshipMagnetPullPowerClient(e);
+  if (!(pull > 0)) return;
+  const p = enemyAt(e);
+  const dir = Math.atan2(p.y - o.y, p.x - o.x);
+  o.x += lenDirX(pull, dir);
+  o.y += lenDirY(pull, dir);
+}
+
 function drawGunshipMagnetAura(x, y, t, now, id) {
   const ease = t * t;
   const pulse = 0.5 + 0.5 * Math.sin(now * 0.008 + id);
@@ -20760,6 +20794,7 @@ function applyInputTo(o, inp, opts) {
   limitPlayerSpeed(o);
   o.x += o.vx;
   o.y += o.vy;
+  applyLocalGunshipMagnetPull(o);
   wrapEntity(o);
   // Leave shared spawn zone → godmode ends for everyone (matches server).
   if (o.godLeft > 0 && opts && opts.localCollide && o === player && myId != null) {
