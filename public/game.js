@@ -14626,22 +14626,27 @@ function drawCampaignMapGL(now) {
   }
 
   const exitRing = [];
+  const specialRing = [];
   const focusRing = [];
   for (let i = 0; i < campaignStars.length; i++) {
     const s = campaignStars[i];
     const isAt = (s.id | 0) === (campaignAtStar | 0);
     const isHover = hover && (hover.id | 0) === (s.id | 0);
     const isExit = !!s.exit;
+    const isSpecial = !!s.special;
     const inPick = !!(at && !isAt && Math.hypot(s.x - at.x, s.y - at.y) <= pickR);
-    if (isExit) pushCampaignCircleLines(exitRing, s.x, s.y, 9, 28);
+    if (isSpecial) pushCampaignCircleLines(specialRing, s.x, s.y, 8, 28);
+    if (isExit) pushCampaignCircleLines(exitRing, s.x, s.y, 11, 28);
     if (isAt || isHover) pushCampaignCircleLines(focusRing, s.x, s.y, isAt ? 12 : 10, 28);
-    const r = isAt ? 5.5 : (isHover || isExit ? 4.5 : 2.8);
+    const r = isAt ? 5.5 : (isHover || isExit || isSpecial ? 4.5 : 2.8);
     let col = [0.6, 0.66, 0.75];
     if (isAt) col = [1.0, 0.88, 0.54];
+    else if (isSpecial) col = [0.35, 1.0, 0.55];
     else if (isExit) col = [0.49, 1.0, 0.69];
     else if (inPick) col = [0.85, 0.94, 1.0];
     drawSoftOval(s.x, s.y, 0, r, r, col, 0.95, true, 0.35);
   }
+  if (specialRing.length) drawLines(specialRing, [0.25, 1.0, 0.45], gl.LINES, 0.85, false);
   if (exitRing.length) drawLines(exitRing, [0.47, 1.0, 0.67], gl.LINES, 0.55, false);
   if (focusRing.length) drawLines(focusRing, [1.0, 0.86, 0.47], gl.LINES, 0.7, false);
 
