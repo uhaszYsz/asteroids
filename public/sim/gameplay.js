@@ -473,14 +473,17 @@ function createCampaignStageAsteroids() {
   return list;
 }
 
-function clearCampaignJump(p) {
+function clearCampaignJump(p, room) {
   if (!p) return;
+  const wasBusy = !!(p.jumping || ((p.jumpChargeLeft | 0) > 0));
   p.jumping = false;
+  p.jumpChargeLeft = 0;
+  if (wasBusy && room) notifyCampaignJump(room, p);
 }
 
 function clearAllCampaignJumps(room) {
   if (!room) return;
-  for (const p of room.players.values()) clearCampaignJump(p);
+  for (const p of room.players.values()) clearCampaignJump(p, room);
 }
 
 function playerOffPlayfield(p) {
@@ -515,13 +518,38 @@ function broadcastCampaignMap(room, open) {
 
 function notifyCampaignJump(room, p) {
   if (!room || !p) return;
-  roomBroadcast(room, { t: 'campJump', id: p.id, j: p.jumping ? 1 : 0 });
+  roomBroadcast(room, {
+    t: 'campJump',
+    id: p.id,
+    j: p.jumping ? 1 : 0,
+    c: p.jumpChargeLeft | 0
+  });
 }
 
 function startCampaignJump(room, p) {
   if (!room || !room.campaign || room.campaignMapOpen || !p || (p.hp | 0) <= 0) return false;
   if (p.jumping) return false;
+  p.jumpChargeLeft = 0;
   p.jumping = true;
+  notifyCampaignJump(room, p);
+  return true;
+}
+
+function beginCampaignJumpCharge(room, p) {
+  if (!room || !room.campaign || room.campaignMapOpen || !p || (p.hp | 0) <= 0) return false;
+  if (p.jumping || (p.jumpChargeLeft | 0) > 0) return false;
+  // Clear field → boost immediately (no 5s wait).
+  if (!soloWaveHasFieldThreats(room)) {
+    return startCampaignJump(room, p);
+  }
+  p.jumpChargeLeft = CAMPAIGN_JUMP_CHARGE_TICKS;
+  notifyCampaignJump(room, p);
+  return true;
+}
+
+function cancelCampaignJumpCharge(room, p) {
+  if (!p || !((p.jumpChargeLeft | 0) > 0)) return false;
+  p.jumpChargeLeft = 0;
   notifyCampaignJump(room, p);
   return true;
 }
@@ -532,6 +560,8 @@ function tickCampaignStageClearJump(room) {
   if (soloWaveHasFieldThreats(room)) return;
   for (const p of room.players.values()) {
     if (p.bot || (p.hp | 0) <= 0) continue;
+    if (p.jumping) continue;
+    p.jumpChargeLeft = 0;
     startCampaignJump(room, p);
   }
 }
@@ -649,11 +679,27 @@ function travelCampaignStar(room, x, y, p) {
   };
 }
 
-/** Enter pulse starts boost immediately; each tick adds aim-dir accel (no edge wrap). */
+/**
+ * Enter pulse: start 5s charge if threats remain; 2nd Enter cancels charge;
+ * clear stage → boost instantly. While boosting, add aim-dir accel (no edge wrap).
+ */
 function tickCampaignPlayerJump(room, p) {
   if (!room || !room.campaign || room.campaignMapOpen || !p || (p.hp | 0) <= 0) return;
-  if (!p.jumping && p.inp && (p.inp.j | 0)) {
-    startCampaignJump(room, p);
+  let chargedThisTick = false;
+  if (p.inp && (p.inp.j | 0)) {
+    if ((p.jumpChargeLeft | 0) > 0) cancelCampaignJumpCharge(room, p);
+    else if (!p.jumping) {
+      beginCampaignJumpCharge(room, p);
+      chargedThisTick = (p.jumpChargeLeft | 0) > 0;
+    }
+  }
+  // Full 5s from the Enter that started charge (don't burn a tick on the start frame).
+  if (!chargedThisTick && (p.jumpChargeLeft | 0) > 0) {
+    p.jumpChargeLeft--;
+    if ((p.jumpChargeLeft | 0) <= 0) {
+      p.jumpChargeLeft = 0;
+      startCampaignJump(room, p);
+    }
   }
   if (p.jumping) {
     p.vx += lenDirX(CAMPAIGN_JUMP_ACCEL, p.angle);
@@ -3597,6 +3643,7 @@ function spawnPlayer(id, name, colors, room) {
     inputQueue: [],
     lastSeq: 0,
     jumping: false,
+    jumpChargeLeft: 0,
     campaignFuel: 0
   };
 }
@@ -4906,7 +4953,7 @@ function hitPlayerAsteroid(room, p, a, hit) {
   applyShipCrash(room, p, hit.nx, hit.ny, hit.overlap, dmg, 0.5);
   // Hard eject in case dual hit-circles / spin left us still overlapping.
   separatePlayerFromAsteroids(p, room, 8);
-  if (room && room.campaign) clearCampaignJump(p);
+  if (room && room.campaign) clearCampaignJump(p, room);
   notifyShipHit(room, p);
 }
 

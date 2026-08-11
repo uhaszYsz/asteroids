@@ -13647,6 +13647,10 @@ let campaignAtStar = 0;
 let campaignJumpCount = 0;
 let campaignFuel = 10;
 let campaignJumping = false;
+let campaignJumpChargeLeft = 0;
+let campaignJumpChargeUntil = 0;
+const CAMPAIGN_JUMP_CHARGE_TICKS_CLIENT = Math.round(5 * TPS);
+const campaignJumpChargeUntilById = new Map();
 let campaignMapPointer = { x: W * 0.5, y: H * 0.5 };
 
 const modePanelEl = document.getElementById('mode-panel');
@@ -14517,6 +14521,9 @@ function applyCampaignMapMsg(msg) {
   }
   if (msg.open) {
     campaignJumping = false;
+    campaignJumpChargeLeft = 0;
+    campaignJumpChargeUntil = 0;
+    campaignJumpChargeUntilById.clear();
     showCampaignMap();
   } else {
     hideCampaignMap();
@@ -14587,7 +14594,7 @@ function redrawCampaignMap() {
   const at = campaignCurrentStarLocal();
   const hover = pickLocalCampaignStar(campaignMapPointer.x, campaignMapPointer.y);
 
-  // Expanding zone from world bottom-left (after first star jump).
+  // Expanding zone from world bottom-left (map only) — filled discs, not outlines.
   const zoneR = campaignJumpCount >= 1
     ? (70 * RES_SCALE) + (campaignJumpCount - 1) * (20 * RES_SCALE)
     : 0;
@@ -14597,14 +14604,12 @@ function redrawCampaignMap() {
     const nextR = zoneR + 20 * RES_SCALE;
     ctx.beginPath();
     ctx.arc(ox * sx, oy * sy, nextR * sx, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255, 48, 48, 0.2)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 48, 48, 0.22)';
+    ctx.fill();
     ctx.beginPath();
     ctx.arc(ox * sx, oy * sy, zoneR * sx, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(255, 48, 48, 0.5)';
-    ctx.lineWidth = 3.5;
-    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 48, 48, 0.5)';
+    ctx.fill();
   }
 
   // Jump radius around current star (not the mouse).
@@ -16783,6 +16788,9 @@ function resetMatchState() {
   campaignJumpCount = 0;
   campaignFuel = 10;
   campaignJumping = false;
+  campaignJumpChargeLeft = 0;
+  campaignJumpChargeUntil = 0;
+  campaignJumpChargeUntilById.clear();
   jumpPulse = false;
   hideCampaignMap();
   hideCampaignJumpHud();
@@ -22185,38 +22193,129 @@ function render() {
   drawFxLabels(now);
   drawWaveBanner(now);
   if (soloShopOpen) updateShopPreviews();
-  drawCampaignZoneRings();
+  emitCampaignJumpChargeFx();
   emitCampaignJumpFx();
 }
 
-/** World-space expanding campaign zone from bottom-left corner. */
-function drawCampaignZoneRings() {
-  if (!campaignMode || campaignMapOpen || (campaignJumpCount | 0) < 1) return;
-  const ox = 0;
-  const oy = H;
-  const base = 70 * RES_SCALE;
-  const grow = 20 * RES_SCALE;
-  const r = base + ((campaignJumpCount | 0) - 1) * grow;
-  const next = r + grow;
-  const segs = 64;
-  const drawRing = (radius, rgb, alpha, width) => {
-    if (!(radius > 1)) return;
-    for (let i = 0; i < segs; i++) {
-      const a0 = (i / segs) * Math.PI * 2;
-      const a1 = ((i + 1) / segs) * Math.PI * 2;
-      drawThickSegment(
-        ox + Math.cos(a0) * radius,
-        oy + Math.sin(a0) * radius,
-        ox + Math.cos(a1) * radius,
-        oy + Math.sin(a1) * radius,
-        width,
-        rgb,
-        alpha
-      );
+function ownerCampaignJumpCharge(ownerId) {
+  const until = campaignJumpChargeUntilById.get(ownerId | 0);
+  if (until != null) {
+    const ms = until - performance.now();
+    return Math.max(0, Math.ceil(ms / (1000 / TPS)));
+  }
+  if (ownerId === myId) {
+    if (campaignJumpChargeUntil > 0) {
+      const ms = campaignJumpChargeUntil - performance.now();
+      return Math.max(0, Math.ceil(ms / (1000 / TPS)));
     }
-  };
-  drawRing(next, [1.0, 0.2, 0.18], 0.2, 2.2 * RES_SCALE);
-  drawRing(r, [1.0, 0.18, 0.14], 0.5, 3.4 * RES_SCALE);
+    return campaignJumpChargeLeft | 0;
+  }
+  const r = remotes.get(ownerId);
+  return r ? (r.jumpChargeLeft | 0) : 0;
+}
+
+function applyCampJumpState(id, jumping, chargeLeft) {
+  const c = chargeLeft | 0;
+  const j = !!jumping;
+  if (id === myId) {
+    const was = campaignJumping;
+    campaignJumping = j;
+    if (c > 0) {
+      campaignJumpChargeLeft = c;
+      campaignJumpChargeUntil = performance.now() + (c / TPS) * 1000;
+      campaignJumpChargeUntilById.set(id | 0, campaignJumpChargeUntil);
+    } else {
+      campaignJumpChargeLeft = 0;
+      campaignJumpChargeUntil = 0;
+      campaignJumpChargeUntilById.delete(id | 0);
+    }
+    if (campaignJumping && !was) emitCampaignJumpBurst();
+    return;
+  }
+  const r = remotes.get(id);
+  if (r) {
+    r.jumping = j;
+    r.jumpChargeLeft = c;
+    if (c > 0) campaignJumpChargeUntilById.set(id | 0, performance.now() + (c / TPS) * 1000);
+    else campaignJumpChargeUntilById.delete(id | 0);
+  }
+}
+
+/** Charge-up warp aura around the ship (5s Enter load). */
+function drawCampaignJumpChargeFx(x, y, shipAngle, chargeLeft) {
+  const max = CAMPAIGN_JUMP_CHARGE_TICKS_CLIENT;
+  const left = Math.max(0, chargeLeft | 0);
+  if (!(left > 0) || !(max > 0)) return;
+  const t = 1 - left / max;
+  const now = performance.now();
+  const ang = shipAngle || 0;
+  const baseR = (10 + t * 18) * RES_SCALE;
+  const pulse = 1 + 0.1 * Math.sin(now * 0.014);
+  const radius = baseR * pulse;
+  const spin = now * (0.012 + t * 0.025);
+  // Soft warp discs under the charge sphere.
+  drawSoftOval(x, y, ang, radius * 0.55, radius * 0.95, [0.35, 0.7, 1.0], 0.12 + t * 0.2, true, 0.4);
+  drawSoftOval(x, y, ang + Math.PI * 0.5, radius * 0.9, radius * 0.4, [0.9, 0.95, 1.0], 0.08 + t * 0.15, true, 0.45);
+  drawEnemyChargeSphere(x, y, radius, ang, spin, [0.45, 0.85, 1.0], 0.28 + t * 0.5, {
+    chargeT: 0.4 + t * 0.55,
+    noCore: true,
+    pulseHz: 2.2 + t * 3.5
+  });
+  // Nose foreshock + orbiting sparks.
+  if (Math.random() > 0.45) {
+    emitParticles({
+      x: x + Math.cos(ang) * (8 + t * 10) * RES_SCALE,
+      y: y + Math.sin(ang) * (8 + t * 10) * RES_SCALE,
+      count: 1,
+      speed: (10 + Math.random() * 18) * RES_SCALE,
+      speedSpread: 8 * RES_SCALE,
+      direction: ang,
+      spread: 0.55,
+      size: 1.2 + Math.random(),
+      sizeSpread: 0.4,
+      lifetime: 0.12 + Math.random() * 0.1,
+      color: [1.0, 0.95, 0.75],
+      drag: 2.0,
+      skipShip: myId | 0
+    });
+  }
+  if (Math.random() > 0.35) {
+    const a = spin * 2.5 + Math.random() * Math.PI * 2;
+    emitParticles({
+      x: x + Math.cos(a) * radius * 0.9,
+      y: y + Math.sin(a) * radius * 0.9,
+      count: 1,
+      speed: (8 + Math.random() * 16) * RES_SCALE,
+      speedSpread: 10 * RES_SCALE,
+      direction: a + Math.PI * 0.5,
+      spread: 0.35,
+      size: 1.0 + Math.random() * 0.9,
+      sizeSpread: 0.4,
+      lifetime: 0.18 + Math.random() * 0.14,
+      color: Math.random() > 0.45 ? [0.55, 0.9, 1.0] : [0.75, 0.95, 1.0],
+      drag: 1.7,
+      skipShip: myId | 0
+    });
+  }
+}
+
+function emitCampaignJumpChargeFx() {
+  if (!campaignMode || campaignMapOpen || deathSpectating) return;
+  // Local ship aura
+  if ((player.hp | 0) > 0) {
+    const left = ownerCampaignJumpCharge(myId);
+    if (left > 0) {
+      const me = localView();
+      drawCampaignJumpChargeFx(me.x, me.y, me.angle, left);
+    }
+  }
+  for (const r of remotes.values()) {
+    if ((r.hp | 0) <= 0) continue;
+    const left = ownerCampaignJumpCharge(r.id);
+    if (!(left > 0)) continue;
+    const v = remoteView(r);
+    drawCampaignJumpChargeFx(v.x, v.y, v.angle, left);
+  }
 }
 
 /** Warp streak particles while hyperspace boosting. */
@@ -22245,51 +22344,59 @@ function emitCampaignJumpBurst() {
   });
 }
 
-function emitCampaignJumpFx() {
-  if (!campaignMode || campaignMapOpen || !campaignJumping || deathSpectating) return;
-  if ((player.hp | 0) <= 0) return;
-  const me = localView();
-  const back = me.angle + Math.PI;
+function emitCampaignJumpStreakAt(x, y, angle, vx, vy, skipId) {
+  const back = angle + Math.PI;
   const col = [0.55, 0.85, 1.0];
   const hot = [1.0, 0.95, 0.75];
   emitParticles({
-    x: me.x + Math.cos(back) * 6 * RES_SCALE,
-    y: me.y + Math.sin(back) * 6 * RES_SCALE,
-    count: 3,
-    speed: (40 + Math.random() * 50) * RES_SCALE,
-    speedSpread: 28 * RES_SCALE,
+    x,
+    y,
+    count: 5,
+    speed: (70 + Math.random() * 60) * RES_SCALE,
+    speedSpread: 40 * RES_SCALE,
     direction: back,
-    spread: 0.55,
-    size: 1.4 + Math.random() * 1.2,
-    sizeSpread: 0.6,
-    scaleY: 1.8,
-    lifetime: 0.18 + Math.random() * 0.2,
-    lifetimeSpread: 0.08,
-    color: Math.random() > 0.45 ? col : hot,
-    drag: 1.6,
-    inheritVx: me.vx * 0.35,
-    inheritVy: me.vy * 0.35,
-    skipShip: myId | 0
+    spread: 0.35,
+    size: 1.2 + Math.random() * 1.4,
+    sizeSpread: 0.7,
+    scaleY: 2.4,
+    lifetime: 0.12 + Math.random() * 0.14,
+    lifetimeSpread: 0.06,
+    color: Math.random() > 0.4 ? col : hot,
+    drag: 1.2,
+    inheritVx: (vx || 0) * 0.15,
+    inheritVy: (vy || 0) * 0.15,
+    skipShip: skipId | 0
   });
-  // Soft nose flash
-  if (Math.random() > 0.55) {
-    emitParticles({
-      x: me.x + Math.cos(me.angle) * 8 * RES_SCALE,
-      y: me.y + Math.sin(me.angle) * 8 * RES_SCALE,
-      count: 1,
-      speed: (8 + Math.random() * 12) * RES_SCALE,
-      speedSpread: 6 * RES_SCALE,
-      direction: me.angle,
-      spread: 0.8,
-      size: 2.2,
-      sizeSpread: 0.5,
-      lifetime: 0.12,
-      color: hot,
-      drag: 2.2,
-      inheritVx: me.vx * 0.2,
-      inheritVy: me.vy * 0.2,
-      skipShip: myId | 0
-    });
+  emitParticles({
+    x: x + Math.cos(back) * 5 * RES_SCALE,
+    y: y + Math.sin(back) * 5 * RES_SCALE,
+    count: 3,
+    speed: (45 + Math.random() * 40) * RES_SCALE,
+    speedSpread: 25 * RES_SCALE,
+    direction: back,
+    spread: 0.7,
+    size: 1.0 + Math.random(),
+    sizeSpread: 0.5,
+    scaleY: 1.8,
+    lifetime: 0.16 + Math.random() * 0.12,
+    color: col,
+    drag: 1.5,
+    inheritVx: (vx || 0) * 0.3,
+    inheritVy: (vy || 0) * 0.3,
+    skipShip: skipId | 0
+  });
+}
+
+function emitCampaignJumpFx() {
+  if (!campaignMode || campaignMapOpen || deathSpectating) return;
+  if (campaignJumping && (player.hp | 0) > 0) {
+    const me = localView();
+    emitCampaignJumpStreakAt(me.x, me.y, me.angle, me.vx, me.vy, myId);
+  }
+  for (const r of remotes.values()) {
+    if (!r.jumping || (r.hp | 0) <= 0) continue;
+    const v = remoteView(r);
+    emitCampaignJumpStreakAt(v.x, v.y, v.angle, v.vx, v.vy, r.id);
   }
 }
 
@@ -22462,6 +22569,9 @@ function enterGameFromWelcome(msg) {
   campaignJumpCount = msg.jumps != null ? (msg.jumps | 0) : 0;
   campaignFuel = msg.fuel != null ? (msg.fuel | 0) : 10;
   campaignJumping = false;
+  campaignJumpChargeLeft = 0;
+  campaignJumpChargeUntil = 0;
+  campaignJumpChargeUntilById.clear();
   jumpPulse = false;
   hideCampaignMap();
   setPracticeWaiting(!!msg.practice);
@@ -23169,6 +23279,9 @@ function handleWsMessage(e) {
       if (msg.jumps != null) campaignJumpCount = msg.jumps | 0;
       if (msg.fuels) applyCampaignFuelsMsg(msg.fuels);
       campaignJumping = false;
+      campaignJumpChargeLeft = 0;
+      campaignJumpChargeUntil = 0;
+      campaignJumpChargeUntilById.clear();
       jumpPulse = false;
       hideCampaignMap();
       if (msg.n != null) {
@@ -23184,11 +23297,7 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'campJump' && inGame) {
-      if ((msg.id | 0) === (myId | 0) || msg.id == null) {
-        const was = campaignJumping;
-        campaignJumping = !!(msg.j | 0);
-        if (campaignJumping && !was) emitCampaignJumpBurst();
-      }
+      applyCampJumpState(msg.id | 0, !!(msg.j | 0), msg.c | 0);
       return;
     }
     if (msg.t === 'soloOver') {
