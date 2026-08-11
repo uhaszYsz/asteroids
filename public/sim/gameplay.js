@@ -501,6 +501,8 @@ function nearestCampaignChainStar(x, y, chain) {
  * 2) Each path star sprouts 1–4 children at random within radius 75.
  * 3) Those children (35%) sprout 1–4 more away from the nearest path star (±30°, ≤75),
  *    and newly created stars keep doing the same until 64 stars exist.
+ * Every placement must stay ≥ CAMPAIGN_STAR_MIN_DIST from all existing stars
+ * (one retry on fail, then skip that star).
  */
 function rollCampaignStars() {
   const margin = 28 * RES_SCALE;
@@ -512,39 +514,73 @@ function rollCampaignStars() {
   const goalY = minY; // top-right (y grows downward)
   const step = CAMPAIGN_STAR_PATH_STEP;
   const branchR = CAMPAIGN_STAR_BRANCH_R;
+  const minDist = CAMPAIGN_STAR_MIN_DIST;
+  const minDist2 = minDist * minDist;
   const target = CAMPAIGN_STAR_COUNT;
   const pathN = CAMPAIGN_STAR_PATH_COUNT;
 
   const stars = [];
   const chain = [];
-  let x = minX;
-  let y = maxY; // bottom-left
-  const start = { id: 0, x, y, chain: 1, exit: 0 };
-  stars.push(start);
-  chain.push(start);
 
-  for (let i = 1; i < pathN; i++) {
-    const toward = Math.atan2(goalY - y, goalX - x);
-    const ang = toward + ((Math.random() * 2 - 1) * (Math.PI / 6));
-    const placed = campaignStarStepBounced(x, y, ang, step, minX, maxX, minY, maxY);
-    x = placed.x;
-    y = placed.y;
-    const s = { id: stars.length, x, y, chain: 1, exit: 0 };
-    stars.push(s);
-    chain.push(s);
+  function isClear(x, y) {
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      const dx = (+s.x) - x;
+      const dy = (+s.y) - y;
+      if (dx * dx + dy * dy < minDist2) return false;
+    }
+    return true;
   }
-  // Final path star aims at the top-right corner (±30°) once more if we somehow
-  // undershot the path count — already applied per step; mark exit on last chain star.
-  const exitStar = chain[chain.length - 1];
-  exitStar.exit = 1;
 
-  function pushStar(px, py) {
+  /** Place if clear; returns star or null. */
+  function pushStar(px, py, opts) {
     if (stars.length >= target) return null;
     const p = clampCampaignStarPos(px, py, minX, maxX, minY, maxY);
-    const s = { id: stars.length, x: p.x, y: p.y, chain: 0, exit: 0 };
+    if (!isClear(p.x, p.y)) return null;
+    const s = {
+      id: stars.length,
+      x: p.x,
+      y: p.y,
+      chain: opts && opts.chain ? 1 : 0,
+      exit: 0
+    };
     stars.push(s);
     return s;
   }
+
+  /**
+   * Try a candidate, then one more fresh candidate on fail (skip if both too close).
+   * `makeCandidate` returns {x,y} each call.
+   */
+  function tryPlaceTwice(makeCandidate, opts) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const c = makeCandidate();
+      if (!c) continue;
+      const s = pushStar(c.x, c.y, opts);
+      if (s) return s;
+    }
+    return null;
+  }
+
+  // Bottom-left start (always clear).
+  let x = minX;
+  let y = maxY;
+  const start = pushStar(x, y, { chain: 1 });
+  chain.push(start);
+
+  for (let i = 1; i < pathN; i++) {
+    const placed = tryPlaceTwice(() => {
+      const toward = Math.atan2(goalY - y, goalX - x);
+      const ang = toward + ((Math.random() * 2 - 1) * (Math.PI / 6));
+      return campaignStarStepBounced(x, y, ang, step, minX, maxX, minY, maxY);
+    }, { chain: 1 });
+    if (!placed) continue;
+    x = placed.x;
+    y = placed.y;
+    chain.push(placed);
+  }
+  const exitStar = chain[chain.length - 1];
+  if (exitStar) exitStar.exit = 1;
 
   // Phase A: each main-chain star sprouts 1–4 random stars within range 75.
   let frontier = [];
@@ -552,15 +588,21 @@ function rollCampaignStars() {
     const main = chain[i];
     const n = 1 + ((Math.random() * 4) | 0);
     for (let k = 0; k < n && stars.length < target; k++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = Math.random() * branchR;
-      const child = pushStar(main.x + Math.cos(a) * d, main.y + Math.sin(a) * d);
+      const child = tryPlaceTwice(() => {
+        const a = Math.random() * Math.PI * 2;
+        const d = Math.random() * branchR;
+        return {
+          x: main.x + Math.cos(a) * d,
+          y: main.y + Math.sin(a) * d
+        };
+      });
       if (child) frontier.push(child);
     }
   }
 
   // Phase B: children keep 35% sprouting away from nearest chain star until 64.
   let guard = 0;
+  let stall = 0;
   while (stars.length < target && guard++ < 2048) {
     const parents = frontier.length
       ? frontier
@@ -580,10 +622,11 @@ function rollCampaignStars() {
       }
       const n = 1 + ((Math.random() * 4) | 0);
       for (let k = 0; k < n && stars.length < target; k++) {
-        const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
-        const d = Math.random() * branchR;
-        const placed = campaignStarStepBounced(parent.x, parent.y, ang, Math.max(d, 8 * RES_SCALE), minX, maxX, minY, maxY);
-        const child = pushStar(placed.x, placed.y);
+        const child = tryPlaceTwice(() => {
+          const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
+          const d = Math.max(Math.random() * branchR, minDist);
+          return campaignStarStepBounced(parent.x, parent.y, ang, d, minX, maxX, minY, maxY);
+        });
         if (child) {
           next.push(child);
           spawned++;
@@ -592,25 +635,24 @@ function rollCampaignStars() {
     }
     frontier = next;
 
-    if (!spawned && stars.length < target) {
-      // Guaranteed progress toward 64.
+    if (!spawned) {
+      stall++;
+      if (stall >= 8) break; // can't fit more without violating min distance
+      // One more directed attempt from a random parent (still retry-once / skip).
       const parent = parents[(Math.random() * parents.length) | 0];
       const nearest = nearestCampaignChainStar(parent.x, parent.y, chain);
       let away = Math.atan2(parent.y - nearest.y, parent.x - nearest.x);
       if (!Number.isFinite(away)) away = Math.random() * Math.PI * 2;
-      const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
-      const d = (0.35 + Math.random() * 0.65) * branchR;
-      const placed = campaignStarStepBounced(parent.x, parent.y, ang, d, minX, maxX, minY, maxY);
-      const child = pushStar(placed.x, placed.y);
+      const child = tryPlaceTwice(() => {
+        const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
+        const d = (0.45 + Math.random() * 0.55) * branchR;
+        return campaignStarStepBounced(parent.x, parent.y, ang, d, minX, maxX, minY, maxY);
+      });
       frontier = child ? [child] : [];
+      if (child) stall = 0;
+    } else {
+      stall = 0;
     }
-  }
-
-  // Safety: pad remaining slots near the exit if anything still missing.
-  while (stars.length < target) {
-    const a = Math.random() * Math.PI * 2;
-    const d = Math.random() * branchR;
-    pushStar(exitStar.x + Math.cos(a) * d, exitStar.y + Math.sin(a) * d);
   }
 
   return stars;
