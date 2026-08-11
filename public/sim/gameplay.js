@@ -542,7 +542,8 @@ function rollCampaignStars() {
       x: p.x,
       y: p.y,
       chain: opts && opts.chain ? 1 : 0,
-      exit: 0
+      exit: 0,
+      special: 0
     };
     stars.push(s);
     return s;
@@ -678,7 +679,28 @@ function rollCampaignStars() {
     }
   }
 
+  markCampaignSpecialStars(stars);
   return stars;
+}
+
+/** Stars with exactly one neighbor within CAMPAIGN_STAR_SPECIAL_R → special (flag only). */
+function markCampaignSpecialStars(stars) {
+  if (!stars || !stars.length) return;
+  const r2 = CAMPAIGN_STAR_SPECIAL_R * CAMPAIGN_STAR_SPECIAL_R;
+  for (let i = 0; i < stars.length; i++) {
+    const a = stars[i];
+    let n = 0;
+    for (let j = 0; j < stars.length; j++) {
+      if (i === j) continue;
+      const dx = (+a.x) - (+stars[j].x);
+      const dy = (+a.y) - (+stars[j].y);
+      if (dx * dx + dy * dy <= r2) {
+        n++;
+        if (n > 1) break;
+      }
+    }
+    a.special = n === 1 ? 1 : 0;
+  }
 }
 
 /** First campaign stage rocks: 1–2 big, 1–3 medium, 1–3 small. */
@@ -717,7 +739,13 @@ function playerOffPlayfield(p) {
 }
 
 function packCampaignStars(room) {
-  return (room.campaignStars || []).map((s) => [s.id | 0, +s.x, +s.y, s.exit ? 1 : 0]);
+  return (room.campaignStars || []).map((s) => [
+    s.id | 0,
+    +s.x,
+    +s.y,
+    s.exit ? 1 : 0,
+    s.special ? 1 : 0
+  ]);
 }
 
 function packCampaignFuels(room) {

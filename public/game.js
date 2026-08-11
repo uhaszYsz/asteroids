@@ -14521,7 +14521,8 @@ function applyCampaignMapMsg(msg) {
       id: row[0] | 0,
       x: +row[1],
       y: +row[2],
-      exit: !!(row[3] | 0)
+      exit: !!(row[3] | 0),
+      special: !!(row[4] | 0)
     }));
   }
   if (msg.at != null) campaignAtStar = msg.at | 0;
