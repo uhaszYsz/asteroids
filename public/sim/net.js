@@ -135,9 +135,10 @@ function sanitizeInputFrame(frame, lastSeq, maxQueuedSeq) {
   const u = coerceInputBit(frame.u);
   const sp = coerceInputBit(frame.sp);
   const sh = coerceInputBit(frame.sh);
-  if (l < 0 || r < 0 || u < 0 || sp < 0 || sh < 0) return null;
+  const j = coerceInputBit(frame.j);
+  if (l < 0 || r < 0 || u < 0 || sp < 0 || sh < 0 || j < 0) return null;
 
-  return { seq, l, r, u, sp, sh };
+  return { seq, l, r, u, sp, sh, j };
 }
 
 /**
@@ -193,7 +194,8 @@ function enqueuePlayerInputs(ws, pl, frames) {
       r: cleaned.r,
       u: cleaned.u,
       sp: cleaned.sp,
-      sh: cleaned.sh
+      sh: cleaned.sh,
+      j: cleaned.j
     });
     if (cleaned.seq > maxQueuedSeq) maxQueuedSeq = cleaned.seq;
     accepted++;
@@ -273,10 +275,12 @@ function packPresence() {
   }
   let pvpIngame = 0;
   let coopIngame = 0;
+  let campaignCoopIngame = 0;
   for (const room of rooms.values()) {
     const n = room.clients.size;
     if (!n) continue;
-    if (room.coop) coopIngame += n;
+    if (room.campaign && room.coop) campaignCoopIngame += n;
+    else if (room.coop) coopIngame += n;
     else if (!room.practice) pvpIngame += n;
   }
   return {
@@ -284,7 +288,8 @@ function packPresence() {
     online,
     onlineNames: packOnlineNames(),
     pvp: { ingame: pvpIngame, queue: matchQueue.length },
-    coop: { ingame: coopIngame, queue: coopQueue.length }
+    coop: { ingame: coopIngame, queue: coopQueue.length },
+    campaignCoop: { ingame: campaignCoopIngame, queue: campaignCoopQueue.length }
   };
 }
 

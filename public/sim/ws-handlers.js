@@ -254,6 +254,10 @@ wss.on('connection', (ws) => {
         startSoloMode(ws, null);
         return;
       }
+      if (mode === 'campaign' || mode === 'campaignsolo') {
+        startCampaignSolo(ws);
+        return;
+      }
       if (mode === 'continue') {
         const snap = msg.snap || ws.soloSnapshot;
         if (!snap) {
@@ -265,18 +269,26 @@ wss.on('connection', (ws) => {
         startSoloMode(ws, snap);
         return;
       }
-      // Offline wait-waves while the dedicated server matchmakes PvP/coop.
+      // Offline wait-waves while the dedicated server matchmakes PvP/coop/campaign coop.
       if (mode === 'wait') {
-        const kind = String(msg.waitFor || 'pvp').toLowerCase() === 'coop' ? 'coop' : 'pvp';
+        const waitFor = String(msg.waitFor || 'pvp').toLowerCase();
+        let kind = 'pvp';
+        if (waitFor === 'coop') kind = 'coop';
+        else if (waitFor === 'campaigncoop' || waitFor === 'campaign_coop') kind = 'campaignCoop';
         removeFromQueue(ws);
         if (ws.room) leaveRoom(ws);
         ws.queueMode = 'wait';
         ws.waitKind = kind;
-        startPractice(ws, kind);
+        // Usual solo wait-waves while campaign-coop matchmakes (queueKind tracks re-queue).
+        startPractice(ws, kind === 'campaignCoop' ? 'campaignCoop' : kind);
         return;
       }
       if (mode === 'coop') {
         enqueue(ws, 'coop');
+        return;
+      }
+      if (mode === 'campaigncoop' || mode === 'campaign_coop') {
+        enqueue(ws, 'campaignCoop');
         return;
       }
       enqueue(ws, 'pvp');
@@ -526,6 +538,14 @@ wss.on('connection', (ws) => {
         return;
       }
       if (!room.practice) closePvpShop(room, ws.playerId, false);
+      return;
+    }
+
+    if (msg.t === 'campaignTravel') {
+      const room = ws.room;
+      if (!room || !room.campaign || ws.playerId == null) return;
+      if (!allowAction(ws, 'campaignTravel', 200)) return;
+      travelCampaignStar(room, msg.x, msg.y);
       return;
     }
 

@@ -7,10 +7,12 @@ function takePlayerInput(p) {
     p.inp.u = next.u;
     p.inp.sp = next.sp;
     p.inp.sh = next.sh ? 1 : 0;
+    p.inp.j = next.j ? 1 : 0;
     p.lastSeq = next.seq;
   } else {
     // Hold last movement/turn under jitter — never invent shoot pulses.
     p.inp.sp = 0;
+    p.inp.j = 0;
   }
 }
 
@@ -30,8 +32,8 @@ function drainPlayerInputQueue(p) {
  * Seq advances 1:1 with physics so client prediction stays aligned.
  */
 function stepPlayerInputs(room, p) {
-  const frozen = !!(room.shopOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice));
-  const live = !!(room.matchLive && !roomPreRoundFrozen(room));
+  const frozen = !!(room.shopOpen || room.campaignMapOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice));
+  const live = !!(room.matchLive && !roomPreRoundFrozen(room) && !room.campaignMapOpen);
 
   if (frozen) {
     drainPlayerInputQueue(p);
@@ -42,6 +44,7 @@ function stepPlayerInputs(room, p) {
     p.inp.l = 0;
     p.inp.r = 0;
     p.inp.sp = 0;
+    p.inp.j = 0;
     p.bursting = false;
     p.railChargeLeft = 0;
     p.prevX = p.x;
@@ -59,9 +62,14 @@ function stepPlayerInputs(room, p) {
   p.prevY = p.y;
   p.x += p.vx;
   p.y += p.vy;
-  wrap(p);
+  if (room.campaign && p.jumping) {
+    if (playerOffPlayfield(p)) openCampaignMap(room);
+  } else {
+    wrap(p);
+  }
   clearGodmodeIfLeftSpawn(room, p);
   p.inp.sp = 0;
+  p.inp.j = 0;
 }
 
 function createInitialAsteroids() {
@@ -112,6 +120,11 @@ function createRoom(opts) {
     waveClearLeft: 0,
     /** Solo/coop boss roster for waves 10/20/30 — rolled once at match start. */
     bossPlan: null,
+    /** Campaign mode: star map + hyperspace jump between stages. */
+    campaign: false,
+    campaignStars: null,
+    campaignStarId: 0,
+    campaignMapOpen: false,
     enemies: [],
     nextEnemyId: 1,
     enemySnapLeft: ENEMY_SNAP_INTERVAL,
@@ -621,8 +634,8 @@ function stepRoom(room) {
   if (room.matchLive && !roomPreRoundFrozen(room)) processPendingRailBounces(room);
   // Move asteroids first, rebuild spatial hash once, then bullets + collisions
   // (avoids a second rebuild inside updateBullets).
-  // Pre-round 3-2-1 / PvP shop: freeze the field in place.
-  if (roomPreRoundFrozen(room)) {
+  // Pre-round 3-2-1 / PvP shop / campaign map: freeze the field in place.
+  if (roomPreRoundFrozen(room) || (room.campaign && room.campaignMapOpen)) {
     clearGodmodeSpawnZones(room);
     rebuildAsteroidSpatialHash(room);
     pushPoseHistory(room);
@@ -874,6 +887,14 @@ function queueStatusFor(kind) {
   if (kind === 'coop') {
     return { t: 'queued', mode: 'coop', waiting: coopQueue.length, need: PLAYERS_PER_MATCH };
   }
+  if (kind === 'campaignCoop') {
+    return {
+      t: 'queued',
+      mode: 'campaignCoop',
+      waiting: campaignCoopQueue.length,
+      need: PLAYERS_PER_MATCH
+    };
+  }
   return { t: 'queued', mode: 'pvp', waiting: matchQueue.length, need: PLAYERS_PER_MATCH };
 }
 
@@ -882,8 +903,10 @@ function queueStatus() {
 }
 
 function notifyQueueKind(kind) {
-  const q = kind === 'coop' ? coopQueue : matchQueue;
-  const msg = queueStatusFor(kind);
+  const q = kind === 'coop' ? coopQueue
+    : kind === 'campaignCoop' ? campaignCoopQueue
+    : matchQueue;
+  const msg = queueStatusFor(kind === 'campaignCoop' ? 'campaignCoop' : kind === 'coop' ? 'coop' : 'pvp');
   for (const ws of q) send(ws, msg);
   broadcastPresence();
 }
@@ -905,6 +928,12 @@ function removeFromQueue(ws) {
     coopQueue.splice(j, 1);
     changed = true;
     notifyQueueKind('coop');
+  }
+  const k = campaignCoopQueue.indexOf(ws);
+  if (k >= 0) {
+    campaignCoopQueue.splice(k, 1);
+    changed = true;
+    notifyQueueKind('campaignCoop');
   }
   if (ws.state === 'queued' || ws.state === 'practice') ws.state = 'lobby';
   if (changed) ws.queueMode = null;
@@ -1333,7 +1362,27 @@ function tryMatchmakeCoop() {
   }
 }
 
+function tryMatchmakeCampaignCoop() {
+  while (campaignCoopQueue.length >= PLAYERS_PER_MATCH) {
+    const members = campaignCoopQueue.splice(0, PLAYERS_PER_MATCH);
+    notifyQueueKind('campaignCoop');
+    startCampaignCoop(members);
+  }
+}
+
 function enqueue(ws, mode) {
+  if (mode === 'campaignCoop') {
+    if (ws.state === 'playing') return;
+    removeFromQueue(ws);
+    if (ws.room) leaveRoom(ws);
+    ws.queueMode = 'campaignCoop';
+    ws.state = 'queued';
+    campaignCoopQueue.push(ws);
+    send(ws, queueStatusFor('campaignCoop'));
+    notifyQueueKind('campaignCoop');
+    tryMatchmakeCampaignCoop();
+    return;
+  }
   const m = mode === 'coop' ? 'coop' : 'pvp';
   if (ws.state === 'playing') return;
   if (tryStartWithTeam(ws, m)) return;
@@ -1378,6 +1427,137 @@ function startSoloMode(ws, snap) {
   ws.queueMode = null;
   ws.waitKind = null;
   startPractice(ws, null, { soloOnly: true, snap: snap || null });
+}
+
+function startCampaignSolo(ws) {
+  removeFromQueue(ws);
+  if (ws.room) leaveRoom(ws);
+  ws.queueMode = null;
+  ws.waitKind = null;
+  const room = createRoom({ deferStart: true });
+  room.practice = true;
+  room.matchLive = true;
+  room.coop = false;
+  room.soloOnly = true;
+  room.campaign = true;
+  room.queueKind = null;
+  room.wave = 1;
+  room.waveClearLeft = 0;
+  room.pendingBigSpawns = [];
+  room.enemies = [];
+  room.nextEnemyId = 1;
+  room.shopDoneIds = new Set();
+  room.campaignStars = rollCampaignStars();
+  room.campaignStarId = 0;
+  room.campaignMapOpen = false;
+
+  const id = nextPlayerId++;
+  const p = spawnPlayer(id, ws.displayName, {
+    playerColor: ws.playerColor,
+    shootColor: ws.shootColor,
+    thrustColor: ws.thrustColor,
+    shipId: ws.shipId
+  }, room);
+  p.lives = SOLO_LIVES;
+  p.hp = SOLO_MAX_HP;
+  p.unlockedWeapons = freshUnlockedWeapons();
+  p.accountKey = ws.accountKey || null;
+  room.players.set(id, p);
+  room.clients.add(ws);
+  ws.room = room;
+  ws.playerId = id;
+  ws.state = 'practice';
+
+  beginCampaignStage(room);
+  initPauseBudgets(room);
+  sendWelcome(ws, room, p, {
+    waiting: 0,
+    need: 1,
+    wave: room.wave,
+    lives: p.lives,
+    soloOnly: 1,
+    campaign: 1,
+    mode: 'campaign',
+    at: room.campaignStarId | 0
+  });
+  broadcastPresence();
+  console.log(`Campaign solo room ${room.id}`);
+}
+
+function startCampaignCoop(members) {
+  for (const ws of members) {
+    leaveRoomSavingSnapshot(ws);
+  }
+  const room = createRoom({ deferStart: true });
+  room.practice = true;
+  room.coop = true;
+  room.soloOnly = false;
+  room.campaign = true;
+  room.queueKind = null;
+  room.matchLive = true;
+  room.wave = 1;
+  room.waveClearLeft = 0;
+  room.pendingBigSpawns = [];
+  room.enemies = [];
+  room.nextEnemyId = 1;
+  room.shopDoneIds = new Set();
+  room.campaignStars = rollCampaignStars();
+  room.campaignStarId = 0;
+  room.campaignMapOpen = false;
+
+  for (let i = 0; i < members.length; i++) {
+    const ws = members[i];
+    const id = nextPlayerId++;
+    const p = spawnPlayer(id, ws.displayName, {
+      playerColor: ws.playerColor,
+      shootColor: ws.shootColor,
+      thrustColor: ws.thrustColor,
+      shipId: ws.shipId
+    }, room);
+    p.lives = SOLO_LIVES;
+    p.hp = SOLO_MAX_HP;
+    p.unlockedWeapons = freshUnlockedWeapons();
+    const pose = playerSpawnPose(id, room);
+    p.x = pose.x;
+    p.y = pose.y;
+    p.angle = pose.angle;
+    p.accountKey = ws.accountKey || null;
+    room.players.set(id, p);
+    room.clients.add(ws);
+    ws.room = room;
+    ws.playerId = id;
+    ws.state = 'practice';
+    ws.queueMode = null;
+  }
+  beginCampaignStage(room);
+  initPauseBudgets(room);
+  for (const ws of members) {
+    const p = room.players.get(ws.playerId);
+    if (!p) continue;
+    sendWelcome(ws, room, p, {
+      waiting: 0,
+      need: 2,
+      wave: room.wave,
+      lives: p.lives,
+      coop: 1,
+      campaign: 1,
+      mode: 'campaign',
+      at: room.campaignStarId | 0
+    });
+  }
+  roomBroadcast(room, {
+    t: 'roster',
+    room: room.id,
+    tick: room.tick,
+    st: Date.now(),
+    players: packSnap(room).players,
+    scores: packScoreboard(room),
+    names: packRosterNames(room),
+    colors: packPlayerColors(room),
+    scoreToWin: SCORE_TO_WIN
+  });
+  console.log(`Campaign coop room ${room.id} with ${members.length} players`);
+  broadcastPresence();
 }
 
 function leaveRoom(ws) {

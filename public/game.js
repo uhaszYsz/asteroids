@@ -11979,7 +11979,11 @@ function precisionAimLight() {
   return performance.now() < touchAimLightUntil;
 }
 function shootHeld() {
+  if (campaignMode) return !!(keys.Space || spaceLatch || touchCtl.fire);
   return !!(keys.Space || keys.Enter || spaceLatch || enterLatch || touchCtl.fire);
+}
+function jumpHeld() {
+  return !!(campaignMode && !campaignMapOpen && (keys.Enter || enterLatch));
 }
 
 const GAME_KEYS = new Set([
@@ -12470,8 +12474,12 @@ addEventListener('keydown', e => {
   }
   if (e.code === 'Enter' && !enterLatch) {
     enterLatch = true;
-    armShootLagProbe();
-    triggerShoot();
+    if (campaignMapOpen) {
+      confirmCampaignTravel();
+    } else if (!campaignMode) {
+      armShootLagProbe();
+      triggerShoot();
+    }
   }
 });
 addEventListener('keyup', e => {
@@ -13591,16 +13599,29 @@ let soloSnapshot = null;
 let selectedPlayMode = null;
 let coopMode = false;
 let soloOnlyMode = false;
+let campaignMode = false;
+let campaignMapOpen = false;
+let campaignStars = [];
+let campaignAtStar = 0;
+let campaignJumpCharge = 0;
+let campaignJumping = false;
+let campaignMapPointer = { x: W * 0.5, y: H * 0.5 };
 
 const modePanelEl = document.getElementById('mode-panel');
 const modeCloseBtn = document.getElementById('mode-close-btn');
 const modePvpBtn = document.getElementById('mode-pvp-btn');
 const modeCoopBtn = document.getElementById('mode-coop-btn');
 const modeSoloBtn = document.getElementById('mode-solo-btn');
+const modeCampaignSoloBtn = document.getElementById('mode-campaign-solo-btn');
+const modeCampaignCoopBtn = document.getElementById('mode-campaign-coop-btn');
 const modeContinueBtn = document.getElementById('mode-continue-btn');
 const modeOnlineEl = document.getElementById('mode-online');
 const modePvpMetaEl = document.getElementById('mode-pvp-meta');
 const modeCoopMetaEl = document.getElementById('mode-coop-meta');
+const modeCampaignCoopMetaEl = document.getElementById('mode-campaign-coop-meta');
+const campaignMapEl = document.getElementById('campaign-map');
+const campaignMapCanvas = document.getElementById('campaign-map-c');
+const campaignMapCtx = campaignMapCanvas ? campaignMapCanvas.getContext('2d') : null;
 const waitBannerEl = document.getElementById('wait-banner');
 const soloOverEl = document.getElementById('solo-over');
 const soloOverWaveEl = document.getElementById('solo-over-wave');
@@ -14380,9 +14401,14 @@ function applyPresence(msg) {
   const pvpQ = (msg.pvp && msg.pvp.queue) | 0;
   const coopIn = (msg.coop && msg.coop.ingame) | 0;
   const coopQ = (msg.coop && msg.coop.queue) | 0;
+  const campIn = (msg.campaignCoop && msg.campaignCoop.ingame) | 0;
+  const campQ = (msg.campaignCoop && msg.campaignCoop.queue) | 0;
   if (modeOnlineEl) modeOnlineEl.textContent = 'Players online: ' + online;
   if (modePvpMetaEl) modePvpMetaEl.textContent = 'ingame: ' + pvpIn + ' · in queue: ' + pvpQ;
   if (modeCoopMetaEl) modeCoopMetaEl.textContent = 'ingame: ' + coopIn + ' · in queue: ' + coopQ;
+  if (modeCampaignCoopMetaEl) {
+    modeCampaignCoopMetaEl.textContent = 'ingame: ' + campIn + ' · in queue: ' + campQ;
+  }
   if (Array.isArray(msg.onlineNames)) {
     lbOnlineSet = new Set(msg.onlineNames.map(String));
     if (leaderboardPanelEl && leaderboardPanelEl.classList.contains('open')) {
@@ -14395,6 +14421,153 @@ function applyPresence(msg) {
 function requestPresence() {
   if (!ws || ws.readyState !== 1) return;
   try { ws.send(JSON.stringify({ t: 'presence' })); } catch (_) {}
+}
+
+function hideCampaignMap() {
+  campaignMapOpen = false;
+  if (campaignMapEl) {
+    campaignMapEl.classList.remove('open');
+    campaignMapEl.setAttribute('aria-hidden', 'true');
+  }
+  hideCampaignJumpHud();
+}
+
+function showCampaignMap() {
+  campaignMapOpen = true;
+  if (campaignMapEl) {
+    campaignMapEl.classList.add('open');
+    campaignMapEl.setAttribute('aria-hidden', 'false');
+  }
+  redrawCampaignMap();
+}
+
+function applyCampaignMapMsg(msg) {
+  if (!msg) return;
+  if (Array.isArray(msg.stars)) {
+    campaignStars = msg.stars.map((row) => ({
+      id: row[0] | 0,
+      x: +row[1],
+      y: +row[2]
+    }));
+  }
+  if (msg.at != null) campaignAtStar = msg.at | 0;
+  if (msg.open) {
+    campaignJumpCharge = 0;
+    campaignJumping = false;
+    showCampaignMap();
+  } else {
+    hideCampaignMap();
+  }
+}
+
+function campaignMapCanvasToWorld(clientX, clientY) {
+  if (!campaignMapCanvas) return { x: W * 0.5, y: H * 0.5 };
+  const r = campaignMapCanvas.getBoundingClientRect();
+  return {
+    x: ((clientX - r.left) / Math.max(1, r.width)) * W,
+    y: ((clientY - r.top) / Math.max(1, r.height)) * H
+  };
+}
+
+function pickLocalCampaignStar(x, y) {
+  const r = 70 * RES_SCALE;
+  let nearest = null;
+  let nearestD = Infinity;
+  let inRange = null;
+  let inRangeD = Infinity;
+  for (let i = 0; i < campaignStars.length; i++) {
+    const s = campaignStars[i];
+    const d = Math.hypot(s.x - x, s.y - y);
+    if (d < nearestD) {
+      nearestD = d;
+      nearest = s;
+    }
+    if (d <= r && d < inRangeD) {
+      inRangeD = d;
+      inRange = s;
+    }
+  }
+  return inRange || nearest;
+}
+
+function redrawCampaignMap() {
+  if (!campaignMapCtx || !campaignMapCanvas) return;
+  const ctx = campaignMapCtx;
+  const cw = campaignMapCanvas.width;
+  const ch = campaignMapCanvas.height;
+  ctx.fillStyle = '#05070f';
+  ctx.fillRect(0, 0, cw, ch);
+  // soft nebula
+  const g = ctx.createRadialGradient(cw * 0.35, ch * 0.4, 10, cw * 0.5, ch * 0.5, cw * 0.55);
+  g.addColorStop(0, 'rgba(40, 70, 120, 0.25)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, cw, ch);
+
+  const sx = cw / W;
+  const sy = ch / H;
+  const pickR = 70 * RES_SCALE;
+  const hover = pickLocalCampaignStar(campaignMapPointer.x, campaignMapPointer.y);
+
+  for (let i = 0; i < campaignStars.length; i++) {
+    const s = campaignStars[i];
+    const px = s.x * sx;
+    const py = s.y * sy;
+    const isAt = (s.id | 0) === (campaignAtStar | 0);
+    const isHover = hover && (hover.id | 0) === (s.id | 0);
+    const d = Math.hypot(s.x - campaignMapPointer.x, s.y - campaignMapPointer.y);
+    const inPick = d <= pickR;
+    ctx.beginPath();
+    ctx.arc(px, py, isAt ? 5.5 : (isHover ? 4.5 : 2.8), 0, Math.PI * 2);
+    ctx.fillStyle = isAt ? '#ffe08a' : (inPick ? '#d8f0ff' : '#9aa8c0');
+    ctx.fill();
+    if (isAt || isHover) {
+      ctx.beginPath();
+      ctx.arc(px, py, isAt ? 12 : 10, 0, Math.PI * 2);
+      ctx.strokeStyle = isAt ? 'rgba(255, 220, 120, 0.7)' : 'rgba(160, 210, 255, 0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
+  // pointer + pick radius
+  ctx.beginPath();
+  ctx.arc(campaignMapPointer.x * sx, campaignMapPointer.y * sy, pickR * sx, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(120, 180, 255, 0.25)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(campaignMapPointer.x * sx, campaignMapPointer.y * sy, 3, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+}
+
+function confirmCampaignTravel() {
+  if (!campaignMapOpen || !ws || ws.readyState !== 1) return;
+  try {
+    ws.send(JSON.stringify({
+      t: 'campaignTravel',
+      x: campaignMapPointer.x,
+      y: campaignMapPointer.y
+    }));
+  } catch (_) {}
+}
+
+if (campaignMapCanvas) {
+  campaignMapCanvas.addEventListener('mousemove', (e) => {
+    if (!campaignMapOpen) return;
+    const p = campaignMapCanvasToWorld(e.clientX, e.clientY);
+    campaignMapPointer.x = p.x;
+    campaignMapPointer.y = p.y;
+    redrawCampaignMap();
+  });
+  campaignMapCanvas.addEventListener('click', (e) => {
+    if (!campaignMapOpen) return;
+    const p = campaignMapCanvasToWorld(e.clientX, e.clientY);
+    campaignMapPointer.x = p.x;
+    campaignMapPointer.y = p.y;
+    confirmCampaignTravel();
+  });
 }
 
 function applyTeamState(msg) {
@@ -14452,8 +14625,8 @@ function startPlayMode(mode) {
     ? remoteWs
     : (ws && !ws.__local && ws.readyState === 1 ? ws : null);
   const onlineOk = !!(onlineSock && onlineSock.readyState === 1);
-  const wantSolo = mode === 'solo' || mode === 'continue';
-  const wantOnline = mode === 'pvp' || mode === 'coop';
+  const wantSolo = mode === 'solo' || mode === 'continue' || mode === 'campaign';
+  const wantOnline = mode === 'pvp' || mode === 'coop' || mode === 'campaignCoop';
   if (wantOnline && !onlineOk) return;
   if (wantSolo && !localSoloAvailable() && !onlineOk) return;
   closeModePanel();
@@ -14468,6 +14641,8 @@ function startPlayMode(mode) {
       const snap = soloSnapshot || loadSoloSnapshot();
       if (!snap) return;
       ws.send(JSON.stringify({ t: 'queue', mode: 'continue', name, snap }));
+    } else if (mode === 'campaign') {
+      ws.send(JSON.stringify({ t: 'queue', mode: 'campaign', name }));
     } else {
       ws.send(JSON.stringify({ t: 'queue', mode, name }));
     }
@@ -14484,7 +14659,7 @@ function startPlayMode(mode) {
     return;
   }
 
-  // PvP / coop: queue on dedicated server, play wait-waves on local host.
+  // PvP / coop / campaign coop: queue on dedicated server, play wait-waves on local host.
   if (usingLocalSolo) restoreRemoteSocketAfterSolo();
   if (!onlineSock || onlineSock.readyState !== 1) return;
   remoteWs = onlineSock;
@@ -14508,7 +14683,8 @@ function startPlayMode(mode) {
     if (!ws || !ws.__local || ws.readyState !== 1) return;
     // Wait-waves run on local host — apply saved appearance before welcome.
     syncAppearanceToSocket(ws);
-    ws.send(JSON.stringify({ t: 'queue', mode: 'wait', waitFor: mode, name }));
+    const waitFor = mode === 'campaignCoop' ? 'campaignCoop' : mode;
+    ws.send(JSON.stringify({ t: 'queue', mode: 'wait', waitFor, name }));
   }).catch((err) => {
     console.error(err);
     // Still queued online — just no local wait-waves.
@@ -14998,6 +15174,8 @@ if (modePanelEl) {
 if (modePvpBtn) modePvpBtn.addEventListener('click', (e) => { e.preventDefault(); startPlayMode('pvp'); });
 if (modeCoopBtn) modeCoopBtn.addEventListener('click', (e) => { e.preventDefault(); startPlayMode('coop'); });
 if (modeSoloBtn) modeSoloBtn.addEventListener('click', (e) => { e.preventDefault(); startPlayMode('solo'); });
+if (modeCampaignSoloBtn) modeCampaignSoloBtn.addEventListener('click', (e) => { e.preventDefault(); startPlayMode('campaign'); });
+if (modeCampaignCoopBtn) modeCampaignCoopBtn.addEventListener('click', (e) => { e.preventDefault(); startPlayMode('campaignCoop'); });
 if (modeContinueBtn) modeContinueBtn.addEventListener('click', (e) => { e.preventDefault(); startPlayMode('continue'); });
 soloSnapshot = loadSoloSnapshot();
 syncModeContinueUi();
@@ -16494,6 +16672,13 @@ function resetMatchState() {
   matchReadySent = false;
   coopMode = false;
   soloOnlyMode = false;
+  campaignMode = false;
+  campaignMapOpen = false;
+  campaignStars = [];
+  campaignJumpCharge = 0;
+  campaignJumping = false;
+  hideCampaignMap();
+  hideCampaignJumpHud();
   predReady = false;
   pendingInputs = [];
   frameHistory = [];
@@ -20853,10 +21038,15 @@ function applyInputTo(o, inp, opts) {
     o.vy += Math.sin(o.angle) * THRUST;
   }
   applyLocalGunshipMagnetPull(o);
-  limitPlayerSpeed(o);
+  if (!(campaignMode && campaignJumping)) limitPlayerSpeed(o);
+  if (campaignMode && campaignJumping) {
+    const accel = 0.4 * RES_SCALE;
+    o.vx += Math.cos(o.angle) * accel;
+    o.vy += Math.sin(o.angle) * accel;
+  }
   o.x += o.vx;
   o.y += o.vy;
-  wrapEntity(o);
+  if (!(campaignMode && campaignJumping)) wrapEntity(o);
   // Leave shared spawn zone → godmode ends for everyone (matches server).
   if (o.godLeft > 0 && opts && opts.localCollide && o === player && myId != null) {
     const spawn = sharedSpawnCenterLocal();
@@ -20892,7 +21082,8 @@ function getInput() {
     r: turnRight() ? 1 : 0,
     u: thrustUp() ? 1 : 0,
     sp: shootPulse ? 1 : 0,
-    sh: precisionTurn() ? 1 : 0
+    sh: precisionTurn() ? 1 : 0,
+    j: jumpHeld() ? 1 : 0
   };
 }
 
@@ -20917,7 +21108,7 @@ function sendPendingInputs() {
   ws.send(JSON.stringify({
     t: 'in',
     frames: frames.map(f => ({
-      seq: f.seq, l: f.l, r: f.r, u: f.u, sp: f.sp, sh: f.sh
+      seq: f.seq, l: f.l, r: f.r, u: f.u, sp: f.sp, sh: f.sh, j: f.j | 0
     }))
   }));
   const sentHi = frames[frames.length - 1].seq;
@@ -20976,9 +21167,9 @@ function predictTick(forceShoot) {
     return;
   }
 
-  // PvP intro / 3-2-1 / shop: do not locally predict movement.
-  if (!matchLive || (preRoundCd | 0) > 0 || (soloShopOpen && pvpShopMode)) {
-    const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sh: 0 };
+  // PvP intro / 3-2-1 / shop / campaign map: do not locally predict movement.
+  if (!matchLive || (preRoundCd | 0) > 0 || (soloShopOpen && pvpShopMode) || campaignMapOpen) {
+    const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sh: 0, j: 0 };
     pendingInputs.push(frame);
     shedPendingInputHistory();
     rememberFrame(frame);
@@ -21003,7 +21194,7 @@ function predictTick(forceShoot) {
     }
     const inp = getInput();
     if (forceShoot) inp.sp = 1;
-    const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh };
+    const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh, j: inp.j | 0 };
     pendingInputs.push(frame);
     shedPendingInputHistory();
     rememberFrame(frame);
@@ -21029,7 +21220,7 @@ function predictTick(forceShoot) {
   }
   const inp = getInput();
   if (forceShoot) inp.sp = 1;
-  const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh };
+  const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh, j: inp.j | 0 };
   pendingInputs.push(frame);
   shedPendingInputHistory();
   rememberFrame(frame);
@@ -21885,6 +22076,41 @@ function render() {
   drawFxLabels(now);
   drawWaveBanner(now);
   if (soloShopOpen) updateShopPreviews();
+  drawCampaignJumpChargeHud();
+}
+
+function drawCampaignJumpChargeHud() {
+  if (!campaignMode || campaignMapOpen || (!campaignJumpCharge && !campaignJumping)) {
+    hideCampaignJumpHud();
+    return;
+  }
+  // Reuse 2d overlay via CSS HUD if present; otherwise skip.
+  let el = document.getElementById('campaign-jump-hud');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'campaign-jump-hud';
+    el.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:7;width:180px;height:8px;background:rgba(20,30,45,0.85);border:1px solid rgba(140,180,220,0.45);pointer-events:none;';
+    const fill = document.createElement('div');
+    fill.id = 'campaign-jump-fill';
+    fill.style.cssText = 'height:100%;width:0%;background:linear-gradient(90deg,#6cf,#9ef);';
+    el.appendChild(fill);
+    document.body.appendChild(el);
+  }
+  const fill = document.getElementById('campaign-jump-fill');
+  const max = 5 * TPS;
+  const pct = campaignJumping ? 100 : Math.min(100, ((campaignJumpCharge | 0) / max) * 100);
+  el.style.display = 'block';
+  if (fill) {
+    fill.style.width = pct + '%';
+    fill.style.background = campaignJumping
+      ? 'linear-gradient(90deg,#ffe08a,#fff0c0)'
+      : 'linear-gradient(90deg,#6cf,#9ef)';
+  }
+}
+
+function hideCampaignJumpHud() {
+  const el = document.getElementById('campaign-jump-hud');
+  if (el) el.style.display = 'none';
 }
 
 function configuredServer() {
@@ -22044,14 +22270,24 @@ function enterGameFromWelcome(msg) {
   resumeBlendUntil = 0;
   coopMode = !!msg.coop;
   soloOnlyMode = !!(msg.soloOnly || msg.mode === 'solo' || msg.mode === 'continue');
+  campaignMode = !!(msg.campaign || msg.mode === 'campaign');
+  campaignMapOpen = false;
+  campaignStars = [];
+  campaignAtStar = msg.at != null ? (msg.at | 0) : 0;
+  campaignJumpCharge = 0;
+  campaignJumping = false;
+  hideCampaignMap();
   setPracticeWaiting(!!msg.practice);
   refreshGridStaticPins();
   if (msg.lives != null) setSoloLives(msg.lives);
   else if (msg.practice) setSoloLives(3);
   else setSoloLives(0);
-  if (msg.wave != null) {
+  if (msg.wave != null && !msg.campaign) {
     soloWave = msg.wave | 0;
     startWaveBanner(soloWave);
+  } else if (msg.campaign && msg.wave != null) {
+    soloWave = msg.wave | 0;
+    clearWaveBanner();
   }
   if (msg.coins != null) {
     setLocalCoins(msg.coins);
@@ -22596,7 +22832,13 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'welcome') {
       // Real online PvP/coop only — never promote local wait-wave practice welcomes.
-      if (waitingOnlineQueue && !msg.practice && (msg.waitingReady || msg.coop)) {
+      if (waitingOnlineQueue && !msg.practice && (msg.waitingReady || msg.coop || msg.campaign)) {
+        promoteOnlineMatchFromWait(msg);
+        return;
+      }
+      // Campaign coop welcomes include practice:1 — promote from background path usually;
+      // also catch when welcome lands on the active socket.
+      if (waitingOnlineQueue && msg.campaign && msg.coop) {
         promoteOnlineMatchFromWait(msg);
         return;
       }
@@ -22728,6 +22970,28 @@ function handleWsMessage(e) {
       if (soloShopOpen && soloShopState) {
         soloShopState.lives = soloLives;
         renderSoloShop();
+      }
+      return;
+    }
+    if (msg.t === 'campaignMap' && inGame) {
+      applyCampaignMapMsg(msg);
+      return;
+    }
+    if (msg.t === 'campaignStage' && inGame) {
+      if (msg.at != null) campaignAtStar = msg.at | 0;
+      campaignJumpCharge = 0;
+      campaignJumping = false;
+      hideCampaignMap();
+      if (msg.n != null) {
+        soloWave = msg.n | 0;
+        // No wave banner for campaign stages — quiet continue.
+      }
+      return;
+    }
+    if (msg.t === 'campJump' && inGame) {
+      if ((msg.id | 0) === (myId | 0) || msg.id == null) {
+        campaignJumpCharge = msg.c | 0;
+        campaignJumping = !!(msg.j | 0);
       }
       return;
     }
@@ -23310,7 +23574,7 @@ function handleRemoteBackgroundMsg(bg) {
   }
   if (bg.t === 'welcome') {
     // Only real matches — not anything else on the remote socket.
-    if (bg.waitingReady || bg.coop) promoteOnlineMatchFromWait(bg);
+    if (bg.waitingReady || bg.coop || bg.campaign) promoteOnlineMatchFromWait(bg);
     return;
   }
   if (bg.t === 'queueErr') {
@@ -23341,7 +23605,12 @@ function syncModeOnlineButtons() {
     modeCoopBtn.disabled = !online;
     modeCoopBtn.title = online ? '' : 'Requires online server';
   }
+  if (modeCampaignCoopBtn) {
+    modeCampaignCoopBtn.disabled = !online;
+    modeCampaignCoopBtn.title = online ? '' : 'Requires online server';
+  }
   if (modeSoloBtn) modeSoloBtn.disabled = false;
+  if (modeCampaignSoloBtn) modeCampaignSoloBtn.disabled = false;
   if (modeContinueBtn) {
     const snap = soloSnapshot || loadSoloSnapshot();
     modeContinueBtn.disabled = !snap;

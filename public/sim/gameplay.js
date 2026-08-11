@@ -441,6 +441,171 @@ function createSoloWaveAsteroids(wave) {
   return list;
 }
 
+/** 40 stars; index 0 is fixed bottom-left start. */
+function rollCampaignStars() {
+  const margin = 36 * RES_SCALE;
+  const stars = [{ id: 0, x: margin, y: H - margin }];
+  for (let i = 1; i < CAMPAIGN_STAR_COUNT; i++) {
+    stars.push({
+      id: i,
+      x: margin + Math.random() * Math.max(1, W - 2 * margin),
+      y: margin + Math.random() * Math.max(1, H - 2 * margin)
+    });
+  }
+  return stars;
+}
+
+/** First campaign stage rocks: 1–2 big, 1–3 medium, 1–3 small. */
+function createCampaignStageAsteroids() {
+  const list = [];
+  const bigN = 1 + ((Math.random() * 2) | 0);
+  const medN = 1 + ((Math.random() * 3) | 0);
+  const smN = 1 + ((Math.random() * 3) | 0);
+  for (let i = 0; i < bigN; i++) {
+    list.push(makeAsteroid({ size: 'big', offscreen: true, allowSpecial: false, allowHuge: false }));
+  }
+  for (let i = 0; i < medN; i++) {
+    list.push(makeAsteroid({ size: 'medium', offscreen: true, allowSpecial: false }));
+  }
+  for (let i = 0; i < smN; i++) {
+    list.push(makeAsteroid({ size: 'small', offscreen: true, allowSpecial: false }));
+  }
+  return list;
+}
+
+function clearCampaignJump(p) {
+  if (!p) return;
+  p.jumpCharge = 0;
+  p.jumping = false;
+}
+
+function clearAllCampaignJumps(room) {
+  if (!room) return;
+  for (const p of room.players.values()) clearCampaignJump(p);
+}
+
+function playerOffPlayfield(p) {
+  return !p || p.x < 0 || p.x > W || p.y < 0 || p.y > H;
+}
+
+function packCampaignStars(room) {
+  return (room.campaignStars || []).map((s) => [s.id | 0, +s.x, +s.y]);
+}
+
+function broadcastCampaignMap(room, open) {
+  if (!room || !room.campaign) return;
+  roomBroadcast(room, {
+    t: 'campaignMap',
+    open: open ? 1 : 0,
+    at: room.campaignStarId | 0,
+    stars: packCampaignStars(room)
+  });
+}
+
+function openCampaignMap(room) {
+  if (!room || !room.campaign || room.campaignMapOpen) return;
+  room.campaignMapOpen = true;
+  clearAllCampaignJumps(room);
+  for (const p of room.players.values()) {
+    if (p.bot) continue;
+    p.vx = 0;
+    p.vy = 0;
+    p.av = 0;
+    p.inputQueue = [];
+  }
+  broadcastCampaignMap(room, true);
+}
+
+function pickCampaignStarAt(room, x, y) {
+  const stars = room.campaignStars || [];
+  if (!stars.length) return null;
+  let nearest = stars[0];
+  let nearestD = Infinity;
+  let inRange = null;
+  let inRangeD = Infinity;
+  const r = CAMPAIGN_STAR_PICK_R;
+  for (let i = 0; i < stars.length; i++) {
+    const s = stars[i];
+    const d = Math.hypot((+s.x) - x, (+s.y) - y);
+    if (d < nearestD) {
+      nearestD = d;
+      nearest = s;
+    }
+    if (d <= r && d < inRangeD) {
+      inRangeD = d;
+      inRange = s;
+    }
+  }
+  return inRange || nearest;
+}
+
+function beginCampaignStage(room, opts) {
+  if (!room || !room.campaign) return;
+  opts = opts || {};
+  room.campaignMapOpen = false;
+  room.waveClearLeft = 0;
+  room.pendingBigSpawns = [];
+  room.wave = Math.max(1, (room.wave | 0) || 1);
+  clearAllCampaignJumps(room);
+  for (const a of room.asteroids) {
+    emitAsteroidDead(room, a.aid, true);
+  }
+  setAsteroidsList(room, createCampaignStageAsteroids());
+  for (const a of room.asteroids) emitAsteroidFire(room, a);
+  clearSoloEnemies(room, true);
+  if (room.bullets && room.bullets.length) {
+    for (const b of room.bullets) roomBroadcast(room, { t: 'bd', id: b.id });
+    room.bullets.length = 0;
+  }
+  if (room.pendingRailBounces) room.pendingRailBounces.length = 0;
+  placePlayersAtWaveStart(room, room.coop ? null : { center: true });
+  broadcastCampaignMap(room, false);
+  roomBroadcast(room, {
+    t: 'campaignStage',
+    n: room.wave | 0,
+    at: room.campaignStarId | 0,
+    center: 1
+  });
+}
+
+function travelCampaignStar(room, x, y) {
+  if (!room || !room.campaign || !room.campaignMapOpen) return { ok: 0, err: 'nomap' };
+  const star = pickCampaignStarAt(room, +x, +y);
+  if (!star) return { ok: 0, err: 'nostar' };
+  room.campaignStarId = star.id | 0;
+  room.wave = (room.wave | 0) + 1;
+  beginCampaignStage(room);
+  return { ok: 1, at: room.campaignStarId | 0 };
+}
+
+/** Hold Enter to charge; when full, boost with aim-dir accel each tick (no edge wrap). */
+function tickCampaignPlayerJump(room, p) {
+  if (!room || !room.campaign || room.campaignMapOpen || !p || (p.hp | 0) <= 0) return;
+  if (p.jumping) {
+    p.vx += lenDirX(CAMPAIGN_JUMP_ACCEL, p.angle);
+    p.vy += lenDirY(CAMPAIGN_JUMP_ACCEL, p.angle);
+    return;
+  }
+  if (p.inp && (p.inp.j | 0)) {
+    p.jumpCharge = (p.jumpCharge | 0) + 1;
+    if ((p.jumpCharge | 0) >= CAMPAIGN_JUMP_CHARGE_TICKS) {
+      p.jumping = true;
+      p.jumpCharge = CAMPAIGN_JUMP_CHARGE_TICKS;
+    }
+  } else if (!p.jumping) {
+    p.jumpCharge = 0;
+  }
+  const prevC = p._prevJumpCharge;
+  const prevJ = p._prevJumping ? 1 : 0;
+  const nowC = p.jumpCharge | 0;
+  const nowJ = p.jumping ? 1 : 0;
+  if (prevC !== nowC || prevJ !== nowJ) {
+    p._prevJumpCharge = nowC;
+    p._prevJumping = !!p.jumping;
+    roomBroadcast(room, { t: 'campJump', id: p.id, c: nowC, j: nowJ });
+  }
+}
+
 function broadcastSoloWave(room, opts) {
   roomBroadcast(room, {
     t: 'wave',
@@ -2452,7 +2617,7 @@ function beginSoloWave(room, wave, opts) {
 
 /** New wave: refresh godmode / clear stun. Solo waves always teleport to world middle. */
 function placePlayersAtWaveStart(room, opts) {
-  const center = !!room.practice && !room.coop;
+  const center = !!(opts && opts.center) || (!!room.practice && !room.coop);
   for (const p of room.players.values()) {
     if (p.bot || (p.hp | 0) <= 0) continue;
     if (center) {
@@ -2472,6 +2637,7 @@ function placePlayersAtWaveStart(room, opts) {
 
 function tickSoloWaves(room) {
   if (!room.practice) return;
+  if (room.campaign) return;
   if (room.shopOpen) {
     // Safety: shop with nobody connected to finish it → force next wave.
     tryFinishSoloShop(room);
@@ -3326,9 +3492,11 @@ function spawnPlayer(id, name, colors, room) {
     predictShootStep: 1,
     /** Aim lead ticks via av (sv_predict_shoot_angle). */
     predictShootAngle: 1,
-    inp: { l: 0, r: 0, u: 0, sp: 0, sh: 0 },
+    inp: { l: 0, r: 0, u: 0, sp: 0, sh: 0, j: 0 },
     inputQueue: [],
-    lastSeq: 0
+    lastSeq: 0,
+    jumpCharge: 0,
+    jumping: false
   };
 }
 
@@ -3633,7 +3801,8 @@ function applyInput(room, p) {
     p.vy += Math.sin(p.angle) * THRUST;
   }
   applyGunshipMagnetToPlayer(room, p);
-  limitPlayerSpeed(p);
+  if (!(room && room.campaign && p.jumping)) limitPlayerSpeed(p);
+  if (room && room.campaign) tickCampaignPlayerJump(room, p);
 }
 
 /** True while still inside the shared center spawn circle. */
@@ -4316,6 +4485,13 @@ function endSoloPractice(room) {
       send(ws, queueStatusFor('coop'));
       notifyQueueKind('coop');
       tryMatchmakeCoop();
+    } else if (queueKind === 'campaignCoop') {
+      if (!campaignCoopQueue.includes(ws)) campaignCoopQueue.push(ws);
+      ws.state = 'queued';
+      ws.queueMode = 'campaignCoop';
+      send(ws, queueStatusFor('campaignCoop'));
+      notifyQueueKind('campaignCoop');
+      tryMatchmakeCampaignCoop();
     } else {
       if (!matchQueue.includes(ws)) matchQueue.push(ws);
       ws.state = 'queued';
@@ -4623,6 +4799,7 @@ function hitPlayerAsteroid(room, p, a, hit) {
   applyShipCrash(room, p, hit.nx, hit.ny, hit.overlap, dmg, 0.5);
   // Hard eject in case dual hit-circles / spin left us still overlapping.
   separatePlayerFromAsteroids(p, room, 8);
+  if (room && room.campaign) clearCampaignJump(p);
   notifyShipHit(room, p);
 }
 

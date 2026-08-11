@@ -618,3 +618,12 @@ const rooms = new Map();
 /** @type {import('ws').WebSocket[]} */
 const matchQueue = [];
 const coopQueue = [];
+/** Coop campaign matchmaking (separate from wave coop). */
+const campaignCoopQueue = [];
+
+/** Campaign star map + hyperspace jump. */
+const CAMPAIGN_STAR_COUNT = 40;
+const CAMPAIGN_JUMP_CHARGE_TICKS = 5 * TPS;
+const CAMPAIGN_JUMP_ACCEL = 0.4 * RES_SCALE;
+/** Pick radius on the star map (world units ≈ design px × RES_SCALE). */
+const CAMPAIGN_STAR_PICK_R = 70 * RES_SCALE;

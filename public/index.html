@@ -647,6 +647,32 @@
       background: rgba(40, 70, 35, 0.95);
       color: #e8ffd0;
     }
+    #campaign-map {
+      position: fixed; inset: 0; z-index: 8;
+      display: none;
+      align-items: center; justify-content: center;
+      background: #02040a;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #campaign-map.open {
+      display: flex;
+    }
+    #campaign-map-c {
+      width: min(96vw, 960px);
+      height: min(54vw, 540px);
+      max-height: 80vh;
+      background: #05070f;
+      border: 1px solid rgba(120, 160, 220, 0.35);
+      cursor: crosshair;
+      image-rendering: pixelated;
+    }
+    #campaign-map-hint {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 13px;
+      color: #9bb4c8;
+      letter-spacing: 0.04em;
+    }
     #top-btns {
       position: fixed; top: 12px; right: 12px; z-index: 4;
       display: flex; gap: 8px; align-items: center;
@@ -2338,11 +2364,22 @@
       <button type="button" id="mode-solo-btn">
         <span class="mode-name">Solo</span>
       </button>
+      <button type="button" id="mode-campaign-solo-btn">
+        <span class="mode-name">Solo Campaign</span>
+      </button>
+      <button type="button" id="mode-campaign-coop-btn">
+        <span class="mode-name">Coop Campaign</span>
+        <span class="mode-meta" id="mode-campaign-coop-meta">ingame: 0 · in queue: 0</span>
+      </button>
       <button type="button" id="mode-continue-btn" disabled>
         <span class="mode-name">Continue</span>
       </button>
     </div>
   </div>
+</div>
+<div id="campaign-map" aria-hidden="true">
+  <canvas id="campaign-map-c" width="960" height="540"></canvas>
+  <div id="campaign-map-hint">Aim near a star (70px) · click or Enter to jump · nearest if none in range</div>
 </div>
 <div id="top-btns">
   <button id="cancel-btn" type="button">Cancel</button>
@@ -2408,7 +2445,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=89');
-      await loadScript('game.js?v=1030');
+      await loadScript('game.js?v=1031');
     } catch (err) {
       console.error(err);
     }
