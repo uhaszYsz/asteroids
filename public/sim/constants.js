@@ -692,7 +692,7 @@ const CAMPAIGN_STAR_BRANCH_R = 75 * RES_SCALE;
 /** A star with exactly one neighbor within this range is marked special. */
 const CAMPAIGN_STAR_SPECIAL_R = 50 * RES_SCALE;
 /** Minimum spacing between any two map stars (design px × RES_SCALE). */
-const CAMPAIGN_STAR_MIN_DIST = 15 * RES_SCALE;
+const CAMPAIGN_STAR_MIN_DIST = 21 * RES_SCALE;
 const CAMPAIGN_JUMP_ACCEL = 0.4 * RES_SCALE;
 /** Enter pulse charge time when the stage still has threats. */
 const CAMPAIGN_JUMP_CHARGE_TICKS = 5 * TPS;
