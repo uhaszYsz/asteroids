@@ -17821,6 +17821,7 @@ function parseEnemyKind(raw) {
   if (raw === 'carrier') return 'carrier';
   if (raw === 'worm') return 'worm';
   if (raw === 'spinner') return 'spinner';
+  if (raw === 'gunship') return 'gunship';
   if (raw === 'common1') return 'common1';
   return 'common';
 }
