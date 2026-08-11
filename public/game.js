@@ -19285,8 +19285,8 @@ function lenDirY(len, dir) {
   return Math.sin(dir) * len;
 }
 
-/** Match server: pullPower grows +0.01 each magnet tick. */
-const GUNSHIP_MAGNET_PULL_GROW = 0.01;
+/** Match server: pullPower grows +0.001 each magnet tick. */
+const GUNSHIP_MAGNET_PULL_GROW = 0.001;
 
 function gunshipMagnetPullPowerClient(e) {
   if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4) return 0;
