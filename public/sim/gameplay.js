@@ -2742,7 +2742,7 @@ function packShopState(room, p) {
     weapon: p.weapon || 'default',
     levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
     unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
-    powerups: Object.assign({}, p.powerups || freshPowerups())
+    powerups: packPowerupsNet(p)
   };
 }
 
@@ -2891,9 +2891,12 @@ function handleShopBuy(room, p, item, name) {
     const cost = 1000;
     if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
     p.coins = (p.coins | 0) - cost;
-    p.powerups[name] = true;
+    if (name === 'shield') grantShield(room, p);
+    else {
+      p.powerups[name] = true;
+      notifyPowerups(room, p);
+    }
     notifyPlayerCoins(room, p);
-    notifyPowerups(room, p);
     return { ok: 1 };
   }
 
@@ -3140,6 +3143,11 @@ function applyPickupToPlayer(room, p, u) {
     if (!p.powerups) p.powerups = freshPowerups();
     const name = u.powerup;
     if (!name || !POWERUP_TYPES.includes(name)) return;
+    if (name === 'shield') {
+      if (p.powerups.shield) return; // already owned — collect still removes pickup
+      grantShield(room, p);
+      return;
+    }
     if (p.powerups[name]) return; // already owned — collect still removes pickup
     p.powerups[name] = true;
     notifyPowerups(room, p);
@@ -3484,6 +3492,7 @@ function spawnPlayer(id, name, colors, room) {
     weapon: wpn,
     weaponLevels: levels,
     powerups: freshPowerups(),
+    shieldHp: 0,
     shootAmmo: w.ammo, shootCd: 0, reloadLeft: 0, bursting: false,
     railChargeLeft: 0,
     /** Legacy snap pad (always 0 — ground coin pools removed). */
@@ -3519,6 +3528,7 @@ function respawnPlayer(room, p, keepLoadout, maxHp) {
     // Round loser (or fresh): default gun, no upgrades, no powerups.
     ownOnlyWeapon(p, 'default', 1);
     p.powerups = freshPowerups();
+    p.shieldHp = 0;
   }
   const w = effectiveWeapon(p, p.weapon);
   p.shootAmmo = w.ammo;
@@ -3688,8 +3698,11 @@ function handleAdminGive(ws, itemRaw) {
 
   if (item.kind === 'powerup') {
     if (!p.powerups) p.powerups = freshPowerups();
-    p.powerups[item.name] = true;
-    notifyPowerups(room, p);
+    if (item.name === 'shield') grantShield(room, p);
+    else {
+      p.powerups[item.name] = true;
+      notifyPowerups(room, p);
+    }
     return { ok: 1, kind: 'powerup', item: item.name };
   }
 
@@ -4230,7 +4243,8 @@ function applyShipCrash(room, p, nx, ny, overlap, dmg, bounceScale) {
     p.y += ny * (overlap + 3);
     wrap(p);
   }
-  if (!consumeShield(room, p)) p.hp -= dmg;
+  // Hull crashes (asteroids / meteors / gunship / ship) ignore shield.
+  p.hp -= dmg;
   p.av = spinDir * STUN_SPIN;
   p.turnDecelStep = 0;
   p.turnDecelLeft = 0;
@@ -4314,6 +4328,7 @@ function handlePlayerDeath(room, victim) {
   victim.bursting = false;
   victim.railChargeLeft = 0;
   victim.powerups = freshPowerups();
+  victim.shieldHp = 0;
   notifyPowerups(room, victim);
   if (room.practice) {
     victim.lives = Math.max(0, (victim.lives | 0) - 1);
@@ -4583,7 +4598,7 @@ function emitRoundReset(room) {
   const players = packSnap(room).players;
   const powerupsByPlayer = {};
   for (const pl of room.players.values()) {
-    powerupsByPlayer[pl.id] = pl.powerups || freshPowerups();
+    powerupsByPlayer[pl.id] = packPowerupsNet(pl);
   }
   for (const ws of room.clients) {
     if (ws.readyState !== 1) continue;
@@ -4600,7 +4615,7 @@ function emitRoundReset(room) {
       w: wpnSlot,
       levels: p.weaponLevels,
       ammo: p.shootAmmo,
-      powerups: p.powerups || freshPowerups(),
+      powerups: packPowerupsNet(p),
       powerupsByPlayer,
       asteroids,
       players,
@@ -6539,7 +6554,7 @@ function updateBullets(room) {
         active.add(key);
         applyVoidOverlapPulse(b, key, (dmg) => {
           let d = dmg;
-          dealDamageToPlayer(room, p, d, b.owner | 0);
+          dealDamageToPlayer(room, p, d, b.owner | 0, { bypassShield: true });
           voidScramblePlayerAim(p, 4);
           roomBroadcast(room, { t: 'vd', k: 'p', id: p.id | 0, x: p.x, y: p.y });
         });

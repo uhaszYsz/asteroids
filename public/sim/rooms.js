@@ -630,6 +630,7 @@ function stepRoom(room) {
     }
     // Humans: one cmd/step per tick (backlog drains over time — no thrust stack).
     stepPlayerInputs(room, p);
+    if (room.matchLive && !room.campaignMapOpen) tickPlayerShield(room, p);
   }
   if (room.matchLive && !roomPreRoundFrozen(room)) processPendingRailBounces(room);
   // Move asteroids first, rebuild spatial hash once, then bullets + collisions
@@ -961,6 +962,7 @@ function captureWaitingSnapshot(ws) {
       weaponLevels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
       unlockedWeapons: Object.assign({}, ensureUnlockedWeapons(p)),
       powerups: Object.assign({}, p.powerups || freshPowerups()),
+      shieldHp: playerHasPowerup(p, 'shield') ? Math.max(0, +(p.shieldHp != null ? p.shieldHp : SHIELD_MAX_HP)) : 0,
       shootAmmo: p.shootAmmo | 0,
       shootCd: p.shootCd | 0,
       reloadLeft: p.reloadLeft | 0
@@ -1031,6 +1033,12 @@ function applySnapshotToRoom(room, p, snap) {
   if (!p.weapon) p.weapon = 'default';
   ownOnlyWeapon(p, p.weapon, getWeaponLevel(p, p.weapon));
   p.powerups = Object.assign(freshPowerups(), sp.powerups || {});
+  delete p.powerups.shieldHp;
+  if (p.powerups.shield) {
+    p.shieldHp = sp.shieldHp != null ? Math.max(0, Math.min(SHIELD_MAX_HP, +sp.shieldHp)) : SHIELD_MAX_HP;
+  } else {
+    p.shieldHp = 0;
+  }
   p.shootAmmo = sp.shootAmmo | 0;
   p.shootCd = sp.shootCd | 0;
   p.reloadLeft = sp.reloadLeft | 0;
@@ -1611,7 +1619,7 @@ function sendWelcome(ws, room, p, extra) {
     powerupsByPlayer: (() => {
       const m = {};
       for (const pl of room.players.values()) {
-        m[pl.id] = pl.powerups || freshPowerups();
+        m[pl.id] = packPowerupsNet(pl);
       }
       return m;
     })()

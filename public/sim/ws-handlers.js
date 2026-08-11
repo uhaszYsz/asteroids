@@ -523,7 +523,7 @@ wss.on('connection', (ws) => {
         weapon: p.weapon || 'default',
         levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
         unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
-        powerups: Object.assign({}, p.powerups || freshPowerups()),
+        powerups: packPowerupsNet(p),
         shopTimeLeft: p.shopTimeLeft | 0,
         pvp: room.practice ? 0 : 1
       }));

@@ -208,6 +208,12 @@ function freshPowerups() {
   };
 }
 
+/** Shield vitals: absorbs projectile / laser / ray damage only (not rocks / void / meteors). */
+const SHIELD_MAX_HP = 100;
+/** Recharge while equipped: 3 HP per second. */
+const SHIELD_RECHARGE_PER_SEC = 3;
+const SHIELD_RECHARGE_PER_TICK = SHIELD_RECHARGE_PER_SEC / TPS;
+
 /** Magazine reload ticks. */
 function effectiveReloadTicks(p, baseReload) {
   return Math.max(1, baseReload | 0);
@@ -217,20 +223,73 @@ function playerHasPowerup(p, name) {
   return !!(p && p.powerups && p.powerups[name]);
 }
 
+function packPowerupsNet(p) {
+  const pu = Object.assign({}, (p && p.powerups) || freshPowerups());
+  pu.shieldHp = playerHasPowerup(p, 'shield')
+    ? Math.max(0, Math.min(SHIELD_MAX_HP, +(p.shieldHp != null ? p.shieldHp : SHIELD_MAX_HP)))
+    : 0;
+  return pu;
+}
+
 function notifyPowerups(room, p) {
   roomBroadcast(room, {
     t: 'pwr',
     id: p.id,
-    powerups: Object.assign({}, p.powerups || freshPowerups())
+    powerups: packPowerupsNet(p)
   });
 }
 
-/** Absorb one hit if shield powerup is active. Returns true if damage was blocked. */
-function consumeShield(room, p) {
+function clearShield(room, p) {
+  if (!p) return;
+  if (p.powerups) p.powerups.shield = false;
+  p.shieldHp = 0;
+  if (room) notifyPowerups(room, p);
+}
+
+function grantShield(room, p) {
+  if (!p) return;
+  if (!p.powerups) p.powerups = freshPowerups();
+  p.powerups.shield = true;
+  p.shieldHp = SHIELD_MAX_HP;
+  if (room) notifyPowerups(room, p);
+}
+
+/**
+ * Apply projectile/laser/ray damage to the shield first.
+ * Returns true if player HP was fully blocked (shield still up or just broke).
+ */
+function absorbShieldDamage(room, p, dmg) {
   if (!playerHasPowerup(p, 'shield')) return false;
-  p.powerups.shield = false;
+  let hp = p.shieldHp != null ? +p.shieldHp : SHIELD_MAX_HP;
+  if (!(hp > 0)) {
+    clearShield(room, p);
+    return false;
+  }
+  const hit = Math.max(0, +dmg || 0);
+  hp -= hit;
+  if (hp <= 0) {
+    clearShield(room, p);
+    return true;
+  }
+  p.shieldHp = hp;
   notifyPowerups(room, p);
   return true;
+}
+
+/** Passive shield recharge while equipped. */
+function tickPlayerShield(room, p) {
+  if (!p || !playerHasPowerup(p, 'shield') || (p.hp | 0) <= 0) return;
+  if (p.shieldHp == null) p.shieldHp = SHIELD_MAX_HP;
+  if (p.shieldHp >= SHIELD_MAX_HP) {
+    p.shieldHp = SHIELD_MAX_HP;
+    return;
+  }
+  const prev = p.shieldHp;
+  p.shieldHp = Math.min(SHIELD_MAX_HP, p.shieldHp + SHIELD_RECHARGE_PER_TICK);
+  // Notify on whole-HP steps so the bar updates without flooding.
+  if ((p.shieldHp | 0) !== (prev | 0) || p.shieldHp >= SHIELD_MAX_HP) {
+    notifyPowerups(room, p);
+  }
 }
 
 /** Stamp PvP frag credit (last player who damaged this ship). */
@@ -240,11 +299,15 @@ function notePlayerAttacker(victim, attackerId) {
   victim.lastHitBy = aid;
 }
 
-/** Apply HP damage; shield consumes instead. Returns true if HP was reduced.
- *  `attackerId` (optional) — player who dealt this hit; credited if it kills. */
-function dealDamageToPlayer(room, p, dmg, attackerId) {
+/**
+ * Apply HP damage. Shield absorbs bullets / lasers / rays unless `opts.bypassShield`
+ * (asteroids, meteor-gun rocks, void, hull crashes).
+ * Returns true if HP was reduced.
+ */
+function dealDamageToPlayer(room, p, dmg, attackerId, opts) {
   if (!p || p.hp <= 0 || p.godLeft > 0) return false;
-  if (consumeShield(room, p)) return false;
+  const bypass = !!(opts && opts.bypassShield);
+  if (!bypass && absorbShieldDamage(room, p, dmg)) return false;
   notePlayerAttacker(p, attackerId);
   p.hp -= dmg;
   if (p.hp <= 0) handlePlayerDeath(room, p);

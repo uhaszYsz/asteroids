@@ -12617,7 +12617,8 @@ function bindTouchControls() {
 const player = {
   x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, hp: 100, av: 0,
   turnDecelStep: 0, turnDecelLeft: 0, turnDecelRev: 0, stunned: false, collideCd: 0, godLeft: 0,
-  powerups: { shield: false, drone: false }
+  powerups: { shield: false, drone: false },
+  shieldHp: 0
 };
 const serverGhost = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, av: 0, hp: 100, valid: false };
 /** performance.now() deadline — skip tight drift-snap so tab-resume can soft-blend. */
@@ -12628,6 +12629,7 @@ const PICKUP_CODE_POWERUP_BASE = 100;
 /** Match server: weapon/powerup crates bounce this many times, then drift off. */
 const PICKUP_BOUNCE_MAX = 3;
 const PICKUP_R = 7 * RES_SCALE;
+const SHIELD_MAX_HP = 100;
 function freshPowerups() {
   return {
     shield: false,
@@ -12640,10 +12642,19 @@ function powerupColor(name) {
   return COL.pickup;
 }
 function applyPowerupsState(id, powerups) {
-  const pu = Object.assign(freshPowerups(), powerups || {});
-  if (id === myId) player.powerups = pu;
+  const raw = powerups || {};
+  const pu = Object.assign(freshPowerups(), raw);
+  const shieldHp = raw.shieldHp != null ? Math.max(0, Math.min(SHIELD_MAX_HP, +raw.shieldHp)) : 0;
+  delete pu.shieldHp;
+  if (id === myId) {
+    player.powerups = pu;
+    player.shieldHp = pu.shield ? shieldHp : 0;
+  }
   const r = remotes.get(id);
-  if (r) r.powerups = pu;
+  if (r) {
+    r.powerups = pu;
+    r.shieldHp = pu.shield ? shieldHp : 0;
+  }
 }
 function ownerHasDamagePowerup(ownerId) {
   return false;
@@ -12657,6 +12668,11 @@ function ownerHasPowerup(ownerId, name) {
   if (ownerId === myId) return !!(player.powerups && player.powerups[name]);
   const r = remotes.get(ownerId);
   return !!(r && r.powerups && r.powerups[name]);
+}
+function ownerShieldHp(ownerId) {
+  if (ownerId === myId) return player.shieldHp | 0;
+  const r = remotes.get(ownerId);
+  return r ? (r.shieldHp | 0) : 0;
 }
 let _dmgHue = 0;
 let _dmgHueAt = 0;
@@ -12710,6 +12726,23 @@ function drawShieldFx(x, y, shipAngle) {
     noCore: true,
     pulseHz: 1
   });
+}
+
+/** Shield HP bar above the ship (world space). */
+function drawShieldHpBar(x, y, hp) {
+  const maxHp = SHIELD_MAX_HP;
+  const frac = Math.max(0, Math.min(1, (hp | 0) / maxHp));
+  const barW = 22 * RES_SCALE;
+  const barH = 2.2 * RES_SCALE;
+  const ox = x - barW * 0.5;
+  const oy = y - 20 * RES_SCALE;
+  const fillW = barW * frac;
+  const bg = [0.08, 0.12, 0.18];
+  const fill = frac > 0.35 ? [0.45, 0.85, 1.0] : [1.0, 0.55, 0.35];
+  drawThickSegment(ox, oy, ox + barW, oy, barH + 1.4, bg, 0.85);
+  if (fillW > 0.5) {
+    drawThickSegment(ox, oy, ox + fillW, oy, barH, fill, 0.95);
+  }
 }
 /** Match server turret projectile speed for visual lead aim. */
 const TURRET_VIS_SPEED = 8 * RES_SCALE;
@@ -13027,7 +13060,10 @@ function drawFixDrones(x, y, ownerId, shipAngle, dt) {
 }
 
 function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
-  if (ownerHasPowerup(ownerId, 'shield')) drawShieldFx(x, y, shipAngle);
+  if (ownerHasPowerup(ownerId, 'shield')) {
+    drawShieldFx(x, y, shipAngle);
+    drawShieldHpBar(x, y, ownerShieldHp(ownerId));
+  }
   drawFixDrones(x, y, ownerId, shipAngle, dt);
 }
 
@@ -23467,7 +23503,9 @@ function handleWsMessage(e) {
     if (msg.t === 'pwr' && inGame) {
       const id = msg.id | 0;
       const hadShield = id === myId && !!(player.powerups && player.powerups.shield);
-      applyPowerupsState(id, msg.powerups);
+      const pu = msg.powerups || {};
+      if (msg.shieldHp != null && pu.shieldHp == null) pu.shieldHp = msg.shieldHp;
+      applyPowerupsState(id, pu);
       if (id === myId && hadShield && !(player.powerups && player.powerups.shield)) {
         playSfx(SFX.shieldOff, { vol: 0.85, pool: 2 });
       }
