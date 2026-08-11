@@ -689,7 +689,7 @@ const CAMPAIGN_STAR_COUNT = 64;
 const CAMPAIGN_STAR_PATH_COUNT = 10;
 const CAMPAIGN_STAR_PATH_STEP = 60 * RES_SCALE;
 const CAMPAIGN_STAR_BRANCH_R = 75 * RES_SCALE;
-/** Special roll: 1% normal, 4% inside this radius of top-left or bottom-right. */
+/** Special roll: 4% normal, 7% inside this radius of top-left or bottom-right. */
 const CAMPAIGN_STAR_SPECIAL_CORNER_R = 124 * RES_SCALE;
 /** Minimum spacing between any two map stars (design px × RES_SCALE). */
 const CAMPAIGN_STAR_MIN_DIST = 21 * RES_SCALE;
