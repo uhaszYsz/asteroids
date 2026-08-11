@@ -676,23 +676,21 @@ function rollCampaignStars() {
   return stars;
 }
 
-/** Stars with exactly one neighbor within CAMPAIGN_STAR_SPECIAL_R → special (flag only). */
+/**
+ * Special flag only: 1% chance per star, or 4% if within
+ * CAMPAIGN_STAR_SPECIAL_CORNER_R of top-left or bottom-right.
+ */
 function markCampaignSpecialStars(stars) {
   if (!stars || !stars.length) return;
-  const r2 = CAMPAIGN_STAR_SPECIAL_R * CAMPAIGN_STAR_SPECIAL_R;
+  const r2 = CAMPAIGN_STAR_SPECIAL_CORNER_R * CAMPAIGN_STAR_SPECIAL_CORNER_R;
   for (let i = 0; i < stars.length; i++) {
     const a = stars[i];
-    let n = 0;
-    for (let j = 0; j < stars.length; j++) {
-      if (i === j) continue;
-      const dx = (+a.x) - (+stars[j].x);
-      const dy = (+a.y) - (+stars[j].y);
-      if (dx * dx + dy * dy <= r2) {
-        n++;
-        if (n > 1) break;
-      }
-    }
-    a.special = n === 1 ? 1 : 0;
+    const x = +a.x;
+    const y = +a.y;
+    const nearCorner = (x * x + y * y) <= r2
+      || ((x - W) * (x - W) + (y - H) * (y - H)) <= r2;
+    const chance = nearCorner ? 0.04 : 0.01;
+    a.special = Math.random() < chance ? 1 : 0;
   }
 }
 
