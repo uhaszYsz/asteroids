@@ -1409,14 +1409,14 @@ function interruptAllWormAttacks(room) {
   gunshipMagnetClearAllAsteroids(room);
 }
 
-/** Every ~0.2s: crush overlapping asteroids (no coin credit). */
+/** Every ~0.2s: crush overlapping asteroids (no coin credit). Worm + gunship. */
 function wormCrushAsteroids(room, e) {
-  if (!e || e.kind !== 'worm' || !room) return;
+  if (!e || (e.kind !== 'worm' && e.kind !== 'gunship') || !room) return;
   e.astCheckLeft = (e.astCheckLeft | 0) - 1;
   if ((e.astCheckLeft | 0) > 0) return;
   e.astCheckLeft = ENEMY_WORM_AST_CHECK;
 
-  const er = e.r || ENEMY_R.worm || 10;
+  const er = e.r || (e.kind === 'gunship' ? ENEMY_GUNSHIP_HIT_R : ENEMY_R.worm) || 10;
   const queryR = er + (ASTEROID_R.huge || ASTEROID_R.big || 40);
   const crush = [];
   forEachAsteroidNear(room, e.x, e.y, queryR, (a) => {
@@ -2037,7 +2037,7 @@ function updateEnemies(room) {
       e.vy = 0;
       e.tx = e.x;
       e.ty = e.y;
-      if (e.kind === 'worm') wormCrushAsteroids(room, e);
+      if (e.kind === 'worm' || e.kind === 'gunship') wormCrushAsteroids(room, e);
       enemyTryFire(room, e);
       continue;
     }
@@ -2063,7 +2063,7 @@ function updateEnemies(room) {
       emitEnemyUpdate(room, e);
     }
 
-    if (e.kind === 'worm') wormCrushAsteroids(room, e);
+    if (e.kind === 'worm' || e.kind === 'gunship') wormCrushAsteroids(room, e);
     enemyTryFire(room, e);
   }
 

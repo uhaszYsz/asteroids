@@ -19259,9 +19259,9 @@ const COL_MAGNET_RING = [0.72, 0.35, 1.0];
 const COL_MAGNET_DUST = [0.85, 0.92, 1.0];
 const GUNSHIP_MAGNET_PULL_MAX = 5;
 /** Match server: at full power keep this fraction of vx/vy. */
-const GUNSHIP_MAGNET_VEL_KEEP = 0.82;
+const GUNSHIP_MAGNET_VEL_KEEP = 0.856;
 /** Match server: at full power add this toward gunship. */
-const GUNSHIP_MAGNET_ATTRACT = 0.35;
+const GUNSHIP_MAGNET_ATTRACT = 0.28;
 const gunshipMagnetDust = []; // {x,y,vx,vy,life,maxLife,size}
 const GUNSHIP_MAGNET_DUST_MAX = 220;
 let gunshipMagnetDustAcc = 0;
