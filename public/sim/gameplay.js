@@ -1294,19 +1294,12 @@ function gunshipMagnetClearAllAsteroids(room) {
 
 /**
  * Spawn one small off-screen asteroid during gunship magnet.
- * Place on the edge farthest from the gunship and aim velocity + magnet accel at it
- * (default offscreen spawn aims inward / sideways, which looked random).
+ * Random edge (any outside); velocity + magnet accel aim at the gunship.
  */
 function gunshipMagnetSpawnOneAsteroid(room, e) {
   if (!room || !e) return;
-  // Prefer the edge farthest from the ship so the rock crosses toward it.
-  let preferSide = 0;
-  let best = e.x;
-  if ((W - e.x) > best) { best = W - e.x; preferSide = 1; }
-  if (e.y > best) { best = e.y; preferSide = 2; }
-  if ((H - e.y) > best) preferSide = 3;
   const r = ASTEROID_R.small * (0.92 + Math.random() * 0.16);
-  const pose = spawnOffscreenIncoming(r, 1, preferSide);
+  const pose = spawnOffscreenIncoming(r, 1);
   const dx = e.x - pose.x;
   const dy = e.y - pose.y;
   const dist = Math.hypot(dx, dy) || 1;
