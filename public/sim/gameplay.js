@@ -1192,24 +1192,32 @@ function gunshipMagnetPullSpeed(e) {
   return ENEMY_GUNSHIP_MAGNET_PULL_MAX * (t * t);
 }
 
-/** Nudge pose toward gunship — position only, does not touch vx/vy. */
-function gunshipMagnetNudgePos(target, e, pull) {
-  if (!target || !e || !(pull > 0)) return;
-  const dx = e.x - target.x;
-  const dy = e.y - target.y;
+/**
+ * Player magnet: shed vx/vy (slow the ship) + mild attract toward gunship.
+ * Does not teleport/nudge position — normal move still uses vx/vy.
+ */
+function gunshipMagnetApplyPlayerVel(p, e, pull) {
+  if (!p || !e || !(pull > 0)) return;
+  const power = Math.min(1, pull / Math.max(1e-6, ENEMY_GUNSHIP_MAGNET_PULL_MAX));
+  const keep = 1 - power * (1 - ENEMY_GUNSHIP_MAGNET_VEL_KEEP);
+  p.vx = (p.vx || 0) * keep;
+  p.vy = (p.vy || 0) * keep;
+  const dx = e.x - p.x;
+  const dy = e.y - p.y;
   const dist = Math.hypot(dx, dy) || 1;
-  target.x += (dx / dist) * pull;
-  target.y += (dy / dist) * pull;
+  const attract = power * ENEMY_GUNSHIP_MAGNET_ATTRACT;
+  p.vx += (dx / dist) * attract;
+  p.vy += (dy / dist) * attract;
 }
 
-/** Apply active gunship magnet to a player (after x+=vx / y+=vy). */
+/** Apply active gunship magnet to a player (inside applyInput, before speed limit). */
 function applyGunshipMagnetToPlayer(room, p) {
   if (!room || !room.practice || !room.enemies || !p) return;
   if ((p.hp | 0) <= 0 || (p.godLeft | 0) > 0) return;
   for (let i = 0; i < room.enemies.length; i++) {
     const e = room.enemies[i];
     if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4) continue;
-    gunshipMagnetNudgePos(p, e, gunshipMagnetPullSpeed(e));
+    gunshipMagnetApplyPlayerVel(p, e, gunshipMagnetPullSpeed(e));
     return;
   }
 }
@@ -3446,6 +3454,7 @@ function applyInput(room, p) {
     p.vx += Math.cos(p.angle) * THRUST;
     p.vy += Math.sin(p.angle) * THRUST;
   }
+  applyGunshipMagnetToPlayer(room, p);
   limitPlayerSpeed(p);
 }
 

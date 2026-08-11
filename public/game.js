@@ -19258,6 +19258,10 @@ const COL_MAGNET_CORE = [0.55, 0.85, 1.0];
 const COL_MAGNET_RING = [0.72, 0.35, 1.0];
 const COL_MAGNET_DUST = [0.85, 0.92, 1.0];
 const GUNSHIP_MAGNET_PULL_MAX = 5;
+/** Match server: at full power keep this fraction of vx/vy. */
+const GUNSHIP_MAGNET_VEL_KEEP = 0.82;
+/** Match server: at full power add this toward gunship. */
+const GUNSHIP_MAGNET_ATTRACT = 0.35;
 const gunshipMagnetDust = []; // {x,y,vx,vy,life,maxLife,size}
 const GUNSHIP_MAGNET_DUST_MAX = 220;
 let gunshipMagnetDustAcc = 0;
@@ -19273,7 +19277,6 @@ function gunshipMagnetProgress(e) {
 
 function gunshipMagnetPullSpeedClient(e) {
   const t = gunshipMagnetProgress(e);
-  // Cap: force magnitude ≤ GUNSHIP_MAGNET_PULL_MAX per sim tick.
   return GUNSHIP_MAGNET_PULL_MAX * (t * t);
 }
 
@@ -19289,13 +19292,17 @@ function applyLocalGunshipMagnetPull(o) {
   if (!e || !o || (o.hp | 0) <= 0 || (o.godLeft | 0) > 0) return;
   const pull = gunshipMagnetPullSpeedClient(e);
   if (!(pull > 0)) return;
+  const power = Math.min(1, pull / Math.max(1e-6, GUNSHIP_MAGNET_PULL_MAX));
+  const keep = 1 - power * (1 - GUNSHIP_MAGNET_VEL_KEEP);
+  o.vx = (o.vx || 0) * keep;
+  o.vy = (o.vy || 0) * keep;
   const p = enemyAt(e);
   const dx = p.x - o.x;
   const dy = p.y - o.y;
   const dist = Math.hypot(dx, dy) || 1;
-  // Position nudge only — same as server (does not touch vx/vy).
-  o.x += (dx / dist) * pull;
-  o.y += (dy / dist) * pull;
+  const attract = power * GUNSHIP_MAGNET_ATTRACT;
+  o.vx += (dx / dist) * attract;
+  o.vy += (dy / dist) * attract;
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
@@ -20778,11 +20785,10 @@ function applyInputTo(o, inp, opts) {
     o.vx += Math.cos(o.angle) * THRUST;
     o.vy += Math.sin(o.angle) * THRUST;
   }
+  applyLocalGunshipMagnetPull(o);
   limitPlayerSpeed(o);
   o.x += o.vx;
   o.y += o.vy;
-  // Magnet: position nudge toward gunship (after normal move, before wrap).
-  applyLocalGunshipMagnetPull(o);
   wrapEntity(o);
   // Leave shared spawn zone → godmode ends for everyone (matches server).
   if (o.godLeft > 0 && opts && opts.localCollide && o === player && myId != null) {

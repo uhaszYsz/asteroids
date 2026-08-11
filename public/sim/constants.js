@@ -464,9 +464,13 @@ const ENEMY_GUNSHIP_SPRAY = {
   sizeMax: 7,
   dmg: 14
 };
-/** Magnet pull duration; each tick nudges position by up to ENEMY_GUNSHIP_MAGNET_PULL_MAX px toward gunship. */
+/** Magnet pull duration; power 0→ENEMY_GUNSHIP_MAGNET_PULL_MAX over the attack. */
 const ENEMY_GUNSHIP_MAGNET_TICKS = Math.round(10 * TPS);
 const ENEMY_GUNSHIP_MAGNET_PULL_MAX = 5;
+/** At full power: keep this fraction of vx/vy each tick (rest is shed). */
+const ENEMY_GUNSHIP_MAGNET_VEL_KEEP = 0.82;
+/** At full power: add this much velocity toward gunship each tick. */
+const ENEMY_GUNSHIP_MAGNET_ATTRACT = 0.35;
 /** Off-screen small asteroid during magnet. */
 const ENEMY_GUNSHIP_MAGNET_AST_EVERY = Math.round(0.5 * TPS);
 /** Asteroid magnet: constant accel toward gunship (set once; NTP simulates). */
