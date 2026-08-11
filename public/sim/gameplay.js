@@ -498,8 +498,8 @@ function nearestCampaignChainStar(x, y, chain) {
  * Star map layout:
  * 1) 10-star main path from bottom-left toward top-right (step 60, ±30°, wall bounce).
  *    Last path star is the exit.
- * 2) Each path star sprouts 1–4 children at random within radius 75.
- * 3) Those children (35%) sprout 1–4 more away from the nearest path star (±30°, ≤75),
+ * 2) Each path star sprouts 1–3 children at random within radius 75.
+ * 3) Those children (35%) sprout 1–3 more away from the nearest path star (±30°, ≤75),
  *    and newly created stars keep doing the same until 64 stars exist.
  * Every placement must stay ≥ CAMPAIGN_STAR_MIN_DIST from all existing stars
  * (too close → skip that star, no retry).
@@ -587,11 +587,11 @@ function rollCampaignStars() {
   const exitStar = chain[chain.length - 1];
   if (exitStar) exitStar.exit = 1;
 
-  // Phase A: each main-chain star sprouts 1–4 (uneven radii).
+  // Phase A: each main-chain star sprouts 1–3 (uneven radii).
   let frontier = [];
   for (let i = 0; i < chain.length && stars.length < target; i++) {
     const main = chain[i];
-    const n = 1 + ((Math.random() * 4) | 0);
+    const n = 1 + ((Math.random() * 3) | 0);
     for (let k = 0; k < n && stars.length < target; k++) {
       const child = tryPlaceOnce(() => {
         const a = Math.random() * Math.PI * 2;
@@ -636,7 +636,7 @@ function rollCampaignStars() {
       if (!Number.isFinite(away) || (parent.x === nearest.x && parent.y === nearest.y)) {
         away = Math.random() * Math.PI * 2;
       }
-      const n = 1 + ((Math.random() * 4) | 0);
+      const n = 1 + ((Math.random() * 3) | 0);
       for (let k = 0; k < n && stars.length < target; k++) {
         const child = tryPlaceOnce(() => {
           let ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
