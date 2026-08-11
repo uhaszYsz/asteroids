@@ -562,6 +562,17 @@ function rollCampaignStars() {
     return null;
   }
 
+  /**
+   * Uneven radius in [0, branchR] — clumps near the parent or shoots farther,
+   * instead of filling a uniform disc (uniform + min-dist packs like a grid).
+   */
+  function unevenBranchDist() {
+    const u = Math.random();
+    if (u < 0.55) return branchR * Math.pow(Math.random(), 1.7);
+    if (u < 0.85) return branchR * (0.35 + Math.random() * 0.45);
+    return branchR * (0.7 + Math.random() * 0.3);
+  }
+
   // Bottom-left start (always clear).
   let x = minX;
   let y = maxY;
@@ -582,7 +593,7 @@ function rollCampaignStars() {
   const exitStar = chain[chain.length - 1];
   if (exitStar) exitStar.exit = 1;
 
-  // Phase A: each main-chain star sprouts 1–4 random stars within range 75.
+  // Phase A: each main-chain star sprouts 1–4 (uneven radii).
   let frontier = [];
   for (let i = 0; i < chain.length && stars.length < target; i++) {
     const main = chain[i];
@@ -590,7 +601,7 @@ function rollCampaignStars() {
     for (let k = 0; k < n && stars.length < target; k++) {
       const child = tryPlaceTwice(() => {
         const a = Math.random() * Math.PI * 2;
-        const d = Math.random() * branchR;
+        const d = unevenBranchDist();
         return {
           x: main.x + Math.cos(a) * d,
           y: main.y + Math.sin(a) * d
@@ -600,18 +611,29 @@ function rollCampaignStars() {
     }
   }
 
-  // Phase B: children keep 35% sprouting away from nearest chain star until 64.
+  // Phase B: 35% sprout away from nearest chain; sparse backfill (no uniform sweep).
   let guard = 0;
   let stall = 0;
   while (stars.length < target && guard++ < 2048) {
-    const parents = frontier.length
-      ? frontier
+    let parents = frontier.length
+      ? frontier.slice()
       : stars.filter((s) => !s.chain);
     if (!parents.length) break;
 
+    for (let i = parents.length - 1; i > 0; i--) {
+      const j = (Math.random() * (i + 1)) | 0;
+      const tmp = parents[i];
+      parents[i] = parents[j];
+      parents[j] = tmp;
+    }
+    const useRoll = frontier.length > 0;
+    if (!useRoll) {
+      const keep = Math.max(1, Math.min(parents.length, 1 + ((Math.random() * 3) | 0)));
+      parents = parents.slice(0, keep);
+    }
+
     const next = [];
     let spawned = 0;
-    const useRoll = frontier.length > 0;
     for (let i = 0; i < parents.length && stars.length < target; i++) {
       const parent = parents[i];
       if (useRoll && Math.random() >= 0.35) continue;
@@ -623,9 +645,11 @@ function rollCampaignStars() {
       const n = 1 + ((Math.random() * 4) | 0);
       for (let k = 0; k < n && stars.length < target; k++) {
         const child = tryPlaceTwice(() => {
-          const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
-          const d = Math.max(Math.random() * branchR, minDist);
-          return campaignStarStepBounced(parent.x, parent.y, ang, d, minX, maxX, minY, maxY);
+          let ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
+          // Occasional wider wander so parallel “lanes” don’t form along the path.
+          if (Math.random() < 0.28) ang += ((Math.random() * 2 - 1) * (Math.PI / 3));
+          const d = unevenBranchDist();
+          return campaignStarStepBounced(parent.x, parent.y, ang, Math.max(d, minDist), minX, maxX, minY, maxY);
         });
         if (child) {
           next.push(child);
@@ -637,16 +661,15 @@ function rollCampaignStars() {
 
     if (!spawned) {
       stall++;
-      if (stall >= 8) break; // can't fit more without violating min distance
-      // One more directed attempt from a random parent (still retry-once / skip).
+      if (stall >= 8) break;
       const parent = parents[(Math.random() * parents.length) | 0];
       const nearest = nearestCampaignChainStar(parent.x, parent.y, chain);
       let away = Math.atan2(parent.y - nearest.y, parent.x - nearest.x);
       if (!Number.isFinite(away)) away = Math.random() * Math.PI * 2;
       const child = tryPlaceTwice(() => {
-        const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
-        const d = (0.45 + Math.random() * 0.55) * branchR;
-        return campaignStarStepBounced(parent.x, parent.y, ang, d, minX, maxX, minY, maxY);
+        const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 2));
+        const d = unevenBranchDist();
+        return campaignStarStepBounced(parent.x, parent.y, ang, Math.max(d, minDist * 1.2), minX, maxX, minY, maxY);
       });
       frontier = child ? [child] : [];
       if (child) stall = 0;
