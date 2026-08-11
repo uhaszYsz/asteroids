@@ -752,6 +752,7 @@ function makeEnemy(kind, wave, weapon) {
     magnetLeft: 0,
     magnetMax: 0,
     magnetStartedAt: 0,
+    magnetAstLeft: 0,
     lastHitBy: 0,
     // common1 post-shot flank (deg peak, ticks remaining / duration).
     flankDeg: 0,
@@ -1070,6 +1071,7 @@ function finishGunshipAttack(room, e) {
   e.magnetLeft = 0;
   e.magnetMax = 0;
   e.magnetStartedAt = 0;
+  e.magnetAstLeft = 0;
   e.astCheckLeft = 0;
   e.wormAtk = ((e.wormAtk | 0) + 1) % 3;
   e.fireCd = Math.round(
@@ -1105,7 +1107,7 @@ function beginGunshipMagnetAttack(room, e) {
   e.magnetMax = ENEMY_GUNSHIP_MAGNET_TICKS;
   e.magnetLeft = ENEMY_GUNSHIP_MAGNET_TICKS;
   e.magnetStartedAt = Date.now();
-  e.astCheckLeft = 0;
+  e.magnetAstLeft = 0;
   e.vx = 0;
   e.vy = 0;
   e.tx = e.x;
@@ -1303,9 +1305,9 @@ function gunshipMagnetClearAllAsteroids(room) {
 }
 
 function gunshipMagnetSpawnAsteroid(room, e) {
-  e.astCheckLeft = (e.astCheckLeft | 0) - 1;
-  if ((e.astCheckLeft | 0) > 0) return;
-  e.astCheckLeft = ENEMY_GUNSHIP_MAGNET_AST_EVERY;
+  e.magnetAstLeft = (e.magnetAstLeft | 0) - 1;
+  if ((e.magnetAstLeft | 0) > 0) return;
+  e.magnetAstLeft = ENEMY_GUNSHIP_MAGNET_AST_EVERY;
   const a = makeAsteroid({ size: 'small', offscreen: true, allowSpecial: false, special: null });
   // Drift toward gunship so they don't sit forever off-rim.
   const dx = e.x - a.x;
@@ -1328,6 +1330,7 @@ function updateGunshipAttack(room, e, target) {
       e.reloadLeft = 0;
       e.magnetLeft = 0;
       e.magnetStartedAt = 0;
+      e.magnetAstLeft = 0;
       e.fireCd = Math.round(
         (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
       );
