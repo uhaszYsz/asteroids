@@ -19299,7 +19299,7 @@ function gunshipMagnetPullPowerClient(e) {
   return Math.floor(t * (10 * TPS)) * GUNSHIP_MAGNET_PULL_GROW;
 }
 
-/** Position nudge toward gunship — does not touch vx/vy. */
+/** Add lenDir(pullPower, toward gunship) to vx/vy — before speed limit. */
 function applyLocalGunshipMagnetPull(o) {
   const e = activeGunshipMagnet();
   if (!e || !o || (o.hp | 0) <= 0 || (o.godLeft | 0) > 0) return;
@@ -19307,8 +19307,8 @@ function applyLocalGunshipMagnetPull(o) {
   if (!(pull > 0)) return;
   const p = enemyAt(e);
   const dir = Math.atan2(p.y - o.y, p.x - o.x);
-  o.x += lenDirX(pull, dir);
-  o.y += lenDirY(pull, dir);
+  o.vx = (o.vx || 0) + lenDirX(pull, dir);
+  o.vy = (o.vy || 0) + lenDirY(pull, dir);
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
@@ -20791,10 +20791,10 @@ function applyInputTo(o, inp, opts) {
     o.vx += Math.cos(o.angle) * THRUST;
     o.vy += Math.sin(o.angle) * THRUST;
   }
+  applyLocalGunshipMagnetPull(o);
   limitPlayerSpeed(o);
   o.x += o.vx;
   o.y += o.vy;
-  applyLocalGunshipMagnetPull(o);
   wrapEntity(o);
   // Leave shared spawn zone → godmode ends for everyone (matches server).
   if (o.godLeft > 0 && opts && opts.localCollide && o === player && myId != null) {

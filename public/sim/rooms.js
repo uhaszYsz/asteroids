@@ -789,11 +789,7 @@ function stepRoom(room) {
     updateBullets(room);
     updateFixDrones(room);
     updatePickups(room);
-    if (room.practice && !room.shopOpen) {
-      updateEnemies(room);
-      // After gunship grows magnetPull — lenDir nudge (does not touch vx/vy).
-      applyGunshipMagnetToAllPlayers(room);
-    }
+    if (room.practice && !room.shopOpen) updateEnemies(room);
     tickWorldPoseSnap(room);
   } else if (room.bullets.length) {
     // Pre-start: fly around only — clear any stray shots.

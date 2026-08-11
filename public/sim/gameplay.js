@@ -1202,8 +1202,8 @@ function gunshipMagnetAstAccelFor(a) {
 }
 
 /**
- * Player magnet: position nudge via lenDir toward gunship.
- * Does not touch vx/vy — thrust/physics stay normal.
+ * Player magnet: add lenDir(pullPower, toward gunship) to vx/vy.
+ * Call before limitPlayerSpeed so the ship speed cap still applies.
  */
 function applyGunshipMagnetToPlayer(room, p) {
   if (!room || !room.practice || !room.enemies || !p) return;
@@ -1214,18 +1214,9 @@ function applyGunshipMagnetToPlayer(room, p) {
     const pull = +e.magnetPull || 0;
     if (!(pull > 0)) return;
     const dir = Math.atan2(e.y - p.y, e.x - p.x);
-    p.x += lenDirX(pull, dir);
-    p.y += lenDirY(pull, dir);
+    p.vx = (p.vx || 0) + lenDirX(pull, dir);
+    p.vy = (p.vy || 0) + lenDirY(pull, dir);
     return;
-  }
-}
-
-/** Apply active gunship magnet lenDir pull to every living ship. */
-function applyGunshipMagnetToAllPlayers(room) {
-  if (!room || !room.players) return;
-  for (const p of room.players.values()) {
-    applyGunshipMagnetToPlayer(room, p);
-    if ((p.hp | 0) > 0) wrap(p);
   }
 }
 
@@ -3495,6 +3486,7 @@ function applyInput(room, p) {
     p.vx += Math.cos(p.angle) * THRUST;
     p.vy += Math.sin(p.angle) * THRUST;
   }
+  applyGunshipMagnetToPlayer(room, p);
   limitPlayerSpeed(p);
 }
 
