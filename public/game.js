@@ -11982,8 +11982,11 @@ function shootHeld() {
   if (campaignMode) return !!(keys.Space || spaceLatch || touchCtl.fire);
   return !!(keys.Space || keys.Enter || spaceLatch || enterLatch || touchCtl.fire);
 }
-function jumpHeld() {
-  return !!(campaignMode && !campaignMapOpen && (keys.Enter || enterLatch));
+/** One-shot Enter pulse for campaign hyperspace (set in keydown). */
+let jumpPulse = false;
+function armCampaignJumpPulse() {
+  if (!campaignMode || campaignMapOpen) return;
+  jumpPulse = true;
 }
 
 const GAME_KEYS = new Set([
@@ -12476,7 +12479,9 @@ addEventListener('keydown', e => {
     enterLatch = true;
     if (campaignMapOpen) {
       confirmCampaignTravel();
-    } else if (!campaignMode) {
+    } else if (campaignMode) {
+      armCampaignJumpPulse();
+    } else {
       armShootLagProbe();
       triggerShoot();
     }
@@ -13639,7 +13644,6 @@ let campaignMode = false;
 let campaignMapOpen = false;
 let campaignStars = [];
 let campaignAtStar = 0;
-let campaignJumpCharge = 0;
 let campaignJumping = false;
 let campaignMapPointer = { x: W * 0.5, y: H * 0.5 };
 
@@ -14488,7 +14492,6 @@ function applyCampaignMapMsg(msg) {
   }
   if (msg.at != null) campaignAtStar = msg.at | 0;
   if (msg.open) {
-    campaignJumpCharge = 0;
     campaignJumping = false;
     showCampaignMap();
   } else {
@@ -16711,8 +16714,8 @@ function resetMatchState() {
   campaignMode = false;
   campaignMapOpen = false;
   campaignStars = [];
-  campaignJumpCharge = 0;
   campaignJumping = false;
+  jumpPulse = false;
   hideCampaignMap();
   hideCampaignJumpHud();
   predReady = false;
@@ -21113,13 +21116,15 @@ function copyShipState(from, to) {
 }
 
 function getInput() {
+  const j = jumpPulse ? 1 : 0;
+  if (jumpPulse) jumpPulse = false;
   return {
     l: turnLeft() ? 1 : 0,
     r: turnRight() ? 1 : 0,
     u: thrustUp() ? 1 : 0,
     sp: shootPulse ? 1 : 0,
     sh: precisionTurn() ? 1 : 0,
-    j: jumpHeld() ? 1 : 0
+    j
   };
 }
 
@@ -22112,35 +22117,80 @@ function render() {
   drawFxLabels(now);
   drawWaveBanner(now);
   if (soloShopOpen) updateShopPreviews();
-  drawCampaignJumpChargeHud();
+  emitCampaignJumpFx();
 }
 
-function drawCampaignJumpChargeHud() {
-  if (!campaignMode || campaignMapOpen || (!campaignJumpCharge && !campaignJumping)) {
-    hideCampaignJumpHud();
-    return;
-  }
-  // Reuse 2d overlay via CSS HUD if present; otherwise skip.
-  let el = document.getElementById('campaign-jump-hud');
-  if (!el) {
-    el = document.createElement('div');
-    el.id = 'campaign-jump-hud';
-    el.style.cssText = 'position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:7;width:180px;height:8px;background:rgba(20,30,45,0.85);border:1px solid rgba(140,180,220,0.45);pointer-events:none;';
-    const fill = document.createElement('div');
-    fill.id = 'campaign-jump-fill';
-    fill.style.cssText = 'height:100%;width:0%;background:linear-gradient(90deg,#6cf,#9ef);';
-    el.appendChild(fill);
-    document.body.appendChild(el);
-  }
-  const fill = document.getElementById('campaign-jump-fill');
-  const max = 5 * TPS;
-  const pct = campaignJumping ? 100 : Math.min(100, ((campaignJumpCharge | 0) / max) * 100);
-  el.style.display = 'block';
-  if (fill) {
-    fill.style.width = pct + '%';
-    fill.style.background = campaignJumping
-      ? 'linear-gradient(90deg,#ffe08a,#fff0c0)'
-      : 'linear-gradient(90deg,#6cf,#9ef)';
+/** Warp streak particles while hyperspace boosting. */
+function emitCampaignJumpBurst() {
+  if (!campaignMode || (player.hp | 0) <= 0) return;
+  const me = localView();
+  const back = me.angle + Math.PI;
+  emitParticles({
+    x: me.x,
+    y: me.y,
+    count: 18,
+    speed: (55 + Math.random() * 40) * RES_SCALE,
+    speedSpread: 35 * RES_SCALE,
+    direction: back,
+    spread: 1.1,
+    size: 1.6 + Math.random(),
+    sizeSpread: 0.8,
+    scaleY: 2.0,
+    lifetime: 0.28,
+    lifetimeSpread: 0.12,
+    color: [0.7, 0.9, 1.0],
+    drag: 1.4,
+    inheritVx: me.vx * 0.25,
+    inheritVy: me.vy * 0.25,
+    skipShip: myId | 0
+  });
+}
+
+function emitCampaignJumpFx() {
+  if (!campaignMode || campaignMapOpen || !campaignJumping || deathSpectating) return;
+  if ((player.hp | 0) <= 0) return;
+  const me = localView();
+  const back = me.angle + Math.PI;
+  const col = [0.55, 0.85, 1.0];
+  const hot = [1.0, 0.95, 0.75];
+  emitParticles({
+    x: me.x + Math.cos(back) * 6 * RES_SCALE,
+    y: me.y + Math.sin(back) * 6 * RES_SCALE,
+    count: 3,
+    speed: (40 + Math.random() * 50) * RES_SCALE,
+    speedSpread: 28 * RES_SCALE,
+    direction: back,
+    spread: 0.55,
+    size: 1.4 + Math.random() * 1.2,
+    sizeSpread: 0.6,
+    scaleY: 1.8,
+    lifetime: 0.18 + Math.random() * 0.2,
+    lifetimeSpread: 0.08,
+    color: Math.random() > 0.45 ? col : hot,
+    drag: 1.6,
+    inheritVx: me.vx * 0.35,
+    inheritVy: me.vy * 0.35,
+    skipShip: myId | 0
+  });
+  // Soft nose flash
+  if (Math.random() > 0.55) {
+    emitParticles({
+      x: me.x + Math.cos(me.angle) * 8 * RES_SCALE,
+      y: me.y + Math.sin(me.angle) * 8 * RES_SCALE,
+      count: 1,
+      speed: (8 + Math.random() * 12) * RES_SCALE,
+      speedSpread: 6 * RES_SCALE,
+      direction: me.angle,
+      spread: 0.8,
+      size: 2.2,
+      sizeSpread: 0.5,
+      lifetime: 0.12,
+      color: hot,
+      drag: 2.2,
+      inheritVx: me.vx * 0.2,
+      inheritVy: me.vy * 0.2,
+      skipShip: myId | 0
+    });
   }
 }
 
@@ -22310,8 +22360,8 @@ function enterGameFromWelcome(msg) {
   campaignMapOpen = false;
   campaignStars = [];
   campaignAtStar = msg.at != null ? (msg.at | 0) : 0;
-  campaignJumpCharge = 0;
   campaignJumping = false;
+  jumpPulse = false;
   hideCampaignMap();
   setPracticeWaiting(!!msg.practice);
   refreshGridStaticPins();
@@ -23015,8 +23065,8 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'campaignStage' && inGame) {
       if (msg.at != null) campaignAtStar = msg.at | 0;
-      campaignJumpCharge = 0;
       campaignJumping = false;
+      jumpPulse = false;
       hideCampaignMap();
       if (msg.n != null) {
         soloWave = msg.n | 0;
@@ -23026,8 +23076,9 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'campJump' && inGame) {
       if ((msg.id | 0) === (myId | 0) || msg.id == null) {
-        campaignJumpCharge = msg.c | 0;
+        const was = campaignJumping;
         campaignJumping = !!(msg.j | 0);
+        if (campaignJumping && !was) emitCampaignJumpBurst();
       }
       return;
     }

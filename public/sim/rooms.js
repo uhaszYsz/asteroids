@@ -820,6 +820,7 @@ function stepRoom(room) {
   resolvePlayerGunshipCollisions(room);
   resolvePlayerPlayerCollisions(room);
   tickSoloWaves(room);
+  tickCampaignStageClearJump(room);
   pushPoseHistory(room);
   sendAsteroidGhostDumps(room);
 }

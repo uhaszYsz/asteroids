@@ -475,7 +475,6 @@ function createCampaignStageAsteroids() {
 
 function clearCampaignJump(p) {
   if (!p) return;
-  p.jumpCharge = 0;
   p.jumping = false;
 }
 
@@ -500,6 +499,29 @@ function broadcastCampaignMap(room, open) {
     at: room.campaignStarId | 0,
     stars: packCampaignStars(room)
   });
+}
+
+function notifyCampaignJump(room, p) {
+  if (!room || !p) return;
+  roomBroadcast(room, { t: 'campJump', id: p.id, j: p.jumping ? 1 : 0 });
+}
+
+function startCampaignJump(room, p) {
+  if (!room || !room.campaign || room.campaignMapOpen || !p || (p.hp | 0) <= 0) return false;
+  if (p.jumping) return false;
+  p.jumping = true;
+  notifyCampaignJump(room, p);
+  return true;
+}
+
+/** Stage clear → every living pilot boosts out automatically. */
+function tickCampaignStageClearJump(room) {
+  if (!room || !room.campaign || room.campaignMapOpen) return;
+  if (soloWaveHasFieldThreats(room)) return;
+  for (const p of room.players.values()) {
+    if (p.bot || (p.hp | 0) <= 0) continue;
+    startCampaignJump(room, p);
+  }
 }
 
 function openCampaignMap(room) {
@@ -578,31 +600,15 @@ function travelCampaignStar(room, x, y) {
   return { ok: 1, at: room.campaignStarId | 0 };
 }
 
-/** Hold Enter to charge; when full, boost with aim-dir accel each tick (no edge wrap). */
+/** Enter pulse starts boost immediately; each tick adds aim-dir accel (no edge wrap). */
 function tickCampaignPlayerJump(room, p) {
   if (!room || !room.campaign || room.campaignMapOpen || !p || (p.hp | 0) <= 0) return;
+  if (!p.jumping && p.inp && (p.inp.j | 0)) {
+    startCampaignJump(room, p);
+  }
   if (p.jumping) {
     p.vx += lenDirX(CAMPAIGN_JUMP_ACCEL, p.angle);
     p.vy += lenDirY(CAMPAIGN_JUMP_ACCEL, p.angle);
-    return;
-  }
-  if (p.inp && (p.inp.j | 0)) {
-    p.jumpCharge = (p.jumpCharge | 0) + 1;
-    if ((p.jumpCharge | 0) >= CAMPAIGN_JUMP_CHARGE_TICKS) {
-      p.jumping = true;
-      p.jumpCharge = CAMPAIGN_JUMP_CHARGE_TICKS;
-    }
-  } else if (!p.jumping) {
-    p.jumpCharge = 0;
-  }
-  const prevC = p._prevJumpCharge;
-  const prevJ = p._prevJumping ? 1 : 0;
-  const nowC = p.jumpCharge | 0;
-  const nowJ = p.jumping ? 1 : 0;
-  if (prevC !== nowC || prevJ !== nowJ) {
-    p._prevJumpCharge = nowC;
-    p._prevJumping = !!p.jumping;
-    roomBroadcast(room, { t: 'campJump', id: p.id, c: nowC, j: nowJ });
   }
 }
 
@@ -3504,7 +3510,6 @@ function spawnPlayer(id, name, colors, room) {
     inp: { l: 0, r: 0, u: 0, sp: 0, sh: 0, j: 0 },
     inputQueue: [],
     lastSeq: 0,
-    jumpCharge: 0,
     jumping: false
   };
 }
