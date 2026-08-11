@@ -13677,8 +13677,6 @@ const modePvpMetaEl = document.getElementById('mode-pvp-meta');
 const modeCoopMetaEl = document.getElementById('mode-coop-meta');
 const modeCampaignCoopMetaEl = document.getElementById('mode-campaign-coop-meta');
 const campaignMapEl = document.getElementById('campaign-map');
-const campaignMapCanvas = document.getElementById('campaign-map-c');
-const campaignMapCtx = campaignMapCanvas ? campaignMapCanvas.getContext('2d') : null;
 const campaignMapFuelEl = document.getElementById('campaign-map-fuel');
 
 function syncCampaignFuelHud() {
@@ -14501,6 +14499,7 @@ function hideCampaignMap() {
     campaignMapEl.classList.remove('open');
     campaignMapEl.setAttribute('aria-hidden', 'true');
   }
+  if (canvas) canvas.style.cursor = '';
   hideCampaignJumpHud();
 }
 
@@ -14510,8 +14509,8 @@ function showCampaignMap() {
     campaignMapEl.classList.add('open');
     campaignMapEl.setAttribute('aria-hidden', 'false');
   }
+  if (canvas) canvas.style.cursor = 'crosshair';
   syncCampaignFuelHud();
-  redrawCampaignMap();
 }
 
 function applyCampaignMapMsg(msg) {
@@ -14544,8 +14543,8 @@ function applyCampaignMapMsg(msg) {
 }
 
 function campaignMapCanvasToWorld(clientX, clientY) {
-  if (!campaignMapCanvas) return { x: W * 0.5, y: H * 0.5 };
-  const r = campaignMapCanvas.getBoundingClientRect();
+  if (!canvas) return { x: W * 0.5, y: H * 0.5 };
+  const r = canvas.getBoundingClientRect();
   return {
     x: ((clientX - r.left) / Math.max(1, r.width)) * W,
     y: ((clientY - r.top) / Math.max(1, r.height)) * H
@@ -14587,86 +14586,78 @@ function pickLocalCampaignStar(mouseX, mouseY) {
   return bestInRange || nearestOther || at;
 }
 
-function redrawCampaignMap() {
-  if (!campaignMapCtx || !campaignMapCanvas) return;
-  const ctx = campaignMapCtx;
-  const cw = campaignMapCanvas.width;
-  const ch = campaignMapCanvas.height;
-  ctx.fillStyle = '#05070f';
-  ctx.fillRect(0, 0, cw, ch);
-  // soft nebula
-  const g = ctx.createRadialGradient(cw * 0.35, ch * 0.4, 10, cw * 0.5, ch * 0.5, cw * 0.55);
-  g.addColorStop(0, 'rgba(40, 70, 120, 0.25)');
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, cw, ch);
+function pushCampaignCircleLines(out, cx, cy, radius, segs) {
+  const n = Math.max(8, segs | 0);
+  const r = Math.max(0.5, +radius);
+  for (let i = 0; i < n; i++) {
+    const a0 = (i / n) * Math.PI * 2;
+    const a1 = ((i + 1) / n) * Math.PI * 2;
+    out.push(
+      cx + Math.cos(a0) * r, cy + Math.sin(a0) * r,
+      cx + Math.cos(a1) * r, cy + Math.sin(a1) * r
+    );
+  }
+}
 
-  const sx = cw / W;
-  const sy = ch / H;
+/** Fullscreen WebGL star map on the main game canvas (same W×H). */
+function drawCampaignMapGL(now) {
+  const t = now || performance.now();
+  // Soft backdrop wash (same clear color already applied).
+  drawSoftOval(W * 0.38, H * 0.42, 0, W * 0.42, H * 0.38, [0.16, 0.28, 0.48], 0.22, true, 0.55);
+  drawSoftOval(W * 0.7, H * 0.65, 0.4, W * 0.3, H * 0.28, [0.12, 0.18, 0.32], 0.16, true, 0.5);
+
   const pickR = 70 * RES_SCALE;
   const at = campaignCurrentStarLocal();
   const hover = pickLocalCampaignStar(campaignMapPointer.x, campaignMapPointer.y);
 
-  // Expanding zone from world bottom-left (map only) — filled discs, not outlines.
   const zoneR = campaignJumpCount >= 1
     ? (70 * RES_SCALE) + (campaignJumpCount - 1) * (20 * RES_SCALE)
     : 0;
   if (zoneR > 0) {
-    const ox = 0;
-    const oy = H;
     const nextR = zoneR + 20 * RES_SCALE;
-    ctx.beginPath();
-    ctx.arc(ox * sx, oy * sy, nextR * sx, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255, 48, 48, 0.22)';
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(ox * sx, oy * sy, zoneR * sx, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(255, 48, 48, 0.5)';
-    ctx.fill();
+    drawSoftOval(0, H, 0, nextR, nextR, [1.0, 0.2, 0.2], 0.2, true, 0.65);
+    drawSoftOval(0, H, 0, zoneR, zoneR, [1.0, 0.22, 0.22], 0.45, true, 0.7);
   }
 
-  // Jump radius around current star (not the mouse).
   if (at) {
-    ctx.beginPath();
-    ctx.arc(at.x * sx, at.y * sy, pickR * sx, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(120, 180, 255, 0.28)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
+    const ring = [];
+    pushCampaignCircleLines(ring, at.x, at.y, pickR, 48);
+    drawLines(ring, [0.47, 0.7, 1.0], gl.LINES, 0.28, false);
   }
 
+  const exitRing = [];
+  const focusRing = [];
   for (let i = 0; i < campaignStars.length; i++) {
     const s = campaignStars[i];
-    const px = s.x * sx;
-    const py = s.y * sy;
     const isAt = (s.id | 0) === (campaignAtStar | 0);
     const isHover = hover && (hover.id | 0) === (s.id | 0);
     const isExit = !!s.exit;
     const inPick = !!(at && !isAt && Math.hypot(s.x - at.x, s.y - at.y) <= pickR);
-    if (isExit) {
-      ctx.beginPath();
-      ctx.arc(px, py, 9, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(120, 255, 170, 0.55)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.arc(px, py, isAt ? 5.5 : (isHover || isExit ? 4.5 : 2.8), 0, Math.PI * 2);
-    ctx.fillStyle = isAt ? '#ffe08a' : (isExit ? '#7dffb0' : (inPick ? '#d8f0ff' : '#9aa8c0'));
-    ctx.fill();
-    if (isAt || isHover) {
-      ctx.beginPath();
-      ctx.arc(px, py, isAt ? 12 : 10, 0, Math.PI * 2);
-      ctx.strokeStyle = isAt ? 'rgba(255, 220, 120, 0.7)' : 'rgba(160, 210, 255, 0.55)';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-    }
+    if (isExit) pushCampaignCircleLines(exitRing, s.x, s.y, 9, 28);
+    if (isAt || isHover) pushCampaignCircleLines(focusRing, s.x, s.y, isAt ? 12 : 10, 28);
+    const r = isAt ? 5.5 : (isHover || isExit ? 4.5 : 2.8);
+    let col = [0.6, 0.66, 0.75];
+    if (isAt) col = [1.0, 0.88, 0.54];
+    else if (isExit) col = [0.49, 1.0, 0.69];
+    else if (inPick) col = [0.85, 0.94, 1.0];
+    drawSoftOval(s.x, s.y, 0, r, r, col, 0.95, true, 0.35);
   }
+  if (exitRing.length) drawLines(exitRing, [0.47, 1.0, 0.67], gl.LINES, 0.55, false);
+  if (focusRing.length) drawLines(focusRing, [1.0, 0.86, 0.47], gl.LINES, 0.7, false);
 
-  // Mouse cursor marker
-  ctx.beginPath();
-  ctx.arc(campaignMapPointer.x * sx, campaignMapPointer.y * sy, 3, 0, Math.PI * 2);
-  ctx.fillStyle = '#ffffff';
-  ctx.fill();
+  // Pointer
+  drawSoftOval(campaignMapPointer.x, campaignMapPointer.y, 0, 3, 3, [1, 1, 1], 0.9, true, 0.4);
+
+  // You-are-here: ship orbiting the current star.
+  if (at) {
+    const orbitR = 16 * RES_SCALE;
+    const ang = t * 0.0022;
+    const sx = at.x + Math.cos(ang) * orbitR;
+    const sy = at.y + Math.sin(ang) * orbitR;
+    const nose = ang + Math.PI * 0.5;
+    const col = ownerPlayerColor(myId);
+    drawShip3D(sx, sy, nose, 0.08, col, myId || 1, 0.016, true);
+  }
 }
 
 function confirmCampaignTravel() {
@@ -14684,15 +14675,14 @@ function confirmCampaignTravel() {
   } catch (_) {}
 }
 
-if (campaignMapCanvas) {
-  campaignMapCanvas.addEventListener('mousemove', (e) => {
+if (canvas) {
+  canvas.addEventListener('mousemove', (e) => {
     if (!campaignMapOpen) return;
     const p = campaignMapCanvasToWorld(e.clientX, e.clientY);
     campaignMapPointer.x = p.x;
     campaignMapPointer.y = p.y;
-    redrawCampaignMap();
   });
-  campaignMapCanvas.addEventListener('click', (e) => {
+  canvas.addEventListener('click', (e) => {
     if (!campaignMapOpen) return;
     const p = campaignMapCanvasToWorld(e.clientX, e.clientY);
     campaignMapPointer.x = p.x;
@@ -22141,6 +22131,12 @@ function render() {
   const nowBg = performance.now();
   tickAsteroidTuneLead(nowBg);
   applyScreenShakeCss(nowBg);
+  if (campaignMapOpen) {
+    syncThrustSfx(false);
+    syncLaserSfx(false);
+    drawCampaignMapGL(nowBg);
+    return;
+  }
   drawSynthGrid(nowBg);
   if (!inGame) {
     syncThrustSfx(false);

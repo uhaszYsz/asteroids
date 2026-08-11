@@ -650,28 +650,23 @@
     #campaign-map {
       position: fixed; inset: 0; z-index: 8;
       display: none;
-      align-items: center; justify-content: center;
-      background: #02040a;
+      pointer-events: none;
       flex-direction: column;
-      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      padding-bottom: max(18px, env(safe-area-inset-bottom, 0px) + 12px);
+      gap: 6px;
+      background: transparent;
     }
     #campaign-map.open {
       display: flex;
-    }
-    #campaign-map-c {
-      width: min(96vw, 960px);
-      height: min(54vw, 540px);
-      max-height: 80vh;
-      background: #05070f;
-      border: 1px solid rgba(120, 160, 220, 0.35);
-      cursor: crosshair;
-      image-rendering: pixelated;
     }
     #campaign-map-hint {
       font-family: "Segoe UI", system-ui, sans-serif;
       font-size: 13px;
       color: #9bb4c8;
       letter-spacing: 0.04em;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.85);
     }
     #campaign-map-fuel {
       font-family: "Segoe UI", system-ui, sans-serif;
@@ -679,7 +674,7 @@
       font-weight: 600;
       color: #d8f0ff;
       letter-spacing: 0.06em;
-      margin-top: 2px;
+      text-shadow: 0 1px 4px rgba(0,0,0,0.85);
     }
     #campaign-map-fuel.empty {
       color: #ff8a8a;
@@ -2389,7 +2384,6 @@
   </div>
 </div>
 <div id="campaign-map" aria-hidden="true">
-  <canvas id="campaign-map-c" width="960" height="540"></canvas>
   <div id="campaign-map-hint">Stars within range of your current star · click or Enter · nearest if none in range</div>
   <div id="campaign-map-fuel">Jump fuel: 10</div>
 </div>
@@ -2457,7 +2451,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=89');
-      await loadScript('game.js?v=1040');
+      await loadScript('game.js?v=1041');
     } catch (err) {
       console.error(err);
     }
