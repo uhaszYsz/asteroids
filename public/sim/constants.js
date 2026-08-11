@@ -458,8 +458,8 @@ const ENEMY_GUNSHIP_SPRAY = {
   cooldown: 1,
   reload: Math.round(1 * TPS),
   kickDeg: 15,
-  spdMin: 3,
-  spdMax: 6,
+  spdMin: 6,
+  spdMax: 12,
   sizeMin: 3,
   sizeMax: 7,
   dmg: 14
