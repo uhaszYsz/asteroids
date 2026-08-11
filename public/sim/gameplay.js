@@ -1199,35 +1199,9 @@ function gunshipMagnetPullSpeed(e) {
   return MAX_SPEED * ENEMY_GUNSHIP_MAGNET_PULL_FRAC * (t * t);
 }
 
-/**
- * Player magnet: raise velocity *along* gunship direction up to `pull`.
- * Does not damp or rewrite other velocity — thrust/physics stay normal.
- * Idle ship → moves toward gunship at exactly `pull`.
- */
-function gunshipMagnetApplyPlayerVel(p, e, pull) {
-  if (!p || !e || !(pull > 0)) return;
-  const dx = e.x - p.x;
-  const dy = e.y - p.y;
-  const dist = Math.hypot(dx, dy) || 1;
-  const ux = dx / dist;
-  const uy = dy / dist;
-  const along = (p.vx || 0) * ux + (p.vy || 0) * uy;
-  if (along >= pull) return;
-  const need = pull - along;
-  p.vx = (p.vx || 0) + ux * need;
-  p.vy = (p.vy || 0) + uy * need;
-}
-
-/** Apply active gunship magnet to a player (inside applyInput, before speed limit). */
-function applyGunshipMagnetToPlayer(room, p) {
-  if (!room || !room.practice || !room.enemies || !p) return;
-  if ((p.hp | 0) <= 0 || (p.godLeft | 0) > 0) return;
-  for (let i = 0; i < room.enemies.length; i++) {
-    const e = room.enemies[i];
-    if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4) continue;
-    gunshipMagnetApplyPlayerVel(p, e, gunshipMagnetPullSpeed(e));
-    return;
-  }
+/** Player is not affected by gunship magnet. */
+function applyGunshipMagnetToPlayer(/* room, p */) {
+  return;
 }
 
 function gunshipMagnetAstAccelFor(a) {
@@ -3477,7 +3451,6 @@ function applyInput(room, p) {
     p.vx += Math.cos(p.angle) * THRUST;
     p.vy += Math.sin(p.angle) * THRUST;
   }
-  applyGunshipMagnetToPlayer(room, p);
   limitPlayerSpeed(p);
 }
 

@@ -19283,22 +19283,8 @@ function activeGunshipMagnet() {
   return null;
 }
 
-function applyLocalGunshipMagnetPull(o) {
-  const e = activeGunshipMagnet();
-  if (!e || !o || (o.hp | 0) <= 0 || (o.godLeft | 0) > 0) return;
-  const pull = gunshipMagnetPullSpeedClient(e);
-  if (!(pull > 0)) return;
-  const p = enemyAt(e);
-  const dx = p.x - o.x;
-  const dy = p.y - o.y;
-  const dist = Math.hypot(dx, dy) || 1;
-  const ux = dx / dist;
-  const uy = dy / dist;
-  const along = (o.vx || 0) * ux + (o.vy || 0) * uy;
-  if (along >= pull) return;
-  const need = pull - along;
-  o.vx = (o.vx || 0) + ux * need;
-  o.vy = (o.vy || 0) + uy * need;
+function applyLocalGunshipMagnetPull(/* o */) {
+  // Player is not affected by gunship magnet.
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
@@ -20781,7 +20767,6 @@ function applyInputTo(o, inp, opts) {
     o.vx += Math.cos(o.angle) * THRUST;
     o.vy += Math.sin(o.angle) * THRUST;
   }
-  applyLocalGunshipMagnetPull(o);
   limitPlayerSpeed(o);
   o.x += o.vx;
   o.y += o.vy;
