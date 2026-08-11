@@ -1158,14 +1158,26 @@ function beginGunshipAttack(room, e) {
 function fireGunshipSprayShot(room, e, angleOffset) {
   const base = (e.dir != null && Number.isFinite(e.dir)) ? e.dir
     : (Number.isFinite(e.angle) ? e.angle : 0);
+  const off = angleOffset || 0;
   const kick = ((Math.random() * 2) - 1) * (ENEMY_GUNSHIP_SPRAY.kickDeg * Math.PI / 180);
-  const ang = base + (angleOffset || 0) + kick;
+  const ang = base + off + kick;
   const spd = ENEMY_GUNSHIP_SPRAY.spdMin
     + Math.random() * (ENEMY_GUNSHIP_SPRAY.spdMax - ENEMY_GUNSHIP_SPRAY.spdMin);
   const sz = ENEMY_GUNSHIP_SPRAY.sizeMin
     + Math.random() * (ENEMY_GUNSHIP_SPRAY.sizeMax - ENEMY_GUNSHIP_SPRAY.sizeMin);
-  const x = e.x + Math.cos(ang) * ((e.r || 10) + 4);
-  const y = e.y + Math.sin(ang) * ((e.r || 10) + 4);
+  let x;
+  let y;
+  if (off !== 0) {
+    // Sideways: muzzle at half plane width on the hull flank (not out at hit-radius).
+    const side = off > 0 ? 1 : -1;
+    const muzzle = ENEMY_GUNSHIP_HIT_WID;
+    const lat = base + side * (Math.PI * 0.5);
+    x = e.x + Math.cos(lat) * muzzle;
+    y = e.y + Math.sin(lat) * muzzle;
+  } else {
+    x = e.x + Math.cos(ang) * ((e.r || 10) + 4);
+    y = e.y + Math.sin(ang) * ((e.r || 10) + 4);
+  }
   const now = Date.now();
   const b = {
     id: room.nextBulletId++,
