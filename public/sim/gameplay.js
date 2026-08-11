@@ -594,6 +594,12 @@ function beginCampaignStage(room, opts) {
   setAsteroidsList(room, createCampaignStageAsteroids());
   for (const a of room.asteroids) emitAsteroidFire(room, a);
   clearSoloEnemies(room, true);
+  if (room.pickups && room.pickups.length) {
+    for (const u of room.pickups) {
+      emitPickupDead(room, u.id, null, null, { silent: 1 });
+    }
+    room.pickups.length = 0;
+  }
   if (room.bullets && room.bullets.length) {
     for (const b of room.bullets) roomBroadcast(room, { t: 'bd', id: b.id });
     room.bullets.length = 0;
@@ -3075,17 +3081,18 @@ function splitAsteroid(room, parent) {
 }
 
 function spawnPickup(room, parent) {
+  // Campaign stages never drop crates (weapons / health / powerups).
+  if (!room || room.campaign) return;
   const ang = Math.random() * Math.PI * 2;
   const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
   const roll = Math.random();
   let kind = 'weapon';
   let weapon = null;
   let powerup = null;
-  // Campaign: weapons / health only — never drop shield/drone crates.
-  if (!room.campaign && roll < 0.28) {
+  if (roll < 0.28) {
     kind = 'powerup';
     powerup = POWERUP_TYPES[Math.random() * POWERUP_TYPES.length | 0];
-  } else if (roll < (room.campaign ? 0.5 : 0.64)) {
+  } else if (roll < 0.64) {
     kind = 'health';
   } else {
     weapon = WEAPON_SLOTS[Math.random() * WEAPON_SLOTS.length | 0];
