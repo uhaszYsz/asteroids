@@ -594,6 +594,7 @@ function beginCampaignStage(room, opts) {
   setAsteroidsList(room, createCampaignStageAsteroids());
   for (const a of room.asteroids) emitAsteroidFire(room, a);
   clearSoloEnemies(room, true);
+  spawnCampaignStageEnemies(room);
   if (room.pickups && room.pickups.length) {
     for (const u of room.pickups) {
       emitPickupDead(room, u.id, null, null, { silent: 1 });
@@ -1065,6 +1066,41 @@ function clearSoloCommons(room) {
     if (enemyIsSpawned(e)) emitEnemyDead(room, e, true);
   }
   room.enemies = kept;
+}
+
+/** Campaign stage enemies: random commons + optional UFO/spinner. */
+function spawnCampaignStageEnemies(room) {
+  if (!room || !room.campaign) return;
+  if (!room.enemies) room.enemies = [];
+  if (!room.nextEnemyId) room.nextEnemyId = 1;
+  const wave = Math.max(1, room.wave | 0);
+
+  // 40% chance → 1–3 commons; 10% chance to double that count.
+  if (Math.random() < 0.4) {
+    let n = 1 + ((Math.random() * 3) | 0);
+    if (Math.random() < 0.1) n *= 2;
+    n = Math.min(MAX_COMMON_ON_FIELD, n);
+    for (let i = 0; i < n; i++) {
+      const commonKind = Math.random() < 0.5 ? 'common1' : 'common';
+      const e = makeEnemy(commonKind, wave);
+      e.id = room.nextEnemyId++;
+      e.queued = false;
+      e.appearLeft = 0;
+      room.enemies.push(e);
+      emitEnemyFire(room, e);
+    }
+  }
+
+  // 12% chance → one special (UFO or spinner).
+  if (Math.random() < 0.12) {
+    const specialKind = Math.random() < 0.5 ? 'spinner' : 'ufo';
+    const e = makeEnemy(specialKind, wave);
+    e.id = room.nextEnemyId++;
+    e.queued = false;
+    e.appearLeft = 0;
+    room.enemies.push(e);
+    emitEnemyFire(room, e);
+  }
 }
 
 function spawnSoloWaveEnemies(room, wave) {
