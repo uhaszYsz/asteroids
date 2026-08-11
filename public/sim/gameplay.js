@@ -1156,11 +1156,13 @@ function fireGunshipSprayShot(room, e) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
-/** Four voids at 90° — player void speed/size/dmg. */
+/** Four voids at 90° — player void size/dmg, half player void speed. */
 function fireGunshipVoidVolley(room, e) {
   const w = WEAPONS.voidcannon;
-  const spd = (w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE);
-  const dmg = (BULLET_TYPES.voidcannon && BULLET_TYPES.voidcannon.dmg) || 5;
+  const spd = ((w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE)) * 0.5;
+  const cfg = BULLET_TYPES.voidcannon;
+  const dmg = (cfg && cfg.dmg) || 5;
+  const size = (cfg && cfg.size) || (27 * RES_SCALE);
   const base = Math.random() * Math.PI * 2;
   const now = Date.now();
   for (let i = 0; i < 4; i++) {
@@ -1173,6 +1175,7 @@ function fireGunshipVoidVolley(room, e) {
       enemyOwner: e.id | 0,
       type: 'voidcannon',
       dmg,
+      size,
       x, y,
       spawnX: x,
       spawnY: y,
@@ -6119,10 +6122,12 @@ function updateBullets(room) {
     if (b.type === 'voidcannon') {
       if (!b.voidTouch) b.voidTouch = new Map();
       const active = new Set();
+      const enemyVoid = (b.enemyOwner | 0) > 0;
       for (const p of players.values()) {
         if (p.id === b.owner || p.hp <= 0 || p.godLeft > 0) continue;
-        if (blocksFriendlyFire(room, b.owner)) continue;
-        const target = lagCompPose(room, b.owner, p);
+        if (!enemyVoid && blocksFriendlyFire(room, b.owner)) continue;
+        // Enemy voids: live pose (same as other NPC shots). Player voids: lag-comp.
+        const target = enemyVoid ? p : lagCompPose(room, b.owner, p);
         if (!hitBulletPlayer(b, target)) continue;
         const key = 'p:' + p.id;
         active.add(key);
@@ -6161,8 +6166,9 @@ function updateBullets(room) {
       for (let j = bullets.length - 1; j >= 0; j--) {
         const r = bullets[j];
         if (!isHittableRocket(r)) continue;
-        if ((r.owner | 0) === (b.owner | 0)) continue;
-        if (blocksFriendlyFire(room, b.owner)) continue;
+        if ((r.owner | 0) === (b.owner | 0) && !enemyVoid) continue;
+        if (enemyVoid && (r.owner | 0) <= 0) continue;
+        if (!enemyVoid && blocksFriendlyFire(room, b.owner)) continue;
         if (!hitBulletTarget(b, r.x, r.y, rocketHitR(r), false)) continue;
         const key = 'r:' + r.id;
         active.add(key);
