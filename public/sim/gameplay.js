@@ -615,7 +615,7 @@ function tickWorldPoseSnap(room) {
 
 /** Common / UFO / worm about to fire — charge telegraph for clients. */
 function emitEnemyCharge(room, e, opts) {
-  if (!e || (!isCommonKind(e.kind) && e.kind !== 'ufo' && e.kind !== 'worm')) return;
+  if (!e || (!isCommonKind(e.kind) && e.kind !== 'ufo' && e.kind !== 'worm' && e.kind !== 'gunship')) return;
   const ms = e.kind === 'ufo'
     ? Math.round((ENEMY_UFO_CHARGE * 1000) / TPS)
     : e.kind === 'worm'
@@ -696,6 +696,7 @@ function makeEnemy(kind, wave, weapon) {
   else if (kind === 'carrier') k = 'carrier';
   else if (kind === 'worm') k = 'worm';
   else if (kind === 'spinner') k = 'spinner';
+  else if (kind === 'gunship') k = 'gunship';
   // Random 4–6s before first shot (reuse fireCd / shootCd — no extra timer).
   const firstShotCd = Math.round(
     (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
@@ -715,7 +716,8 @@ function makeEnemy(kind, wave, weapon) {
     angle: 0,
     dir: 0,
     hp: ENEMY_HP[k] != null ? ENEMY_HP[k] : ENEMY_HP.common,
-    r: k === 'ufo' ? ENEMY_UFO_HIT_R : (ENEMY_R[k] || ENEMY_R.common),
+    r: k === 'ufo' ? ENEMY_UFO_HIT_R
+      : (k === 'gunship' ? ENEMY_GUNSHIP_HIT_R : (ENEMY_R[k] || ENEMY_R.common)),
     tx: 0,
     ty: 0,
     fireCd: firstShotCd,
@@ -1544,6 +1546,18 @@ function enemyTryFire(room, e) {
     return;
   }
 
+  if (e.kind === 'gunship') {
+    // Twin-prong craft 224: same 3-spread as commons, along facing.
+    const baseG = (e.dir != null && Number.isFinite(e.dir)) ? e.dir
+      : (Number.isFinite(e.angle) ? e.angle : 0);
+    const spreadG = (15 * Math.PI) / 180;
+    fireEnemyLineBullet(room, e, baseG, ENEMY_COMMON_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
+    fireEnemyLineBullet(room, e, baseG - spreadG, ENEMY_COMMON_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
+    fireEnemyLineBullet(room, e, baseG + spreadG, ENEMY_COMMON_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
+    e.fireCd = ENEMY_COMMON_RELOAD;
+    return;
+  }
+
   // Commons: fire along current facing (wander / turn), not at the player.
   // Charge orbs sit on the nose — aiming at the player while facing elsewhere
   // looked like a charge with no bullets.
@@ -1677,7 +1691,7 @@ function updateEnemies(room) {
     }
     if ((e.fireCd | 0) > 0) e.fireCd--;
     // Pre-shot charge telegraph (commons 1s, UFO turrets 0.5s).
-    if (isCommonKind(e.kind) && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
+    if ((isCommonKind(e.kind) || e.kind === 'gunship') && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
       emitEnemyCharge(room, e);
     }
     if (e.kind === 'ufo' && (e.fireCd | 0) === ENEMY_UFO_CHARGE) {
@@ -1747,7 +1761,7 @@ function damageEnemy(room, e, dmg, ownerId) {
 
   let coinGrant = 0;
   let coinVisual = 0;
-  if (kind === 'ufo' || kind === 'spinner') {
+  if (kind === 'ufo' || kind === 'spinner' || kind === 'gunship') {
     coinGrant = ENEMY_ELITE_COIN_GRANT;
     coinVisual = ENEMY_ELITE_COIN_VISUAL;
   } else if (kind === 'worm') {
@@ -1765,13 +1779,16 @@ function damageEnemy(room, e, dmg, ownerId) {
 }
 
 function enemyUsesRectHit(e) {
-  return !!(e && (e.kind === 'ufo' || e.kind === 'worm'));
+  return !!(e && (e.kind === 'ufo' || e.kind === 'worm' || e.kind === 'gunship'));
 }
 
-/** Full length/width of oriented enemy hit box (UFO or worm). */
+/** Full length/width of oriented enemy hit box (UFO, gunship, or worm). */
 function enemyRectDims(e) {
   if (e && e.kind === 'worm') {
     return { len: ENEMY_WORM_HIT_LEN, wid: ENEMY_WORM_HIT_WID };
+  }
+  if (e && e.kind === 'gunship') {
+    return { len: ENEMY_GUNSHIP_HIT_LEN, wid: ENEMY_GUNSHIP_HIT_WID };
   }
   return { len: ENEMY_UFO_HIT_LEN, wid: ENEMY_UFO_HIT_WID };
 }
@@ -2908,7 +2925,7 @@ function resolveAdminGiveItem(raw) {
 
 /**
  * Admin console `spawn <kind>` — off-screen asteroid / enemy with normal entry path.
- * kinds: big medium small huge meteor common ufo worm spinner
+ * kinds: big medium small huge meteor common common1 ufo worm spinner gunship
  */
 function handleAdminSpawn(ws, kindRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -2934,7 +2951,7 @@ function handleAdminSpawn(ws, kindRaw) {
     emitAsteroidFire(room, a);
     return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
   }
-  if (kind === 'common' || kind === 'common1' || kind === 'ufo' || kind === 'worm' || kind === 'spinner') {
+  if (kind === 'common' || kind === 'common1' || kind === 'ufo' || kind === 'worm' || kind === 'spinner' || kind === 'gunship') {
     if (!room.practice) return { ok: 0, err: 'enemies only in solo/coop wave rooms' };
     if (!room.enemies) room.enemies = [];
     if (!room.nextEnemyId) room.nextEnemyId = 1;
@@ -2948,7 +2965,7 @@ function handleAdminSpawn(ws, kindRaw) {
   }
   return {
     ok: 0,
-    err: 'usage: spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner'
+    err: 'usage: spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner|gunship'
   };
 }
 

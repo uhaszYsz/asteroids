@@ -7117,6 +7117,7 @@ function enemyMaxHp(kind) {
   if (kind === 'carrier') return 90;
   if (kind === 'worm') return 1000;
   if (kind === 'spinner') return 320;
+  if (kind === 'gunship') return 220;
   return 95;
 }
 
@@ -7254,6 +7255,7 @@ function enemyThrustColor(kind) {
   if (kind === 'carrier') return COL.enemyCarrier;
   if (kind === 'worm') return COL.enemy;
   if (kind === 'spinner') return COL.enemy;
+  if (kind === 'gunship') return COL.enemy;
   return COL.enemy;
 }
 
@@ -17661,7 +17663,8 @@ const ENEMY_R = {
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
-  spinner: 8 * RES_SCALE
+  spinner: 8 * RES_SCALE,
+  gunship: 10 * RES_SCALE
 };
 /**
  * UFO (Heavy 370) after 270° CW: fw=52, fh=84.
@@ -17671,6 +17674,12 @@ const ENEMY_UFO_HIT_LEN = 84;
 const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
+/** Gunship (Craft 224) after 270° CW: fw=75, fh=138 — match server OBB × sprite scale. */
+const ENEMY_GUNSHIP_SPRITE_SCALE = 0.85;
+const ENEMY_GUNSHIP_HIT_LEN = Math.round(138 * ENEMY_GUNSHIP_SPRITE_SCALE);
+const ENEMY_GUNSHIP_HIT_WID = Math.round((75 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
+const ENEMY_GUNSHIP_HIT_R = Math.hypot(ENEMY_GUNSHIP_HIT_LEN * 0.5, ENEMY_GUNSHIP_HIT_WID * 0.5);
+ENEMY_R.gunship = ENEMY_GUNSHIP_HIT_R;
 /** Worm: oriented hit box — length 4× circle-R; width 70% of both tube planes. */
 const ENEMY_WORM_HIT_R = 8 * RES_SCALE;
 const ENEMY_WORM_HIT_LEN = 8 * ENEMY_WORM_HIT_R;
@@ -17709,16 +17718,20 @@ function enemyTurnMaxOf(e) {
 function enemyHitR(e) {
   if (!e) return ENEMY_R.common;
   if (e.kind === 'ufo') return ENEMY_UFO_HIT_R;
+  if (e.kind === 'gunship') return ENEMY_GUNSHIP_HIT_R;
   return ENEMY_R[e.kind] || ENEMY_R.common;
 }
 
 function enemyUsesRectHit(e) {
-  return !!(e && (e.kind === 'ufo' || e.kind === 'worm'));
+  return !!(e && (e.kind === 'ufo' || e.kind === 'worm' || e.kind === 'gunship'));
 }
 
 function enemyRectDims(e) {
   if (e && e.kind === 'worm') {
     return { len: ENEMY_WORM_HIT_LEN, wid: ENEMY_WORM_HIT_WID };
+  }
+  if (e && e.kind === 'gunship') {
+    return { len: ENEMY_GUNSHIP_HIT_LEN, wid: ENEMY_GUNSHIP_HIT_WID };
   }
   return { len: ENEMY_UFO_HIT_LEN, wid: ENEMY_UFO_HIT_WID };
 }
@@ -18190,6 +18203,8 @@ const ENEMY_COMMON_MESH = (() => {
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_SPRITE_ID = 'enemy_370';
 const ENEMY_UFO_SPRITE_SCALE = 1;
+/** Gunship = Craft 224 (2 roof plates + sprite). */
+const ENEMY_GUNSHIP_SPRITE_ID = 'enemy_224';
 /** Medium sheet last cell (row 3, col 2) — flat side mounts at mid-length. */
 const ENEMY_UFO_TURRET_SHEET = 'medium';
 const ENEMY_UFO_TURRET_COL = 2;
@@ -18659,6 +18674,7 @@ function beginEnemyCharge(id, ms, side, kind) {
   let k = 'common';
   if (kind === 'ufo') k = 'ufo';
   else if (kind === 'worm') k = 'worm';
+  else if (kind === 'gunship') k = 'common'; // nose charge like commons
   enemyCharges.set(id | 0, {
     start: now,
     until: now + dur,
@@ -19158,6 +19174,21 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
   }
 }
 
+/** Gunship: craft 224 on default 2 roof plates (same path as commons / UFO body). */
+function drawEnemyGunship(x, y, angle, color, id, dt) {
+  const bank = enemyBankSmoothed(id, angle, dt);
+  const opt = getShipOptionById(ENEMY_GUNSHIP_SPRITE_ID);
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(
+      x, y, angle, 0, id, dt, opt, true, color,
+      bank, ENEMY_GUNSHIP_SPRITE_SCALE, COL.enemyOutline
+    );
+  } else {
+    drawEnemyCommon(x, y, angle, color, id, dt);
+  }
+  return bank;
+}
+
 /** Flat z=-10 turrets — visual only; each aims player in its 180° flank arc.
  *  emitTint: same sprite-plane emission tint as the UFO body (cl_ship_emit × bright texels).
  *  outline uses COL.self + host id pulse — same silhouette as UFO sprite planes. */
@@ -19228,7 +19259,10 @@ function drawEnemies(dt) {
     const x = p.x + vs.x;
     const y = p.y + vs.y;
     if (p.kind === 'ufo') drawEnemyUfo(x, y, p.angle, COL.enemyUfo, id, dt);
-    else if (p.kind === 'carrier') drawEnemyCarrier(x, y, p.angle, e.weapon);
+    else if (p.kind === 'gunship') {
+      const bank = drawEnemyGunship(x, y, p.angle, COL.enemy, id, dt);
+      enemyDrawBank.set(id, bank);
+    } else if (p.kind === 'carrier') drawEnemyCarrier(x, y, p.angle, e.weapon);
     else if (p.kind === 'worm') {
       const bank = drawEnemyWorm(x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
@@ -25328,7 +25362,7 @@ function runConsole(line) {
   if (cmdName === 'spawn') {
     if (!conRequireAdmin()) return;
     if (!args.length) {
-      conPrint('usage: spawn big|medium|small|huge|meteor|common|ufo|worm|spinner', 'err');
+      conPrint('usage: spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner|gunship', 'err');
       return;
     }
     if (!ws || ws.readyState !== 1) {
@@ -25348,7 +25382,7 @@ function runConsole(line) {
     conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
     conPrint('give <weapon|shield|drone|live>  — grant loadout / vitals / 99 lives (admin, in-game)', 'info');
-    conPrint('spawn big|medium|small|huge|meteor|common|ufo|worm|spinner  — off-screen spawn (admin, in-game)', 'info');
+    conPrint('spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner|gunship  — off-screen spawn (admin, in-game)', 'info');
     conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');
