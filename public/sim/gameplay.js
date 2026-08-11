@@ -1286,14 +1286,39 @@ function gunshipMagnetClearAllAsteroids(room) {
 
 /**
  * Spawn one small off-screen asteroid during gunship magnet.
- * Keeps makeAsteroid inward velocity; stamps magnet accel into the same `af` packet.
+ * Place on the edge farthest from the gunship and aim velocity + magnet accel at it
+ * (default offscreen spawn aims inward / sideways, which looked random).
  */
 function gunshipMagnetSpawnOneAsteroid(room, e) {
   if (!room || !e) return;
-  const a = makeAsteroid({ size: 'small', offscreen: true, allowSpecial: false, special: null });
-  const dx = e.x - a.x;
-  const dy = e.y - a.y;
+  // Prefer the edge farthest from the ship so the rock crosses toward it.
+  let preferSide = 0;
+  let best = e.x;
+  if ((W - e.x) > best) { best = W - e.x; preferSide = 1; }
+  if (e.y > best) { best = e.y; preferSide = 2; }
+  if ((H - e.y) > best) preferSide = 3;
+  const r = ASTEROID_R.small * (0.92 + Math.random() * 0.16);
+  const pose = spawnOffscreenIncoming(r, 1, preferSide);
+  const dx = e.x - pose.x;
+  const dy = e.y - pose.y;
   const dist = Math.hypot(dx, dy) || 1;
+  const band = asteroidSpeedBand(null);
+  const spd = band.min + Math.random() * Math.max(0, band.max - band.min);
+  const a = makeAsteroid({
+    size: 'small',
+    offscreen: true,
+    allowSpecial: false,
+    special: null,
+    x: pose.x,
+    y: pose.y,
+    vx: (dx / dist) * spd,
+    vy: (dy / dist) * spd,
+    r
+  });
+  // Explicit x/y marks entered=true in makeAsteroid; magnet rocks still start off-screen.
+  a.entered = false;
+  a.spawnX = pose.x;
+  a.spawnY = pose.y;
   const accel = ENEMY_GUNSHIP_MAGNET_AST_ACCEL;
   a.magnetAx = (dx / dist) * accel;
   a.magnetAy = (dy / dist) * accel;
@@ -1301,7 +1326,7 @@ function gunshipMagnetSpawnOneAsteroid(room, e) {
   if (!(a.magnetUntil > Date.now())) {
     a.magnetUntil = Date.now() + Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS);
   }
-  a.magnetSpdMax = asteroidSpeedBand(a.special).max;
+  a.magnetSpdMax = band.max;
   pushAsteroid(room, a);
   emitAsteroidFire(room, a);
 }
