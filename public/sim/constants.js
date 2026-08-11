@@ -464,9 +464,8 @@ const ENEMY_GUNSHIP_SPRAY = {
   sizeMax: 7,
   dmg: 14
 };
-/** Magnet pull duration; toward-gunship speed ramps 0 → 80% of MAX_SPEED. */
+/** Magnet duration (asteroids + VFX only — does not affect the player). */
 const ENEMY_GUNSHIP_MAGNET_TICKS = Math.round(10 * TPS);
-const ENEMY_GUNSHIP_MAGNET_PULL_FRAC = 0.8;
 /** Off-screen small asteroid during magnet. */
 const ENEMY_GUNSHIP_MAGNET_AST_EVERY = Math.round(0.5 * TPS);
 /** Asteroid magnet: constant accel toward gunship (set once; NTP simulates). */

@@ -1189,21 +1189,6 @@ function fireGunshipVoidVolley(room, e) {
   }
 }
 
-function gunshipMagnetPullSpeed(e) {
-  // Wall-clock ramp (same duration as ech telegraph) so client/server share one curve.
-  const start = e.magnetStartedAt | 0;
-  if (!start) return 0;
-  const durMs = Math.max(1, Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS));
-  const t = Math.min(1, Math.max(0, (Date.now() - start) / durMs));
-  // Target toward-gunship speed: 0 → 80% of ship MAX_SPEED.
-  return MAX_SPEED * ENEMY_GUNSHIP_MAGNET_PULL_FRAC * (t * t);
-}
-
-/** Player is not affected by gunship magnet. */
-function applyGunshipMagnetToPlayer(/* room, p */) {
-  return;
-}
-
 function gunshipMagnetAstAccelFor(a) {
   let frac = 1;
   if (!a) return 0;
@@ -1390,7 +1375,7 @@ function updateGunshipAttack(room, e, target) {
     return;
   }
 
-  // —— Magnet (phase 4): vel damp/attract on player; off-screen smalls on a fixed cadence ——
+  // —— Magnet (phase 4): asteroids only (player is never pulled) ——
   if ((e.wormPhase | 0) === 4) {
     e.magnetLeft = (e.magnetLeft | 0) - 1;
     const every = Math.max(1, ENEMY_GUNSHIP_MAGNET_AST_EVERY | 0);

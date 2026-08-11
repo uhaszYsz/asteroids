@@ -19253,11 +19253,10 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
   }
 }
 
-/** Gunship magnet VFX — cyan/violet rings + room dust sucked to hull. */
+/** Gunship magnet VFX — cyan/violet rings + room dust sucked to hull (visual only). */
 const COL_MAGNET_CORE = [0.55, 0.85, 1.0];
 const COL_MAGNET_RING = [0.72, 0.35, 1.0];
 const COL_MAGNET_DUST = [0.85, 0.92, 1.0];
-const GUNSHIP_MAGNET_PULL_FRAC = 0.8;
 const gunshipMagnetDust = []; // {x,y,vx,vy,life,maxLife,size}
 const GUNSHIP_MAGNET_DUST_MAX = 220;
 let gunshipMagnetDustAcc = 0;
@@ -19271,20 +19270,11 @@ function gunshipMagnetProgress(e) {
   return 0;
 }
 
-function gunshipMagnetPullSpeedClient(e) {
-  const t = gunshipMagnetProgress(e);
-  return MAX_SPEED * GUNSHIP_MAGNET_PULL_FRAC * (t * t);
-}
-
 function activeGunshipMagnet() {
   for (const e of enemies.values()) {
     if (e && e.kind === 'gunship' && (e.wormPhase | 0) === 4 && (e.hp | 0) > 0) return e;
   }
   return null;
-}
-
-function applyLocalGunshipMagnetPull(/* o */) {
-  // Player is not affected by gunship magnet.
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
