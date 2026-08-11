@@ -1194,9 +1194,9 @@ function gunshipApplyMagnetPull(room, e) {
     const dx = e.x - target.x;
     const dy = e.y - target.y;
     const dist = Math.hypot(dx, dy) || 1;
-    // Blend toward magnet velocity so cap ≈ pull (85% MAX_SPEED at end).
-    target.vx = (target.vx || 0) * 0.88 + (dx / dist) * pull * 0.12;
-    target.vy = (target.vy || 0) * 0.88 + (dy / dist) * pull * 0.12;
+    // Additive force only — do not damp / rewrite player velocity.
+    target.vx = (target.vx || 0) + (dx / dist) * pull;
+    target.vy = (target.vy || 0) + (dy / dist) * pull;
   }
   if (!room.asteroids) return;
   for (let i = 0; i < room.asteroids.length; i++) {
@@ -1210,8 +1210,8 @@ function gunshipApplyMagnetPull(room, e) {
     const dx = e.x - a.x;
     const dy = e.y - a.y;
     const dist = Math.hypot(dx, dy) || 1;
-    a.vx = (a.vx || 0) * 0.88 + (dx / dist) * ap * 0.12;
-    a.vy = (a.vy || 0) * 0.88 + (dy / dist) * ap * 0.12;
+    a.vx = (a.vx || 0) + (dx / dist) * ap;
+    a.vy = (a.vy || 0) + (dy / dist) * ap;
   }
 }
 

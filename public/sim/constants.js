@@ -464,7 +464,7 @@ const ENEMY_GUNSHIP_SPRAY = {
   sizeMax: 7,
   dmg: 14
 };
-/** Magnet pull duration; ramp 0 → ENEMY_GUNSHIP_MAGNET_PULL_MAX. */
+/** Magnet pull duration; additive accel ramps 0 → ENEMY_GUNSHIP_MAGNET_PULL_MAX per tick. */
 const ENEMY_GUNSHIP_MAGNET_TICKS = Math.round(10 * TPS);
 const ENEMY_GUNSHIP_MAGNET_PULL_MAX = 5;
 /** Off-screen small asteroid during magnet. */

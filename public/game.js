@@ -19233,8 +19233,9 @@ function applyLocalGunshipMagnetPull(o) {
   const dx = p.x - o.x;
   const dy = p.y - o.y;
   const dist = Math.hypot(dx, dy) || 1;
-  o.vx = (o.vx || 0) * 0.88 + (dx / dist) * pull * 0.12;
-  o.vy = (o.vy || 0) * 0.88 + (dy / dist) * pull * 0.12;
+  // Additive force only — match server (no velocity blend/damping).
+  o.vx = (o.vx || 0) + (dx / dist) * pull;
+  o.vy = (o.vy || 0) + (dy / dist) * pull;
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
