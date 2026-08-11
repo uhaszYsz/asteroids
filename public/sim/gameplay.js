@@ -1203,7 +1203,7 @@ function gunshipMagnetAstAccelFor(a) {
 
 /**
  * Player magnet: add lenDir(pullPower, toward gunship) to vx/vy.
- * Call before limitPlayerSpeed so the ship speed cap still applies.
+ * Hard-clamp after — soft limitPlayerSpeed only sheds 0.2/tick and cannot hold the cap.
  */
 function applyGunshipMagnetToPlayer(room, p) {
   if (!room || !room.practice || !room.enemies || !p) return;
@@ -1216,6 +1216,7 @@ function applyGunshipMagnetToPlayer(room, p) {
     const dir = Math.atan2(e.y - p.y, e.x - p.x);
     p.vx = (p.vx || 0) + lenDirX(pull, dir);
     p.vy = (p.vy || 0) + lenDirY(pull, dir);
+    clampSpeed(p);
     return;
   }
 }

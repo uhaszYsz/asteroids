@@ -19299,7 +19299,7 @@ function gunshipMagnetPullPowerClient(e) {
   return Math.floor(t * (10 * TPS)) * GUNSHIP_MAGNET_PULL_GROW;
 }
 
-/** Add lenDir(pullPower, toward gunship) to vx/vy — before speed limit. */
+/** Add lenDir(pullPower, toward gunship) to vx/vy, then hard-clamp to MAX_SPEED. */
 function applyLocalGunshipMagnetPull(o) {
   const e = activeGunshipMagnet();
   if (!e || !o || (o.hp | 0) <= 0 || (o.godLeft | 0) > 0) return;
@@ -19309,6 +19309,7 @@ function applyLocalGunshipMagnetPull(o) {
   const dir = Math.atan2(p.y - o.y, p.x - o.x);
   o.vx = (o.vx || 0) + lenDirX(pull, dir);
   o.vy = (o.vy || 0) + lenDirY(pull, dir);
+  clampSpeed(o);
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
