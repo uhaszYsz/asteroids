@@ -458,15 +458,15 @@ const ENEMY_GUNSHIP_SPRAY = {
   cooldown: 1,
   reload: Math.round(1 * TPS),
   kickDeg: 15,
-  spdMin: 6,
-  spdMax: 12,
+  spdMin: 4,
+  spdMax: 7,
   sizeMin: 3,
   sizeMax: 7,
   dmg: 14
 };
-/** Magnet pull duration; ramp 0 → 85% of player MAX_SPEED. */
+/** Magnet pull duration; ramp 0 → ENEMY_GUNSHIP_MAGNET_PULL_MAX. */
 const ENEMY_GUNSHIP_MAGNET_TICKS = Math.round(10 * TPS);
-const ENEMY_GUNSHIP_MAGNET_PULL_FRAC = 0.85;
+const ENEMY_GUNSHIP_MAGNET_PULL_MAX = 5;
 /** Off-screen small asteroid during magnet. */
 const ENEMY_GUNSHIP_MAGNET_AST_EVERY = Math.round(0.5 * TPS);
 /** Pause after void volley before next attack cycle. */

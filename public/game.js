@@ -19197,7 +19197,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
 const COL_MAGNET_CORE = [0.55, 0.85, 1.0];
 const COL_MAGNET_RING = [0.72, 0.35, 1.0];
 const COL_MAGNET_DUST = [0.85, 0.92, 1.0];
-const GUNSHIP_MAGNET_PULL_FRAC = 0.85;
+const GUNSHIP_MAGNET_PULL_MAX = 5;
 const gunshipMagnetDust = []; // {x,y,vx,vy,life,maxLife,size}
 const GUNSHIP_MAGNET_DUST_MAX = 220;
 let gunshipMagnetDustAcc = 0;
@@ -19214,7 +19214,7 @@ function gunshipMagnetProgress(e) {
 
 function gunshipMagnetPullSpeedClient(e) {
   const t = gunshipMagnetProgress(e);
-  return MAX_SPEED * GUNSHIP_MAGNET_PULL_FRAC * (t * t);
+  return GUNSHIP_MAGNET_PULL_MAX * (t * t);
 }
 
 function activeGunshipMagnet() {

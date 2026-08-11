@@ -1183,7 +1183,7 @@ function gunshipMagnetPullSpeed(e) {
   const left = Math.max(0, e.magnetLeft | 0);
   const t = 1 - (left / maxT); // 0 → 1 over duration
   const ease = t * t; // slow start, ramp up
-  return MAX_SPEED * ENEMY_GUNSHIP_MAGNET_PULL_FRAC * ease;
+  return ENEMY_GUNSHIP_MAGNET_PULL_MAX * ease;
 }
 
 function gunshipApplyMagnetPull(room, e) {
