@@ -139,6 +139,43 @@ function leadInterceptFromDelta(dx, dy, tvx, tvy, speed) {
   return Math.atan2(dy + tvy * t, dx + tvx * t);
 }
 
+/**
+ * Lead aim for rockets that launch at 0 and accelerate (UFO / player curve).
+ * Finds tick t where accel travel distance ≈ range to predicted target pose.
+ */
+function leadInterceptAccelRocket(ox, oy, tx, ty, tvx, tvy, accel, maxSpd, boostSpd, boostMult) {
+  const dx0 = tx - ox;
+  const dy0 = ty - oy;
+  const a0 = accel > 0 ? +accel : 0;
+  const max = maxSpd > 0 ? +maxSpd : 1e9;
+  const boost = boostSpd != null ? +boostSpd : 0;
+  const mult = boostMult != null && boostMult > 0 ? +boostMult : 1;
+  if (!(a0 > 0)) return leadInterceptAngle(ox, oy, tx, ty, tvx, tvy, max < 1e9 ? max : 15);
+
+  let spd = 0;
+  let dist = 0;
+  let bestT = null;
+  let bestErr = Infinity;
+  const maxT = 600;
+  for (let t = 1; t <= maxT; t++) {
+    let step = a0;
+    if (boost > 0 && Math.abs(spd) >= boost) step = a0 * mult;
+    spd += step;
+    if (spd > max) spd = max;
+    dist += spd;
+    const need = Math.hypot(dx0 + tvx * t, dy0 + tvy * t);
+    const err = Math.abs(dist - need);
+    if (dist + 1e-6 >= need && err < bestErr) {
+      bestErr = err;
+      bestT = t;
+      // Past the intercept window — further ticks only cruise past the target.
+      if (dist - need > max * 3) break;
+    }
+  }
+  if (bestT == null) return Math.atan2(dy0, dx0);
+  return Math.atan2(dy0 + tvy * bestT, dx0 + tvx * bestT);
+}
+
 function shortestWrapDelta(from, to, size) {
   let d = to - from;
   if (d > size * 0.5) d -= size;

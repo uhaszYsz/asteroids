@@ -1861,8 +1861,7 @@ function fireEnemyLineBullet(room, e, ang, spd, dmg, typeName) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
-/** UFO lead-aim rocket (tiny, skips asteroids). Same accel curve as player rockets
- *  (launch 0 → ROCKET_ACCEL_* → WEAPONS.rocket.speed). Spawn + aim from hull center. */
+/** UFO lead-aim rocket (tiny, skips asteroids). Launch 0 → ENEMY_UFO_ROCKET_ACCEL → cruise. */
 function fireEnemyRocket(room, e, ang, _spdIgnored, dmg) {
   const damage = dmg != null ? dmg : BULLET_TYPES.enemyRocket.dmg;
   const maxSpd = (WEAPONS.rocket && WEAPONS.rocket.speed > 0) ? WEAPONS.rocket.speed : 15;
@@ -1879,10 +1878,10 @@ function fireEnemyRocket(room, e, ang, _spdIgnored, dmg) {
     x, y,
     spawnX: x,
     spawnY: y,
-    // Kick 0 — accel in applyRocketFlight (same as player rockets).
+    // Kick 0 — accel in applyRocketFlight.
     vx: 0,
     vy: 0,
-    accel: ROCKET_ACCEL_DEFAULT,
+    accel: ENEMY_UFO_ROCKET_ACCEL,
     maxSpeed: maxSpd,
     homing: 0,
     flightAng: ang,
@@ -1946,14 +1945,16 @@ function enemyTryFire(room, e) {
   if ((e.fireCd | 0) > 0) return;
 
   if (e.kind === 'ufo') {
-    // Lead with cruise (max) speed — same flat intercept as constant-speed shots.
-    // Accel from 0 makes close-range hits slightly early; mid/long range stays solid.
+    // Lead with accel travel (0 → ENEMY_UFO_ROCKET_ACCEL → boost → cruise).
     const cruise = (WEAPONS.rocket && WEAPONS.rocket.speed > 0) ? WEAPONS.rocket.speed : 15;
-    const ang = leadInterceptAngleFlat(
+    const ang = leadInterceptAccelRocket(
       e.x, e.y,
       target.x, target.y,
       target.vx || 0, target.vy || 0,
-      cruise
+      ENEMY_UFO_ROCKET_ACCEL,
+      cruise,
+      ROCKET_ACCEL_BOOST_SPEED,
+      ROCKET_ACCEL_BOOST_MULT
     );
     fireEnemyRocket(room, e, ang);
     e.fireCd = ENEMY_UFO_RELOAD;
