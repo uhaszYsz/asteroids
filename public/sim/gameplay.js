@@ -1195,25 +1195,27 @@ function gunshipMagnetPullSpeed(e) {
   if (!start) return 0;
   const durMs = Math.max(1, Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS));
   const t = Math.min(1, Math.max(0, (Date.now() - start) / durMs));
-  return ENEMY_GUNSHIP_MAGNET_PULL_MAX * (t * t);
+  // Target toward-gunship speed: 0 → 80% of ship MAX_SPEED.
+  return MAX_SPEED * ENEMY_GUNSHIP_MAGNET_PULL_FRAC * (t * t);
 }
 
 /**
- * Player magnet: shed vx/vy (slow the ship) + mild attract toward gunship.
- * Does not teleport/nudge position — normal move still uses vx/vy.
+ * Player magnet: raise velocity *along* gunship direction up to `pull`.
+ * Does not damp or rewrite other velocity — thrust/physics stay normal.
+ * Idle ship → moves toward gunship at exactly `pull`.
  */
 function gunshipMagnetApplyPlayerVel(p, e, pull) {
   if (!p || !e || !(pull > 0)) return;
-  const power = Math.min(1, pull / Math.max(1e-6, ENEMY_GUNSHIP_MAGNET_PULL_MAX));
-  const keep = 1 - power * (1 - ENEMY_GUNSHIP_MAGNET_VEL_KEEP);
-  p.vx = (p.vx || 0) * keep;
-  p.vy = (p.vy || 0) * keep;
   const dx = e.x - p.x;
   const dy = e.y - p.y;
   const dist = Math.hypot(dx, dy) || 1;
-  const attract = power * ENEMY_GUNSHIP_MAGNET_ATTRACT;
-  p.vx += (dx / dist) * attract;
-  p.vy += (dy / dist) * attract;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const along = (p.vx || 0) * ux + (p.vy || 0) * uy;
+  if (along >= pull) return;
+  const need = pull - along;
+  p.vx = (p.vx || 0) + ux * need;
+  p.vy = (p.vy || 0) + uy * need;
 }
 
 /** Apply active gunship magnet to a player (inside applyInput, before speed limit). */

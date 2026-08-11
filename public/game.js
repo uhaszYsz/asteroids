@@ -19257,11 +19257,7 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
 const COL_MAGNET_CORE = [0.55, 0.85, 1.0];
 const COL_MAGNET_RING = [0.72, 0.35, 1.0];
 const COL_MAGNET_DUST = [0.85, 0.92, 1.0];
-const GUNSHIP_MAGNET_PULL_MAX = 5;
-/** Match server: at full power keep this fraction of vx/vy. */
-const GUNSHIP_MAGNET_VEL_KEEP = 0.856;
-/** Match server: at full power add this toward gunship. */
-const GUNSHIP_MAGNET_ATTRACT = 0.28;
+const GUNSHIP_MAGNET_PULL_FRAC = 0.8;
 const gunshipMagnetDust = []; // {x,y,vx,vy,life,maxLife,size}
 const GUNSHIP_MAGNET_DUST_MAX = 220;
 let gunshipMagnetDustAcc = 0;
@@ -19277,7 +19273,7 @@ function gunshipMagnetProgress(e) {
 
 function gunshipMagnetPullSpeedClient(e) {
   const t = gunshipMagnetProgress(e);
-  return GUNSHIP_MAGNET_PULL_MAX * (t * t);
+  return MAX_SPEED * GUNSHIP_MAGNET_PULL_FRAC * (t * t);
 }
 
 function activeGunshipMagnet() {
@@ -19292,17 +19288,17 @@ function applyLocalGunshipMagnetPull(o) {
   if (!e || !o || (o.hp | 0) <= 0 || (o.godLeft | 0) > 0) return;
   const pull = gunshipMagnetPullSpeedClient(e);
   if (!(pull > 0)) return;
-  const power = Math.min(1, pull / Math.max(1e-6, GUNSHIP_MAGNET_PULL_MAX));
-  const keep = 1 - power * (1 - GUNSHIP_MAGNET_VEL_KEEP);
-  o.vx = (o.vx || 0) * keep;
-  o.vy = (o.vy || 0) * keep;
   const p = enemyAt(e);
   const dx = p.x - o.x;
   const dy = p.y - o.y;
   const dist = Math.hypot(dx, dy) || 1;
-  const attract = power * GUNSHIP_MAGNET_ATTRACT;
-  o.vx += (dx / dist) * attract;
-  o.vy += (dy / dist) * attract;
+  const ux = dx / dist;
+  const uy = dy / dist;
+  const along = (o.vx || 0) * ux + (o.vy || 0) * uy;
+  if (along >= pull) return;
+  const need = pull - along;
+  o.vx = (o.vx || 0) + ux * need;
+  o.vy = (o.vy || 0) + uy * need;
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
