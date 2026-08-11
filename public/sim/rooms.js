@@ -52,7 +52,7 @@ function stepPlayerInputs(room, p) {
   takePlayerInput(p);
   demoRecorder.recordInput(room, p);
   if (live && p.inp.sp) tryStartBurst(p);
-  applyInput(p);
+  applyInput(room, p);
   if (live && p.hp > 0 && p.inp.u) fireThrustRay(room, p);
   if (live) updateShooting(room, p);
   p.prevX = p.x;
@@ -599,7 +599,7 @@ function stepRoom(room) {
         p.inp.sp = 0;
         continue;
       }
-      applyInput(p);
+      applyInput(room, p);
       if (room.matchLive && room.perfTest && p.hp > 0 && p.inp.u) {
         fireThrustRay(room, p);
       }

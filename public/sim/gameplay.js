@@ -751,6 +751,7 @@ function makeEnemy(kind, wave, weapon) {
     astCheckLeft: 0,
     magnetLeft: 0,
     magnetMax: 0,
+    magnetStartedAt: 0,
     lastHitBy: 0,
     // common1 post-shot flank (deg peak, ticks remaining / duration).
     flankDeg: 0,
@@ -1067,6 +1068,7 @@ function finishGunshipAttack(room, e) {
   e.reloadLeft = 0;
   e.magnetLeft = 0;
   e.magnetMax = 0;
+  e.magnetStartedAt = 0;
   e.astCheckLeft = 0;
   e.wormAtk = ((e.wormAtk | 0) + 1) % 3;
   e.fireCd = Math.round(
@@ -1101,6 +1103,7 @@ function beginGunshipMagnetAttack(room, e) {
   e.wormPhase = 4;
   e.magnetMax = ENEMY_GUNSHIP_MAGNET_TICKS;
   e.magnetLeft = ENEMY_GUNSHIP_MAGNET_TICKS;
+  e.magnetStartedAt = Date.now();
   e.astCheckLeft = 0;
   e.vx = 0;
   e.vy = 0;
@@ -1179,26 +1182,39 @@ function fireGunshipVoidVolley(room, e) {
 }
 
 function gunshipMagnetPullSpeed(e) {
-  const maxT = Math.max(1, e.magnetMax | 0);
-  const left = Math.max(0, e.magnetLeft | 0);
-  const t = 1 - (left / maxT); // 0 → 1 over duration
-  const ease = t * t; // slow start, ramp up
-  return ENEMY_GUNSHIP_MAGNET_PULL_MAX * ease;
+  // Wall-clock ramp (same duration as ech telegraph) so client/server share one curve.
+  const start = e.magnetStartedAt | 0;
+  if (!start) return 0;
+  const durMs = Math.max(1, Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS));
+  const t = Math.min(1, Math.max(0, (Date.now() - start) / durMs));
+  return ENEMY_GUNSHIP_MAGNET_PULL_MAX * (t * t);
 }
 
-function gunshipApplyMagnetPull(room, e) {
-  const pull = gunshipMagnetPullSpeed(e);
-  if (!(pull > 0)) return;
-  const target = soloHumanTarget(room);
-  if (target && (target.hp | 0) > 0 && !(target.godLeft > 0)) {
-    const dx = e.x - target.x;
-    const dy = e.y - target.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    // Additive force only — do not damp / rewrite player velocity.
-    target.vx = (target.vx || 0) + (dx / dist) * pull;
-    target.vy = (target.vy || 0) + (dy / dist) * pull;
+/** Additive magnet on one ship — force ≤ ENEMY_GUNSHIP_MAGNET_PULL_MAX per tick. */
+function gunshipMagnetAddForce(target, e, pull) {
+  if (!target || !e || !(pull > 0)) return;
+  const dx = e.x - target.x;
+  const dy = e.y - target.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  target.vx = (target.vx || 0) + (dx / dist) * pull;
+  target.vy = (target.vy || 0) + (dy / dist) * pull;
+}
+
+/** Apply active gunship magnet to a player (call from applyInput, before speed limit). */
+function applyGunshipMagnetToPlayer(room, p) {
+  if (!room || !room.practice || !room.enemies || !p) return;
+  if ((p.hp | 0) <= 0 || (p.godLeft | 0) > 0) return;
+  for (let i = 0; i < room.enemies.length; i++) {
+    const e = room.enemies[i];
+    if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4) continue;
+    gunshipMagnetAddForce(p, e, gunshipMagnetPullSpeed(e));
+    return;
   }
-  if (!room.asteroids) return;
+}
+
+function gunshipApplyMagnetAsteroids(room, e) {
+  const pull = gunshipMagnetPullSpeed(e);
+  if (!(pull > 0) || !room.asteroids) return;
   for (let i = 0; i < room.asteroids.length; i++) {
     const a = room.asteroids[i];
     if (!a || a.hp <= 0 || a.noCollide) continue;
@@ -1206,12 +1222,7 @@ function gunshipApplyMagnetPull(room, e) {
     if (a.size === 'medium') frac = 0.5;
     else if (a.size === 'big' || a.size === 'huge') frac = 1 / 3;
     else if (a.size !== 'small') frac = 0.5;
-    const ap = pull * frac;
-    const dx = e.x - a.x;
-    const dy = e.y - a.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    a.vx = (a.vx || 0) + (dx / dist) * ap;
-    a.vy = (a.vy || 0) + (dy / dist) * ap;
+    gunshipMagnetAddForce(a, e, pull * frac);
   }
 }
 
@@ -1239,6 +1250,7 @@ function updateGunshipAttack(room, e, target) {
       e.shootCd = 0;
       e.reloadLeft = 0;
       e.magnetLeft = 0;
+      e.magnetStartedAt = 0;
       e.fireCd = Math.round(
         (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
       );
@@ -1283,10 +1295,10 @@ function updateGunshipAttack(room, e, target) {
     return;
   }
 
-  // —— Magnet (phase 4) ——
+  // —— Magnet (phase 4): player pull is in applyInput; here asteroids + timer ——
   if ((e.wormPhase | 0) === 4) {
     e.magnetLeft = (e.magnetLeft | 0) - 1;
-    gunshipApplyMagnetPull(room, e);
+    gunshipApplyMagnetAsteroids(room, e);
     gunshipMagnetSpawnAsteroid(room, e);
     if ((e.magnetLeft | 0) <= 0) {
       finishGunshipAttack(room, e);
@@ -1308,6 +1320,7 @@ function interruptAllWormAttacks(room) {
     e.reloadLeft = 0;
     e.magnetLeft = 0;
     e.magnetMax = 0;
+    e.magnetStartedAt = 0;
     e.astCheckLeft = 0;
     e.fireCd = Math.round(
       (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
@@ -3352,7 +3365,7 @@ function applyTurn(p, l, r, sh) {
   if (stunned && Math.abs(p.av) < STUN_END_AV) p.stunned = false;
 }
 
-function applyInput(p) {
+function applyInput(room, p) {
   const { l, r, u, sh, sp } = p.inp;
   if (p.av == null) p.av = 0;
   if (p.collideCd > 0) p.collideCd--;
@@ -3364,6 +3377,8 @@ function applyInput(p) {
     p.vx += Math.cos(p.angle) * THRUST;
     p.vy += Math.sin(p.angle) * THRUST;
   }
+  // Magnet after thrust, before speed limit — same order as client predict.
+  applyGunshipMagnetToPlayer(room, p);
   limitPlayerSpeed(p);
 }
 

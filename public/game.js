@@ -19208,12 +19208,12 @@ function gunshipMagnetProgress(e) {
   if (ch && ch.kind === 'gunship' && ch.ms > 0) {
     return Math.min(1, Math.max(0, (performance.now() - ch.start) / ch.ms));
   }
-  if (e._magnetT == null) e._magnetT = 0;
-  return Math.min(1, e._magnetT);
+  return 0;
 }
 
 function gunshipMagnetPullSpeedClient(e) {
   const t = gunshipMagnetProgress(e);
+  // Cap: force magnitude ≤ GUNSHIP_MAGNET_PULL_MAX per sim tick.
   return GUNSHIP_MAGNET_PULL_MAX * (t * t);
 }
 
@@ -19233,7 +19233,7 @@ function applyLocalGunshipMagnetPull(o) {
   const dx = p.x - o.x;
   const dy = p.y - o.y;
   const dist = Math.hypot(dx, dy) || 1;
-  // Additive force only — match server (no velocity blend/damping).
+  // Additive force only — match server (then limitPlayerSpeed caps ship speed).
   o.vx = (o.vx || 0) + (dx / dist) * pull;
   o.vy = (o.vy || 0) + (dy / dist) * pull;
 }
@@ -19280,7 +19280,7 @@ function updateGunshipMagnetDust(dt) {
   }
   const p = enemyAt(e);
   const t = gunshipMagnetProgress(e);
-  e._magnetT = Math.min(1, (e._magnetT || 0) + dt / 10);
+  e._magnetT = t;
   gunshipMagnetDustAcc += dt;
   const spawnEvery = 0.028;
   while (gunshipMagnetDustAcc >= spawnEvery && gunshipMagnetDust.length < GUNSHIP_MAGNET_DUST_MAX) {
@@ -20708,7 +20708,8 @@ function applyInputTo(o, inp, opts) {
     o.vx += Math.cos(o.angle) * THRUST;
     o.vy += Math.sin(o.angle) * THRUST;
   }
-  if (opts && opts.localCollide && o === player) applyLocalGunshipMagnetPull(o);
+  // Always (live + reconcile replay) — same order as server applyInput.
+  applyLocalGunshipMagnetPull(o);
   limitPlayerSpeed(o);
   o.x += o.vx;
   o.y += o.vy;
