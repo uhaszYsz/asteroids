@@ -2356,7 +2356,7 @@
 </div>
 <script>
 (function () {
-  var PURGE_FLAG = 'aa_sw_purge_v5';
+  var PURGE_FLAG = 'aa_sw_purge_v6';
   var path = location.pathname;
   var dir = /\/[^/]+\.[a-zA-Z0-9]+$/.test(path)
     ? path.replace(/\/[^/]+$/, '/')
@@ -2408,7 +2408,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=89');
-      await loadScript('game.js?v=1028');
+      await loadScript('game.js?v=1029');
     } catch (err) {
       console.error(err);
     }

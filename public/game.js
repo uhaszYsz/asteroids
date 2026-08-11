@@ -21530,7 +21530,7 @@ function initMenuTitleGl() {
     menuTitleReady = true;
   };
   img.onerror = () => console.warn('menu title texture failed');
-  img.src = 'sprites/Title.png';
+  img.src = 'sprites/Title.png?v=2';
 }
 
 function syncMenuTitleCanvasSize() {
