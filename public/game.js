@@ -13644,6 +13644,7 @@ let campaignMode = false;
 let campaignMapOpen = false;
 let campaignStars = [];
 let campaignAtStar = 0;
+let campaignJumpCount = 0;
 let campaignJumping = false;
 let campaignMapPointer = { x: W * 0.5, y: H * 0.5 };
 
@@ -14491,6 +14492,7 @@ function applyCampaignMapMsg(msg) {
     }));
   }
   if (msg.at != null) campaignAtStar = msg.at | 0;
+  if (msg.jumps != null) campaignJumpCount = msg.jumps | 0;
   if (msg.open) {
     campaignJumping = false;
     showCampaignMap();
@@ -14562,6 +14564,26 @@ function redrawCampaignMap() {
   const pickR = 70 * RES_SCALE;
   const at = campaignCurrentStarLocal();
   const hover = pickLocalCampaignStar(campaignMapPointer.x, campaignMapPointer.y);
+
+  // Expanding zone from world bottom-left (after first star jump).
+  const zoneR = campaignJumpCount >= 1
+    ? (70 * RES_SCALE) + (campaignJumpCount - 1) * (20 * RES_SCALE)
+    : 0;
+  if (zoneR > 0) {
+    const ox = 0;
+    const oy = H;
+    const nextR = zoneR + 20 * RES_SCALE;
+    ctx.beginPath();
+    ctx.arc(ox * sx, oy * sy, nextR * sx, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 48, 48, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(ox * sx, oy * sy, zoneR * sx, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255, 48, 48, 0.5)';
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+  }
 
   // Jump radius around current star (not the mouse).
   if (at) {
@@ -22135,7 +22157,38 @@ function render() {
   drawFxLabels(now);
   drawWaveBanner(now);
   if (soloShopOpen) updateShopPreviews();
+  drawCampaignZoneRings();
   emitCampaignJumpFx();
+}
+
+/** World-space expanding campaign zone from bottom-left corner. */
+function drawCampaignZoneRings() {
+  if (!campaignMode || campaignMapOpen || (campaignJumpCount | 0) < 1) return;
+  const ox = 0;
+  const oy = H;
+  const base = 70 * RES_SCALE;
+  const grow = 20 * RES_SCALE;
+  const r = base + ((campaignJumpCount | 0) - 1) * grow;
+  const next = r + grow;
+  const segs = 64;
+  const drawRing = (radius, rgb, alpha, width) => {
+    if (!(radius > 1)) return;
+    for (let i = 0; i < segs; i++) {
+      const a0 = (i / segs) * Math.PI * 2;
+      const a1 = ((i + 1) / segs) * Math.PI * 2;
+      drawThickSegment(
+        ox + Math.cos(a0) * radius,
+        oy + Math.sin(a0) * radius,
+        ox + Math.cos(a1) * radius,
+        oy + Math.sin(a1) * radius,
+        width,
+        rgb,
+        alpha
+      );
+    }
+  };
+  drawRing(next, [1.0, 0.2, 0.18], 0.2, 2.2 * RES_SCALE);
+  drawRing(r, [1.0, 0.18, 0.14], 0.5, 3.4 * RES_SCALE);
 }
 
 /** Warp streak particles while hyperspace boosting. */
@@ -22378,6 +22431,7 @@ function enterGameFromWelcome(msg) {
   campaignMapOpen = false;
   campaignStars = [];
   campaignAtStar = msg.at != null ? (msg.at | 0) : 0;
+  campaignJumpCount = msg.jumps != null ? (msg.jumps | 0) : 0;
   campaignJumping = false;
   jumpPulse = false;
   hideCampaignMap();
@@ -23083,6 +23137,7 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'campaignStage' && inGame) {
       if (msg.at != null) campaignAtStar = msg.at | 0;
+      if (msg.jumps != null) campaignJumpCount = msg.jumps | 0;
       campaignJumping = false;
       jumpPulse = false;
       hideCampaignMap();

@@ -689,3 +689,14 @@ const CAMPAIGN_STAR_COUNT = 40;
 const CAMPAIGN_JUMP_ACCEL = 0.4 * RES_SCALE;
 /** Pick radius on the star map (world units ≈ design px × RES_SCALE). */
 const CAMPAIGN_STAR_PICK_R = 70 * RES_SCALE;
+/** Expanding zone from world bottom-left after each star jump. */
+const CAMPAIGN_ZONE_ORIGIN_X = 0;
+const CAMPAIGN_ZONE_ORIGIN_Y = H;
+const CAMPAIGN_ZONE_BASE_R = 70 * RES_SCALE;
+const CAMPAIGN_ZONE_GROW = 20 * RES_SCALE;
+
+function campaignZoneRadius(jumpCount) {
+  const n = jumpCount | 0;
+  if (n < 1) return 0;
+  return CAMPAIGN_ZONE_BASE_R + (n - 1) * CAMPAIGN_ZONE_GROW;
+}

@@ -125,6 +125,8 @@ function createRoom(opts) {
     campaignStars: null,
     campaignStarId: 0,
     campaignMapOpen: false,
+    /** Star-travel count (map zone expands after the first jump). */
+    campaignJumpCount: 0,
     enemies: [],
     nextEnemyId: 1,
     enemySnapLeft: ENEMY_SNAP_INTERVAL,
@@ -1459,6 +1461,7 @@ function startCampaignSolo(ws) {
   room.campaignStars = rollCampaignStars();
   room.campaignStarId = 0;
   room.campaignMapOpen = false;
+  room.campaignJumpCount = 0;
 
   const id = nextPlayerId++;
   const p = spawnPlayer(id, ws.displayName, {
@@ -1487,7 +1490,8 @@ function startCampaignSolo(ws) {
     soloOnly: 1,
     campaign: 1,
     mode: 'campaign',
-    at: room.campaignStarId | 0
+    at: room.campaignStarId | 0,
+    jumps: 0
   });
   broadcastPresence();
   console.log(`Campaign solo room ${room.id}`);
@@ -1513,6 +1517,7 @@ function startCampaignCoop(members) {
   room.campaignStars = rollCampaignStars();
   room.campaignStarId = 0;
   room.campaignMapOpen = false;
+  room.campaignJumpCount = 0;
 
   for (let i = 0; i < members.length; i++) {
     const ws = members[i];
@@ -1551,7 +1556,8 @@ function startCampaignCoop(members) {
       coop: 1,
       campaign: 1,
       mode: 'campaign',
-      at: room.campaignStarId | 0
+      at: room.campaignStarId | 0,
+      jumps: 0
     });
   }
   roomBroadcast(room, {

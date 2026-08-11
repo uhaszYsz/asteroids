@@ -497,6 +497,7 @@ function broadcastCampaignMap(room, open) {
     t: 'campaignMap',
     open: open ? 1 : 0,
     at: room.campaignStarId | 0,
+    jumps: room.campaignJumpCount | 0,
     stars: packCampaignStars(room)
   });
 }
@@ -612,6 +613,7 @@ function beginCampaignStage(room, opts) {
     t: 'campaignStage',
     n: room.wave | 0,
     at: room.campaignStarId | 0,
+    jumps: room.campaignJumpCount | 0,
     center: 1
   });
 }
@@ -621,9 +623,10 @@ function travelCampaignStar(room, x, y) {
   const star = pickCampaignStarAt(room, +x, +y);
   if (!star) return { ok: 0, err: 'nostar' };
   room.campaignStarId = star.id | 0;
+  room.campaignJumpCount = (room.campaignJumpCount | 0) + 1;
   room.wave = (room.wave | 0) + 1;
   beginCampaignStage(room);
-  return { ok: 1, at: room.campaignStarId | 0 };
+  return { ok: 1, at: room.campaignStarId | 0, jumps: room.campaignJumpCount | 0 };
 }
 
 /** Enter pulse starts boost immediately; each tick adds aim-dir accel (no edge wrap). */
