@@ -502,7 +502,7 @@ function nearestCampaignChainStar(x, y, chain) {
  * 3) Those children (35%) sprout 1–4 more away from the nearest path star (±30°, ≤75),
  *    and newly created stars keep doing the same until 64 stars exist.
  * Every placement must stay ≥ CAMPAIGN_STAR_MIN_DIST from all existing stars
- * (one retry on fail, then skip that star).
+ * (too close → skip that star, no retry).
  */
 function rollCampaignStars() {
   const margin = 28 * RES_SCALE;
@@ -549,18 +549,11 @@ function rollCampaignStars() {
     return s;
   }
 
-  /**
-   * Try a candidate, then one more fresh candidate on fail (skip if both too close).
-   * `makeCandidate` returns {x,y} each call.
-   */
-  function tryPlaceTwice(makeCandidate, opts) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const c = makeCandidate();
-      if (!c) continue;
-      const s = pushStar(c.x, c.y, opts);
-      if (s) return s;
-    }
-    return null;
+  /** Try one candidate; skip if too close (no retry). */
+  function tryPlaceOnce(makeCandidate, opts) {
+    const c = makeCandidate();
+    if (!c) return null;
+    return pushStar(c.x, c.y, opts);
   }
 
   /**
@@ -581,7 +574,7 @@ function rollCampaignStars() {
   chain.push(start);
 
   for (let i = 1; i < pathN; i++) {
-    const placed = tryPlaceTwice(() => {
+    const placed = tryPlaceOnce(() => {
       const toward = Math.atan2(goalY - y, goalX - x);
       const ang = toward + ((Math.random() * 2 - 1) * (Math.PI / 6));
       return campaignStarStepBounced(x, y, ang, step, minX, maxX, minY, maxY);
@@ -600,7 +593,7 @@ function rollCampaignStars() {
     const main = chain[i];
     const n = 1 + ((Math.random() * 4) | 0);
     for (let k = 0; k < n && stars.length < target; k++) {
-      const child = tryPlaceTwice(() => {
+      const child = tryPlaceOnce(() => {
         const a = Math.random() * Math.PI * 2;
         const d = unevenBranchDist();
         return {
@@ -645,7 +638,7 @@ function rollCampaignStars() {
       }
       const n = 1 + ((Math.random() * 4) | 0);
       for (let k = 0; k < n && stars.length < target; k++) {
-        const child = tryPlaceTwice(() => {
+        const child = tryPlaceOnce(() => {
           let ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
           // Occasional wider wander so parallel “lanes” don’t form along the path.
           if (Math.random() < 0.28) ang += ((Math.random() * 2 - 1) * (Math.PI / 3));
@@ -667,7 +660,7 @@ function rollCampaignStars() {
       const nearest = nearestCampaignChainStar(parent.x, parent.y, chain);
       let away = Math.atan2(parent.y - nearest.y, parent.x - nearest.x);
       if (!Number.isFinite(away)) away = Math.random() * Math.PI * 2;
-      const child = tryPlaceTwice(() => {
+      const child = tryPlaceOnce(() => {
         const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 2));
         const d = unevenBranchDist();
         return campaignStarStepBounced(parent.x, parent.y, ang, Math.max(d, minDist * 1.2), minX, maxX, minY, maxY);
