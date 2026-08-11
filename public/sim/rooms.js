@@ -127,6 +127,8 @@ function createRoom(opts) {
     campaignMapOpen: false,
     /** Star-travel count (map zone expands after the first jump). */
     campaignJumpCount: 0,
+    /** Last campaign common spawn count (0 = none yet). */
+    campaignLastCommonN: 0,
     enemies: [],
     nextEnemyId: 1,
     enemySnapLeft: ENEMY_SNAP_INTERVAL,
@@ -1462,6 +1464,7 @@ function startCampaignSolo(ws) {
   room.campaignStarId = 0;
   room.campaignMapOpen = false;
   room.campaignJumpCount = 0;
+  room.campaignLastCommonN = 0;
 
   const id = nextPlayerId++;
   const p = spawnPlayer(id, ws.displayName, {
@@ -1520,6 +1523,7 @@ function startCampaignCoop(members) {
   room.campaignStarId = 0;
   room.campaignMapOpen = false;
   room.campaignJumpCount = 0;
+  room.campaignLastCommonN = 0;
 
   for (let i = 0; i < members.length; i++) {
     const ws = members[i];

@@ -1144,11 +1144,20 @@ function spawnCampaignStageEnemies(room) {
   if (!room.nextEnemyId) room.nextEnemyId = 1;
   const wave = Math.max(1, room.wave | 0);
 
-  // 40% chance → 1–3 commons; 10% chance to double that count.
-  if (Math.random() < 0.4) {
-    let n = 1 + ((Math.random() * 3) | 0);
-    if (Math.random() < 0.1) n *= 2;
-    n = Math.min(MAX_COMMON_ON_FIELD, n);
+  // 30% chance → commons. Count grows from the last common encounter.
+  if (Math.random() < 0.3) {
+    const last = room.campaignLastCommonN | 0;
+    let n;
+    if (last <= 0) {
+      // First common encounter: 1 or 2.
+      n = 1 + ((Math.random() * 2) | 0);
+    } else {
+      // Next: last + random(-1 … +2).
+      const delta = -1 + ((Math.random() * 4) | 0);
+      n = last + delta;
+    }
+    n = Math.max(1, Math.min(MAX_COMMON_ON_FIELD, n));
+    room.campaignLastCommonN = n;
     for (let i = 0; i < n; i++) {
       const commonKind = Math.random() < 0.5 ? 'common1' : 'common';
       const e = makeEnemy(commonKind, wave);
