@@ -110,6 +110,8 @@ function createRoom(opts) {
     pendingRailBounces: [],
     wave: 0,
     waveClearLeft: 0,
+    /** Solo/coop boss roster for waves 10/20/30 — rolled once at match start. */
+    bossPlan: null,
     enemies: [],
     nextEnemyId: 1,
     enemySnapLeft: ENEMY_SNAP_INTERVAL,
@@ -914,12 +916,14 @@ function captureWaitingSnapshot(ws) {
   if (!room || !room.practice || room.coop || room.soloOnly) return null;
   const p = room.players.get(ws.playerId);
   if (!p) return null;
+  ensureSoloBossPlan(room);
   const snap = {
     v: 1,
     wave: room.wave | 0,
     waveClearLeft: room.waveClearLeft | 0,
     shopOpen: !!room.shopOpen,
     shopWave: room.shopWave | 0,
+    bossPlan: room.bossPlan || null,
     player: {
       x: p.x, y: p.y, vx: p.vx, vy: p.vy, angle: p.angle, av: p.av || 0,
       hp: p.hp, lives: p.lives | 0, coins: p.coins | 0,
@@ -1010,6 +1014,11 @@ function applySnapshotToRoom(room, p, snap) {
   room.shopOpen = false;
   room.shopWave = 0;
   room.shopDoneIds = new Set();
+  if (snap.bossPlan && typeof snap.bossPlan === 'object') {
+    room.bossPlan = snap.bossPlan;
+  } else {
+    ensureSoloBossPlan(room);
+  }
   room.nextBulletId = Math.max(1, snap.nextBulletId | 0);
   room.nextPickupId = Math.max(1, snap.nextPickupId | 0);
   room.nextEnemyId = Math.max(1, snap.nextEnemyId | 0);
@@ -1163,6 +1172,8 @@ function startPractice(ws, queueKind, opts) {
   room.enemies = [];
   room.nextEnemyId = 1;
   room.shopDoneIds = new Set();
+  // Boss roster for waves 10/20/30 — fixed for the whole match (snap may override).
+  if (!opts.snap) room.bossPlan = rollSoloBossPlan();
 
   const id = nextPlayerId++;
   const p = spawnPlayer(id, ws.displayName, {
@@ -1240,6 +1251,7 @@ function startCoop(members) {
   room.wave = 1;
   room.waveClearLeft = 0;
   room.pendingBigSpawns = [];
+  room.bossPlan = rollSoloBossPlan();
   setAsteroidsList(room, createSoloWaveAsteroids(1));
   room.enemies = [];
   room.nextEnemyId = 1;

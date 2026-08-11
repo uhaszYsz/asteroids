@@ -777,16 +777,47 @@ function makeEnemy(kind, wave, weapon) {
 
 /**
  * Even waves = enemy waves (commons). Every 2nd enemy wave (4, 8, 12…) is special:
- * one UFO/spinner + half the commons. Wave 10 is always worm boss (no commons/specials).
- * Commons scale with wave but hard-cap at MAX_COMMON_ON_FIELD (never more per wave / on field).
- * Wave ends only when asteroids and enemies (commons / specials / worm) are all cleared.
+ * one UFO/spinner + half the commons. Boss waves 10 / 20 / 30 use room.bossPlan
+ * (worm/gunship roster rolled at game start — no commons/specials).
+ * Wave ends only when asteroids and enemies are all cleared.
  */
 const MAX_COMMON_ON_FIELD = 6;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
+const SOLO_BOSS_KINDS = ['worm', 'gunship'];
+
+/** Roll once per match: wave 10 one boss, 20 the other, 30 two random (dupes ok). */
+function rollSoloBossPlan() {
+  const first = Math.random() < 0.5 ? 'worm' : 'gunship';
+  const second = first === 'worm' ? 'gunship' : 'worm';
+  const a = SOLO_BOSS_KINDS[(Math.random() * SOLO_BOSS_KINDS.length) | 0];
+  const b = SOLO_BOSS_KINDS[(Math.random() * SOLO_BOSS_KINDS.length) | 0];
+  return {
+    10: [first],
+    20: [second],
+    30: [a, b]
+  };
+}
+
+function ensureSoloBossPlan(room) {
+  if (!room) return rollSoloBossPlan();
+  if (!room.bossPlan) room.bossPlan = rollSoloBossPlan();
+  return room.bossPlan;
+}
+
+function isSoloBossWave(wave) {
+  const n = wave | 0;
+  return n === 10 || n === 20 || n === 30;
+}
+
+function soloBossKindsForWave(room, wave) {
+  const plan = ensureSoloBossPlan(room);
+  const list = plan && plan[wave | 0];
+  return Array.isArray(list) && list.length ? list : null;
+}
 
 function soloEnemyCounts(wave) {
   const n = Math.max(1, wave | 0);
-  if (n === 10) return { common: 0, ufo: 0, carrier: 0 };
+  if (isSoloBossWave(n)) return { common: 0, ufo: 0, carrier: 0 };
   return {
     common: n % 2 === 0 ? Math.min(MAX_COMMON_ON_FIELD, n) : 0,
     ufo: 0,
@@ -794,10 +825,10 @@ function soloEnemyCounts(wave) {
   };
 }
 
-/** 2nd, 4th, 6th… enemy waves → world waves 4, 8, 12, 16… (not boss 10). */
+/** 2nd, 4th, 6th… enemy waves → world waves 4, 8, 12, 16… (not boss 10/20/30). */
 function isSpecialEnemyWave(wave) {
   const n = Math.max(1, wave | 0);
-  if (n === 10 || n % 2 !== 0) return false;
+  if (isSoloBossWave(n) || n % 2 !== 0) return false;
   return (n / 2) % 2 === 0;
 }
 
@@ -826,7 +857,7 @@ function tryPromoteQueuedCommons(room) {
   }
 }
 
-/** Drop all common/common1 enemies (live + queued). Keeps specials / worm. */
+/** Drop all common/common1 enemies (live + queued). Keeps specials / bosses. */
 function clearSoloCommons(room) {
   if (!room.enemies || !room.enemies.length) return;
   const kept = [];
@@ -843,18 +874,23 @@ function clearSoloCommons(room) {
 function spawnSoloWaveEnemies(room, wave) {
   if (!room.enemies) room.enemies = [];
   if (!room.nextEnemyId) room.nextEnemyId = 1;
+  ensureSoloBossPlan(room);
   const c = soloEnemyCounts(wave);
   let commonN = c.common | 0;
   const n = Math.max(1, wave | 0);
 
-  // Wave 10: always worm boss — no commons / specials (asteroids halved like other even waves).
-  if (n === 10) {
-    const worm = makeEnemy('worm', wave);
-    worm.id = room.nextEnemyId++;
-    worm.appearLeft = 0;
-    worm.queued = false;
-    room.enemies.push(worm);
-    emitEnemyFire(room, worm);
+  // Boss waves 10 / 20 / 30 — roster from room.bossPlan (no commons / specials).
+  const bosses = soloBossKindsForWave(room, n);
+  if (bosses) {
+    for (let i = 0; i < bosses.length; i++) {
+      const kind = bosses[i] === 'gunship' ? 'gunship' : 'worm';
+      const boss = makeEnemy(kind, wave);
+      boss.id = room.nextEnemyId++;
+      boss.appearLeft = 0;
+      boss.queued = false;
+      room.enemies.push(boss);
+      emitEnemyFire(room, boss);
+    }
     return;
   }
 
