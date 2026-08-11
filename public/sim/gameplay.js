@@ -501,7 +501,7 @@ function wormIsHolding(e) {
   return !!(e && e.kind === 'worm' && p >= 1 && p <= 3);
 }
 
-/** Gunship void pause / magnet — hold still so pull origin stays fixed. */
+/** Gunship void pause / magnet — hold still. Phase 5 = void cruise (keeps flying). */
 function gunshipIsHolding(e) {
   const p = e && (e.wormPhase | 0);
   return !!(e && e.kind === 'gunship' && (p === 3 || p === 4));
@@ -742,7 +742,7 @@ function makeEnemy(kind, wave, weapon) {
       ? ENEMY_COMMON1_SPEED * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
       : randomEnemyWanderSpeed(),
     // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
-    // Gunship reuses wormPhase: 0 idle; 1 spray; 2 spray reload; 3 void pause; 4 magnet.
+    // Gunship reuses wormPhase: 0 idle; 1 spray; 2 spray reload; 3 void hold; 4 magnet; 5 void cruise.
     // wormAtk cycles 0=laser/spray, 1=rockets/voids, 2=shotgun/magnet.
     wormPhase: 0,
     wormAimLeft: 0,
@@ -754,6 +754,8 @@ function makeEnemy(kind, wave, weapon) {
     magnetStartedAt: 0,
     magnetAstLeft: 0,
     magnetPull: 0,
+    voidVolleysLeft: 0,
+    spraySideCd: 0,
     lastHitBy: 0,
     // common1 post-shot flank (deg peak, ticks remaining / duration).
     flankDeg: 0,
@@ -1074,6 +1076,8 @@ function finishGunshipAttack(room, e) {
   e.magnetStartedAt = 0;
   e.magnetAstLeft = 0;
   e.magnetPull = 0;
+  e.voidVolleysLeft = 0;
+  e.spraySideCd = 0;
   e.astCheckLeft = 0;
   e.wormAtk = ((e.wormAtk | 0) + 1) % 3;
   e.fireCd = Math.round(
@@ -1087,21 +1091,43 @@ function beginGunshipSprayAttack(room, e) {
   e.wormPhase = 1;
   e.shootAmmo = ENEMY_GUNSHIP_SPRAY.ammo;
   e.shootCd = 0;
+  e.spraySideCd = 0;
   e.reloadLeft = 0;
   emitEnemyUpdate(room, e);
 }
 
-function beginGunshipVoidAttack(room, e) {
-  e.wormPhase = 3;
-  e.shootAmmo = 0;
-  e.shootCd = 0;
-  e.reloadLeft = ENEMY_GUNSHIP_VOID_RELOAD;
+function gunshipVoidCruiseTicks() {
+  const lo = ENEMY_GUNSHIP_VOID_CRUISE_MIN | 0;
+  const hi = ENEMY_GUNSHIP_VOID_CRUISE_MAX | 0;
+  if (hi <= lo) return Math.max(1, lo);
+  return lo + (Math.random() * (hi - lo + 1) | 0);
+}
+
+/** Stop, fire one 4-void volley, then either cruise or end-pause. */
+function gunshipVoidFireAndContinue(room, e) {
   e.vx = 0;
   e.vy = 0;
   e.tx = e.x;
   e.ty = e.y;
   fireGunshipVoidVolley(room, e);
+  e.voidVolleysLeft = Math.max(0, (e.voidVolleysLeft | 0) - 1);
+  if ((e.voidVolleysLeft | 0) > 0) {
+    e.wormPhase = 5;
+    e.reloadLeft = gunshipVoidCruiseTicks();
+    pickEnemyWanderTarget(e);
+  } else {
+    e.wormPhase = 3;
+    e.reloadLeft = ENEMY_GUNSHIP_VOID_RELOAD;
+  }
   emitEnemyUpdate(room, e);
+}
+
+function beginGunshipVoidAttack(room, e) {
+  e.wormPhase = 3;
+  e.voidVolleysLeft = ENEMY_GUNSHIP_VOID_VOLLEYS;
+  e.shootAmmo = 0;
+  e.shootCd = 0;
+  gunshipVoidFireAndContinue(room, e);
 }
 
 function beginGunshipMagnetAttack(room, e) {
@@ -1128,12 +1154,12 @@ function beginGunshipAttack(room, e) {
   else beginGunshipSprayAttack(room, e);
 }
 
-/** Sized line pellets: random kick ±15°, speed 3–6, size 3–7. */
-function fireGunshipSprayShot(room, e) {
+/** Sized line pellets: optional angleOffset (e.g. ±π/2 for sideways). */
+function fireGunshipSprayShot(room, e, angleOffset) {
   const base = (e.dir != null && Number.isFinite(e.dir)) ? e.dir
     : (Number.isFinite(e.angle) ? e.angle : 0);
   const kick = ((Math.random() * 2) - 1) * (ENEMY_GUNSHIP_SPRAY.kickDeg * Math.PI / 180);
-  const ang = base + kick;
+  const ang = base + (angleOffset || 0) + kick;
   const spd = ENEMY_GUNSHIP_SPRAY.spdMin
     + Math.random() * (ENEMY_GUNSHIP_SPRAY.spdMax - ENEMY_GUNSHIP_SPRAY.spdMin);
   const sz = ENEMY_GUNSHIP_SPRAY.sizeMin
@@ -1348,6 +1374,8 @@ function updateGunshipAttack(room, e, target) {
       e.magnetStartedAt = 0;
       e.magnetAstLeft = 0;
       e.magnetPull = 0;
+      e.voidVolleysLeft = 0;
+      e.spraySideCd = 0;
       e.fireCd = Math.round(
         (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
       );
@@ -1363,13 +1391,19 @@ function updateGunshipAttack(room, e, target) {
     return;
   }
 
-  // —— Spray (phases 1–2) ——
+  // —— Spray (phases 1–2): forward every cooldown; L/R sideways every sideCooldown ——
   if ((e.wormPhase | 0) === 1) {
+    if ((e.spraySideCd | 0) > 0) e.spraySideCd--;
     if ((e.shootCd | 0) > 0) e.shootCd--;
     if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) return;
-    fireGunshipSprayShot(room, e);
+    fireGunshipSprayShot(room, e, 0);
     e.shootAmmo--;
     e.shootCd = ENEMY_GUNSHIP_SPRAY.cooldown;
+    if ((e.spraySideCd | 0) <= 0) {
+      fireGunshipSprayShot(room, e, Math.PI * 0.5);
+      fireGunshipSprayShot(room, e, -Math.PI * 0.5);
+      e.spraySideCd = ENEMY_GUNSHIP_SPRAY.sideCooldown;
+    }
     if ((e.shootAmmo | 0) <= 0) {
       e.wormPhase = 2;
       e.reloadLeft = ENEMY_GUNSHIP_SPRAY.reload;
@@ -1384,11 +1418,19 @@ function updateGunshipAttack(room, e, target) {
     return;
   }
 
-  // —— Voids (phase 3): already fired on begin; wait then finish ——
+  // —— Voids hold (phase 3): end-pause after last volley ——
   if ((e.wormPhase | 0) === 3) {
     if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
     if ((e.reloadLeft | 0) > 0) return;
     finishGunshipAttack(room, e);
+    return;
+  }
+
+  // —— Voids cruise (phase 5): fly, then stop and shoot ——
+  if ((e.wormPhase | 0) === 5) {
+    if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
+    if ((e.reloadLeft | 0) > 0) return;
+    gunshipVoidFireAndContinue(room, e);
     return;
   }
 
@@ -1423,6 +1465,8 @@ function interruptAllWormAttacks(room) {
     e.magnetMax = 0;
     e.magnetStartedAt = 0;
     e.magnetPull = 0;
+    e.voidVolleysLeft = 0;
+    e.spraySideCd = 0;
     e.astCheckLeft = 0;
     e.fireCd = Math.round(
       (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
@@ -2180,6 +2224,65 @@ function circleHitsEnemyRect(cx, cy, cr, e) {
   const dx = lx - qx;
   const dy = ly - qy;
   return dx * dx + dy * dy <= cr * cr;
+}
+
+/**
+ * Circle vs oriented enemy rect — same hit shape as circleHitsEnemyRect, but returns
+ * { cir, nx, ny, overlap } for applyShipCrash (asteroid-style bounce).
+ */
+function circleHitsEnemyRectInfo(cir, e) {
+  if (!cir || !e) return null;
+  const d = enemyRectDims(e);
+  const hl = d.len * 0.5;
+  const hw = d.wid * 0.5;
+  const cr = cir.r || 0;
+  const { lx, ly } = enemyLocalDelta(e, cir.x, cir.y);
+  const qx = Math.max(-hl, Math.min(hl, lx));
+  const qy = Math.max(-hw, Math.min(hw, ly));
+  let dx = lx - qx;
+  let dy = ly - qy;
+  const dist2 = dx * dx + dy * dy;
+  if (dist2 > cr * cr) return null;
+
+  const ang = e.angle || 0;
+  const c = Math.cos(ang);
+  const s = Math.sin(ang);
+  let lnx;
+  let lny;
+  let overlap;
+  if (dist2 < 1e-12) {
+    // Center inside rect — eject through nearest face.
+    const penR = hl - lx;
+    const penL = hl + lx;
+    const penU = hw - ly;
+    const penD = hw + ly;
+    let best = penR;
+    lnx = 1;
+    lny = 0;
+    if (penL < best) { best = penL; lnx = -1; lny = 0; }
+    if (penU < best) { best = penU; lnx = 0; lny = 1; }
+    if (penD < best) { best = penD; lnx = 0; lny = -1; }
+    overlap = best + cr;
+  } else {
+    const dist = Math.sqrt(dist2);
+    overlap = cr - dist;
+    lnx = dx / dist;
+    lny = dy / dist;
+  }
+  // Local → world (inverse of enemyLocalDelta).
+  const nx = lnx * c - lny * s;
+  const ny = lnx * s + lny * c;
+  return { cir, nx, ny, overlap: Math.max(0, overlap) };
+}
+
+/** First ship hit-circle overlapping gunship OBB, or null. */
+function playerGunshipHit(p, e) {
+  if (!p || !e || e.kind !== 'gunship') return null;
+  for (const cir of playerHitCircles(p)) {
+    const hit = circleHitsEnemyRectInfo(cir, e);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** Ray vs oriented rect; returns distance t along ray or null. */
@@ -4474,6 +4577,45 @@ function hitPlayerAsteroid(room, p, a, hit) {
   notifyShipHit(room, p);
 }
 
+/** Same crash response as asteroids (bounce / stun / HP / iframes). */
+function hitPlayerGunship(room, p, e, hit) {
+  hit = hit || playerGunshipHit(p, e);
+  if (!hit) return;
+  if (p.godLeft > 0) return;
+  if (p.bot && !(room && room.perfTest)) return;
+  if (!e || e.kind !== 'gunship' || (e.hp | 0) <= 0) return;
+  const dmg = asteroidCollideDamage(p, e, 0.5);
+  applyShipCrash(room, p, hit.nx, hit.ny, hit.overlap, dmg, 0.5);
+  separatePlayerFromGunships(p, room, 8);
+  notifyShipHit(room, p);
+}
+
+/** Position-only eject from overlapping gunships (iframe / post-hit). */
+function separatePlayerFromGunships(p, room, maxIters) {
+  if (!room || !room.practice || !room.enemies || !p) return;
+  const iters = maxIters == null ? 6 : maxIters;
+  for (let n = 0; n < iters; n++) {
+    let moved = false;
+    for (let i = 0; i < room.enemies.length; i++) {
+      const e = room.enemies[i];
+      if (!e || e.kind !== 'gunship' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
+      const hit = playerGunshipHit(p, e);
+      if (!hit) continue;
+      const pad = 2;
+      p.x += hit.nx * (hit.overlap + pad);
+      p.y += hit.ny * (hit.overlap + pad);
+      wrap(p);
+      const vn = p.vx * hit.nx + p.vy * hit.ny;
+      if (vn < 0) {
+        p.vx -= vn * hit.nx;
+        p.vy -= vn * hit.ny;
+      }
+      moved = true;
+    }
+    if (!moved) break;
+  }
+}
+
 /** Dual hit-circles of A vs B. Normal pushes A away from B. */
 function playerPlayerHit(a, b) {
   const ca = playerHitCircles(a);
@@ -4510,6 +4652,7 @@ function resolvePlayerAsteroidCollisions(room) {
     // Iframes: keep separating so the ship can't rattle around inside a rock.
     if (p.collideCd > 0) {
       separatePlayerFromAsteroids(p, room, 4);
+      separatePlayerFromGunships(p, room, 4);
       continue;
     }
     forEachAsteroidNear(room, p.x, p.y, PLAYER_AST_QUERY_R, (a) => {
@@ -4519,6 +4662,23 @@ function resolvePlayerAsteroidCollisions(room) {
       hitPlayerAsteroid(room, p, a, hit);
       return true;
     });
+  }
+}
+
+/** Player hull vs gunship — same applyShipCrash path as asteroids. */
+function resolvePlayerGunshipCollisions(room) {
+  if (!room || !room.practice || !room.enemies || !room.enemies.length) return;
+  for (const p of room.players.values()) {
+    if (p.hp <= 0 || p.godLeft > 0) continue;
+    if (p.collideCd > 0) continue; // separation already done in resolvePlayerAsteroidCollisions
+    for (let i = 0; i < room.enemies.length; i++) {
+      const e = room.enemies[i];
+      if (!e || e.kind !== 'gunship' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
+      const hit = playerGunshipHit(p, e);
+      if (!hit) continue;
+      hitPlayerGunship(room, p, e, hit);
+      break;
+    }
   }
 }
 

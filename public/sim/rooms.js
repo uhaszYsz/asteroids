@@ -801,6 +801,7 @@ function stepRoom(room) {
   resolvePlayerShotAsteroidBounces(room);
   resolvePlayerShotEnemyHits(room);
   resolvePlayerAsteroidCollisions(room);
+  resolvePlayerGunshipCollisions(room);
   resolvePlayerPlayerCollisions(room);
   tickSoloWaves(room);
   pushPoseHistory(room);

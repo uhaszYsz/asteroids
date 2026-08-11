@@ -456,6 +456,7 @@ const ENEMY_WORM_ROCKET = {
 const ENEMY_GUNSHIP_SPRAY = {
   ammo: 80,
   cooldown: 1,
+  sideCooldown: 4,
   reload: Math.round(1 * TPS),
   kickDeg: 15,
   spdMin: 4,
@@ -472,7 +473,11 @@ const ENEMY_GUNSHIP_MAGNET_PULL_GROW = 0.001;
 const ENEMY_GUNSHIP_MAGNET_AST_EVERY = Math.round(0.5 * TPS);
 /** Asteroid magnet: constant accel toward gunship (set once; NTP simulates). */
 const ENEMY_GUNSHIP_MAGNET_AST_ACCEL = 0.2;
-/** Pause after void volley before next attack cycle. */
+/** Void attack: 3 stop-and-shoot volleys with a random cruise between them. */
+const ENEMY_GUNSHIP_VOID_VOLLEYS = 3;
+const ENEMY_GUNSHIP_VOID_CRUISE_MIN = Math.round(0.5 * TPS);
+const ENEMY_GUNSHIP_VOID_CRUISE_MAX = Math.round(2 * TPS);
+/** Pause after the last void volley before next attack cycle. */
 const ENEMY_GUNSHIP_VOID_RELOAD = Math.round(1.25 * TPS);
 
 /** common1 move speed: worm-rocket maxSpeed −20%, then −10%, then −15% (±10% rolled per ship). */
