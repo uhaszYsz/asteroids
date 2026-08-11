@@ -538,27 +538,46 @@ function openCampaignMap(room) {
   broadcastCampaignMap(room, true);
 }
 
-function pickCampaignStarAt(room, x, y) {
+/** Reachable stars are within CAMPAIGN_STAR_PICK_R of the current star.
+ *  Mouse (x,y) only chooses among those; if none in range → nearest other star. */
+function campaignStarById(room, id) {
+  const stars = room.campaignStars || [];
+  const want = id | 0;
+  for (let i = 0; i < stars.length; i++) {
+    if ((stars[i].id | 0) === want) return stars[i];
+  }
+  return stars[0] || null;
+}
+
+function pickCampaignStarAt(room, mouseX, mouseY) {
   const stars = room.campaignStars || [];
   if (!stars.length) return null;
-  let nearest = stars[0];
-  let nearestD = Infinity;
-  let inRange = null;
-  let inRangeD = Infinity;
+  const at = campaignStarById(room, room.campaignStarId);
+  if (!at) return stars[0];
   const r = CAMPAIGN_STAR_PICK_R;
+  const mx = +mouseX;
+  const my = +mouseY;
+  let nearestOther = null;
+  let nearestOtherD = Infinity;
+  let bestInRange = null;
+  let bestInRangeMouseD = Infinity;
   for (let i = 0; i < stars.length; i++) {
     const s = stars[i];
-    const d = Math.hypot((+s.x) - x, (+s.y) - y);
-    if (d < nearestD) {
-      nearestD = d;
-      nearest = s;
+    if ((s.id | 0) === (at.id | 0)) continue;
+    const dFromAt = Math.hypot((+s.x) - (+at.x), (+s.y) - (+at.y));
+    if (dFromAt < nearestOtherD) {
+      nearestOtherD = dFromAt;
+      nearestOther = s;
     }
-    if (d <= r && d < inRangeD) {
-      inRangeD = d;
-      inRange = s;
+    if (dFromAt <= r) {
+      const dMouse = Math.hypot((+s.x) - mx, (+s.y) - my);
+      if (dMouse < bestInRangeMouseD) {
+        bestInRangeMouseD = dMouse;
+        bestInRange = s;
+      }
     }
   }
-  return inRange || nearest;
+  return bestInRange || nearestOther || at;
 }
 
 function beginCampaignStage(room, opts) {

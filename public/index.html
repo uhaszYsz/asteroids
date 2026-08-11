@@ -2379,7 +2379,7 @@
 </div>
 <div id="campaign-map" aria-hidden="true">
   <canvas id="campaign-map-c" width="960" height="540"></canvas>
-  <div id="campaign-map-hint">Aim near a star (70px) · click or Enter to jump · nearest if none in range</div>
+  <div id="campaign-map-hint">Stars within range of your current star · click or Enter · nearest if none in range</div>
 </div>
 <div id="top-btns">
   <button id="cancel-btn" type="button">Cancel</button>
@@ -2445,7 +2445,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=89');
-      await loadScript('game.js?v=1033');
+      await loadScript('game.js?v=1034');
     } catch (err) {
       console.error(err);
     }

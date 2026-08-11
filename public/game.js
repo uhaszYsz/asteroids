@@ -14508,25 +14508,39 @@ function campaignMapCanvasToWorld(clientX, clientY) {
   };
 }
 
-function pickLocalCampaignStar(x, y) {
+function campaignCurrentStarLocal() {
+  for (let i = 0; i < campaignStars.length; i++) {
+    if ((campaignStars[i].id | 0) === (campaignAtStar | 0)) return campaignStars[i];
+  }
+  return campaignStars[0] || null;
+}
+
+/** Range is from current star; mouse picks among reachable stars. */
+function pickLocalCampaignStar(mouseX, mouseY) {
   const r = 70 * RES_SCALE;
-  let nearest = null;
-  let nearestD = Infinity;
-  let inRange = null;
-  let inRangeD = Infinity;
+  const at = campaignCurrentStarLocal();
+  if (!at || !campaignStars.length) return null;
+  let nearestOther = null;
+  let nearestOtherD = Infinity;
+  let bestInRange = null;
+  let bestInRangeMouseD = Infinity;
   for (let i = 0; i < campaignStars.length; i++) {
     const s = campaignStars[i];
-    const d = Math.hypot(s.x - x, s.y - y);
-    if (d < nearestD) {
-      nearestD = d;
-      nearest = s;
+    if ((s.id | 0) === (at.id | 0)) continue;
+    const dFromAt = Math.hypot(s.x - at.x, s.y - at.y);
+    if (dFromAt < nearestOtherD) {
+      nearestOtherD = dFromAt;
+      nearestOther = s;
     }
-    if (d <= r && d < inRangeD) {
-      inRangeD = d;
-      inRange = s;
+    if (dFromAt <= r) {
+      const dMouse = Math.hypot(s.x - mouseX, s.y - mouseY);
+      if (dMouse < bestInRangeMouseD) {
+        bestInRangeMouseD = dMouse;
+        bestInRange = s;
+      }
     }
   }
-  return inRange || nearest;
+  return bestInRange || nearestOther || at;
 }
 
 function redrawCampaignMap() {
@@ -14546,7 +14560,17 @@ function redrawCampaignMap() {
   const sx = cw / W;
   const sy = ch / H;
   const pickR = 70 * RES_SCALE;
+  const at = campaignCurrentStarLocal();
   const hover = pickLocalCampaignStar(campaignMapPointer.x, campaignMapPointer.y);
+
+  // Jump radius around current star (not the mouse).
+  if (at) {
+    ctx.beginPath();
+    ctx.arc(at.x * sx, at.y * sy, pickR * sx, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(120, 180, 255, 0.28)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
 
   for (let i = 0; i < campaignStars.length; i++) {
     const s = campaignStars[i];
@@ -14554,8 +14578,7 @@ function redrawCampaignMap() {
     const py = s.y * sy;
     const isAt = (s.id | 0) === (campaignAtStar | 0);
     const isHover = hover && (hover.id | 0) === (s.id | 0);
-    const d = Math.hypot(s.x - campaignMapPointer.x, s.y - campaignMapPointer.y);
-    const inPick = d <= pickR;
+    const inPick = !!(at && !isAt && Math.hypot(s.x - at.x, s.y - at.y) <= pickR);
     ctx.beginPath();
     ctx.arc(px, py, isAt ? 5.5 : (isHover ? 4.5 : 2.8), 0, Math.PI * 2);
     ctx.fillStyle = isAt ? '#ffe08a' : (inPick ? '#d8f0ff' : '#9aa8c0');
@@ -14569,12 +14592,7 @@ function redrawCampaignMap() {
     }
   }
 
-  // pointer + pick radius
-  ctx.beginPath();
-  ctx.arc(campaignMapPointer.x * sx, campaignMapPointer.y * sy, pickR * sx, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(120, 180, 255, 0.25)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
+  // Mouse cursor marker
   ctx.beginPath();
   ctx.arc(campaignMapPointer.x * sx, campaignMapPointer.y * sy, 3, 0, Math.PI * 2);
   ctx.fillStyle = '#ffffff';
