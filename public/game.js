@@ -458,6 +458,8 @@ const SFX = {
   meteorCrash: 'sounds/explosion1.wav',
   voidHit: 'sounds/voidHit.wav',
   voidLoop: 'sounds/voidLoop.wav',
+  /** Gunship magnet attack hum. */
+  magnetLoop: 'sounds/energy.wav',
   laserImpact: 'sounds/laserImpact.wav',
   laser: 'sounds/laser2.wav',
   death: 'sounds/death2.wav',
@@ -850,6 +852,58 @@ function startVoidTravelSfx(b) {
     } catch (_) {}
   };
   voidTravelEnded.set(key, onEnded);
+  a.addEventListener('ended', onEnded);
+}
+
+function gunshipMagnetSfxKey(id) {
+  return 'gunshipMagnet:' + (id | 0);
+}
+
+const gunshipMagnetEnded = new Map();
+
+function stopGunshipMagnetSfx(id) {
+  if (id == null) return;
+  const key = gunshipMagnetSfxKey(id);
+  const a = sfxHolds.get(key);
+  const onEnded = gunshipMagnetEnded.get(key);
+  if (a && onEnded) {
+    try { a.removeEventListener('ended', onEnded); } catch (_) {}
+  }
+  gunshipMagnetEnded.delete(key);
+  stopSfxLoop(key);
+}
+
+function stopAllGunshipMagnetSfx() {
+  for (const key of [...sfxHolds.keys()]) {
+    if (String(key).indexOf('gunshipMagnet:') !== 0) continue;
+    const id = String(key).slice('gunshipMagnet:'.length);
+    stopGunshipMagnetSfx(id);
+  }
+}
+
+function startGunshipMagnetSfx(id) {
+  const eid = id | 0;
+  const key = gunshipMagnetSfxKey(eid);
+  if (!SFX.magnetLoop) return;
+  // Already looping — don't restart from 0 every frame.
+  const held = sfxHolds.get(key);
+  if (held && !held.paused) return;
+  const a = playSfxLoop(key, SFX.magnetLoop, { vol: 0.7, loop: true });
+  if (!a) return;
+  const prev = gunshipMagnetEnded.get(key);
+  if (prev) {
+    try { a.removeEventListener('ended', prev); } catch (_) {}
+  }
+  const onEnded = () => {
+    const e = enemies.get(eid);
+    if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4 || (e.hp | 0) <= 0) return;
+    try {
+      a.loop = true;
+      a.currentTime = 0;
+      sfxTryPlay(a);
+    } catch (_) {}
+  };
+  gunshipMagnetEnded.set(key, onEnded);
   a.addEventListener('ended', onEnded);
 }
 
@@ -18751,11 +18805,14 @@ function beginEnemyCharge(id, ms, side, kind) {
   if (k === 'gunship') {
     const e = enemies.get(id | 0);
     if (e && e.kind === 'gunship' && (e.wormPhase | 0) !== 4) e.wormPhase = 4;
+    startGunshipMagnetSfx(id | 0);
   }
 }
 
 function clearEnemyCharge(id) {
   const eid = id | 0;
+  const ch = enemyCharges.get(eid);
+  if (ch && ch.kind === 'gunship') stopGunshipMagnetSfx(eid);
   enemyCharges.delete(eid);
   clearChargeEnergyField(eid);
   // Common dual-gun field keys.
@@ -18767,6 +18824,7 @@ function clearAllEnemyCharges() {
   enemyCharges.clear();
   chargeEnergyField.clear();
   regenerateChargeNoiseTex();
+  stopAllGunshipMagnetSfx();
 }
 
 function shipLocalToWorldLift(lx, ly, lz, cx, cy, yaw, bank, lift) {
@@ -19350,8 +19408,10 @@ function updateGunshipMagnetDust(dt) {
   if (!e) {
     gunshipMagnetDust.length = 0;
     gunshipMagnetDustAcc = 0;
+    stopAllGunshipMagnetSfx();
     return;
   }
+  startGunshipMagnetSfx(e.id | 0);
   const p = enemyAt(e);
   const t = gunshipMagnetProgress(e);
   e._magnetT = t;
