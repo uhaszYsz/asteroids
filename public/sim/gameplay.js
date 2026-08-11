@@ -1107,7 +1107,6 @@ function beginGunshipMagnetAttack(room, e) {
   e.magnetMax = ENEMY_GUNSHIP_MAGNET_TICKS;
   e.magnetLeft = ENEMY_GUNSHIP_MAGNET_TICKS;
   e.magnetStartedAt = Date.now();
-  e.magnetAstLeft = 0;
   e.vx = 0;
   e.vy = 0;
   e.tx = e.x;
@@ -1115,6 +1114,8 @@ function beginGunshipMagnetAttack(room, e) {
   emitEnemyCharge(room, e, { side: 0 });
   emitEnemyUpdate(room, e);
   gunshipMagnetArmAllAsteroids(room, e);
+  // Immediate off-screen small so magnet always produces rocks right away.
+  gunshipMagnetSpawnOneAsteroid(room, e);
 }
 
 function beginGunshipAttack(room, e) {
@@ -1156,10 +1157,10 @@ function fireGunshipSprayShot(room, e) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
-/** Four voids at 90° — player void size/dmg, half player void speed. */
+/** Four voids at 90° — player void size/dmg, 1/4 player void speed. */
 function fireGunshipVoidVolley(room, e) {
   const w = WEAPONS.voidcannon;
-  const spd = ((w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE)) * 0.5;
+  const spd = ((w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE)) * 0.25;
   const cfg = BULLET_TYPES.voidcannon;
   const dmg = (cfg && cfg.dmg) || 5;
   const size = (cfg && cfg.size) || (27 * RES_SCALE);
@@ -1307,21 +1308,31 @@ function gunshipMagnetClearAllAsteroids(room) {
   }
 }
 
-function gunshipMagnetSpawnAsteroid(room, e) {
-  e.magnetAstLeft = (e.magnetAstLeft | 0) - 1;
-  if ((e.magnetAstLeft | 0) > 0) return;
-  e.magnetAstLeft = ENEMY_GUNSHIP_MAGNET_AST_EVERY;
+/**
+ * Spawn one small off-screen asteroid during gunship magnet.
+ * Keeps makeAsteroid inward velocity; stamps magnet accel into the same `af` packet.
+ */
+function gunshipMagnetSpawnOneAsteroid(room, e) {
+  if (!room || !e) return;
   const a = makeAsteroid({ size: 'small', offscreen: true, allowSpecial: false, special: null });
-  // Drift toward gunship so they don't sit forever off-rim.
   const dx = e.x - a.x;
   const dy = e.y - a.y;
   const dist = Math.hypot(dx, dy) || 1;
-  const entry = Math.max(0.6, Math.hypot(a.vx || 0, a.vy || 0) || 1.2);
-  a.vx = (dx / dist) * entry;
-  a.vy = (dy / dist) * entry;
+  const accel = ENEMY_GUNSHIP_MAGNET_AST_ACCEL;
+  a.magnetAx = (dx / dist) * accel;
+  a.magnetAy = (dy / dist) * accel;
+  a.magnetUntil = (e.magnetStartedAt | 0) + Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS);
+  if (!(a.magnetUntil > Date.now())) {
+    a.magnetUntil = Date.now() + Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS);
+  }
+  a.magnetSpdMax = asteroidSpeedBand(a.special).max;
   pushAsteroid(room, a);
   emitAsteroidFire(room, a);
-  gunshipMagnetArmAsteroid(room, e, a);
+}
+
+function gunshipMagnetSpawnAsteroid(room, e) {
+  // Timed by magnetLeft in updateGunshipAttack (every ENEMY_GUNSHIP_MAGNET_AST_EVERY ticks).
+  gunshipMagnetSpawnOneAsteroid(room, e);
 }
 
 function updateGunshipAttack(room, e, target) {
@@ -1378,10 +1389,14 @@ function updateGunshipAttack(room, e, target) {
     return;
   }
 
-  // —— Magnet (phase 4): player pull is position nudge; asteroids use one-shot accel ——
+  // —— Magnet (phase 4): vel damp/attract on player; off-screen smalls on a fixed cadence ——
   if ((e.wormPhase | 0) === 4) {
     e.magnetLeft = (e.magnetLeft | 0) - 1;
-    gunshipMagnetSpawnAsteroid(room, e);
+    const every = Math.max(1, ENEMY_GUNSHIP_MAGNET_AST_EVERY | 0);
+    // Spawn on the cadence boundary (and when the attack ends at 0).
+    if ((e.magnetLeft % every) === 0) {
+      gunshipMagnetSpawnOneAsteroid(room, e);
+    }
     if ((e.magnetLeft | 0) <= 0) {
       finishGunshipAttack(room, e);
     }
