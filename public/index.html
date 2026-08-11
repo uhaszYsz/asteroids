@@ -673,6 +673,17 @@
       color: #9bb4c8;
       letter-spacing: 0.04em;
     }
+    #campaign-map-fuel {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+      color: #d8f0ff;
+      letter-spacing: 0.06em;
+      margin-top: 2px;
+    }
+    #campaign-map-fuel.empty {
+      color: #ff8a8a;
+    }
     #top-btns {
       position: fixed; top: 12px; right: 12px; z-index: 4;
       display: flex; gap: 8px; align-items: center;
@@ -2380,6 +2391,7 @@
 <div id="campaign-map" aria-hidden="true">
   <canvas id="campaign-map-c" width="960" height="540"></canvas>
   <div id="campaign-map-hint">Stars within range of your current star · click or Enter · nearest if none in range</div>
+  <div id="campaign-map-fuel">Jump fuel: 10</div>
 </div>
 <div id="top-btns">
   <button id="cancel-btn" type="button">Cancel</button>
@@ -2445,7 +2457,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=89');
-      await loadScript('game.js?v=1035');
+      await loadScript('game.js?v=1036');
     } catch (err) {
       console.error(err);
     }

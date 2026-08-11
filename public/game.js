@@ -13645,6 +13645,7 @@ let campaignMapOpen = false;
 let campaignStars = [];
 let campaignAtStar = 0;
 let campaignJumpCount = 0;
+let campaignFuel = 10;
 let campaignJumping = false;
 let campaignMapPointer = { x: W * 0.5, y: H * 0.5 };
 
@@ -13663,6 +13664,21 @@ const modeCampaignCoopMetaEl = document.getElementById('mode-campaign-coop-meta'
 const campaignMapEl = document.getElementById('campaign-map');
 const campaignMapCanvas = document.getElementById('campaign-map-c');
 const campaignMapCtx = campaignMapCanvas ? campaignMapCanvas.getContext('2d') : null;
+const campaignMapFuelEl = document.getElementById('campaign-map-fuel');
+
+function syncCampaignFuelHud() {
+  if (!campaignMapFuelEl) return;
+  const n = Math.max(0, campaignFuel | 0);
+  campaignMapFuelEl.textContent = 'Jump fuel: ' + n;
+  campaignMapFuelEl.classList.toggle('empty', n <= 0);
+}
+
+function applyCampaignFuelsMsg(fuels) {
+  if (!fuels || myId == null) return;
+  if (fuels[myId] != null) campaignFuel = fuels[myId] | 0;
+  else if (fuels[String(myId)] != null) campaignFuel = fuels[String(myId)] | 0;
+  syncCampaignFuelHud();
+}
 const waitBannerEl = document.getElementById('wait-banner');
 const soloOverEl = document.getElementById('solo-over');
 const soloOverWaveEl = document.getElementById('solo-over-wave');
@@ -14479,6 +14495,7 @@ function showCampaignMap() {
     campaignMapEl.classList.add('open');
     campaignMapEl.setAttribute('aria-hidden', 'false');
   }
+  syncCampaignFuelHud();
   redrawCampaignMap();
 }
 
@@ -14493,6 +14510,11 @@ function applyCampaignMapMsg(msg) {
   }
   if (msg.at != null) campaignAtStar = msg.at | 0;
   if (msg.jumps != null) campaignJumpCount = msg.jumps | 0;
+  if (msg.fuels) applyCampaignFuelsMsg(msg.fuels);
+  else if (msg.fuel != null) {
+    campaignFuel = msg.fuel | 0;
+    syncCampaignFuelHud();
+  }
   if (msg.open) {
     campaignJumping = false;
     showCampaignMap();
@@ -14623,6 +14645,10 @@ function redrawCampaignMap() {
 
 function confirmCampaignTravel() {
   if (!campaignMapOpen || !ws || ws.readyState !== 1) return;
+  if ((campaignFuel | 0) <= 0) {
+    syncCampaignFuelHud();
+    return;
+  }
   try {
     ws.send(JSON.stringify({
       t: 'campaignTravel',
@@ -16754,6 +16780,8 @@ function resetMatchState() {
   campaignMode = false;
   campaignMapOpen = false;
   campaignStars = [];
+  campaignJumpCount = 0;
+  campaignFuel = 10;
   campaignJumping = false;
   jumpPulse = false;
   hideCampaignMap();
@@ -22432,6 +22460,7 @@ function enterGameFromWelcome(msg) {
   campaignStars = [];
   campaignAtStar = msg.at != null ? (msg.at | 0) : 0;
   campaignJumpCount = msg.jumps != null ? (msg.jumps | 0) : 0;
+  campaignFuel = msg.fuel != null ? (msg.fuel | 0) : 10;
   campaignJumping = false;
   jumpPulse = false;
   hideCampaignMap();
@@ -23138,12 +23167,19 @@ function handleWsMessage(e) {
     if (msg.t === 'campaignStage' && inGame) {
       if (msg.at != null) campaignAtStar = msg.at | 0;
       if (msg.jumps != null) campaignJumpCount = msg.jumps | 0;
+      if (msg.fuels) applyCampaignFuelsMsg(msg.fuels);
       campaignJumping = false;
       jumpPulse = false;
       hideCampaignMap();
       if (msg.n != null) {
         soloWave = msg.n | 0;
-        // No wave banner for campaign stages — quiet continue.
+      }
+      return;
+    }
+    if (msg.t === 'campaignTravel' && inGame) {
+      if (msg.fuel != null) {
+        campaignFuel = msg.fuel | 0;
+        syncCampaignFuelHud();
       }
       return;
     }

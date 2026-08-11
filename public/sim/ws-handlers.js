@@ -545,7 +545,11 @@ wss.on('connection', (ws) => {
       const room = ws.room;
       if (!room || !room.campaign || ws.playerId == null) return;
       if (!allowAction(ws, 'campaignTravel', 200)) return;
-      travelCampaignStar(room, msg.x, msg.y);
+      const p = room.players.get(ws.playerId);
+      const result = travelCampaignStar(room, msg.x, msg.y, p);
+      if (!result.ok && ws.readyState === 1) {
+        send(ws, { t: 'campaignTravel', ok: 0, err: result.err || 'fail' });
+      }
       return;
     }
 

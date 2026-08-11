@@ -491,6 +491,16 @@ function packCampaignStars(room) {
   return (room.campaignStars || []).map((s) => [s.id | 0, +s.x, +s.y]);
 }
 
+function packCampaignFuels(room) {
+  const out = {};
+  if (!room) return out;
+  for (const p of room.players.values()) {
+    if (p.bot) continue;
+    out[p.id] = Math.max(0, p.campaignFuel | 0);
+  }
+  return out;
+}
+
 function broadcastCampaignMap(room, open) {
   if (!room || !room.campaign) return;
   roomBroadcast(room, {
@@ -498,6 +508,7 @@ function broadcastCampaignMap(room, open) {
     open: open ? 1 : 0,
     at: room.campaignStarId | 0,
     jumps: room.campaignJumpCount | 0,
+    fuels: packCampaignFuels(room),
     stars: packCampaignStars(room)
   });
 }
@@ -614,19 +625,28 @@ function beginCampaignStage(room, opts) {
     n: room.wave | 0,
     at: room.campaignStarId | 0,
     jumps: room.campaignJumpCount | 0,
+    fuels: packCampaignFuels(room),
     center: 1
   });
 }
 
-function travelCampaignStar(room, x, y) {
+function travelCampaignStar(room, x, y, p) {
   if (!room || !room.campaign || !room.campaignMapOpen) return { ok: 0, err: 'nomap' };
+  if (!p || (p.hp | 0) <= 0) return { ok: 0, err: 'dead' };
+  if ((p.campaignFuel | 0) <= 0) return { ok: 0, err: 'nofuel' };
   const star = pickCampaignStarAt(room, +x, +y);
   if (!star) return { ok: 0, err: 'nostar' };
+  p.campaignFuel = Math.max(0, (p.campaignFuel | 0) - 1);
   room.campaignStarId = star.id | 0;
   room.campaignJumpCount = (room.campaignJumpCount | 0) + 1;
   room.wave = (room.wave | 0) + 1;
   beginCampaignStage(room);
-  return { ok: 1, at: room.campaignStarId | 0, jumps: room.campaignJumpCount | 0 };
+  return {
+    ok: 1,
+    at: room.campaignStarId | 0,
+    jumps: room.campaignJumpCount | 0,
+    fuel: p.campaignFuel | 0
+  };
 }
 
 /** Enter pulse starts boost immediately; each tick adds aim-dir accel (no edge wrap). */
@@ -3576,7 +3596,8 @@ function spawnPlayer(id, name, colors, room) {
     inp: { l: 0, r: 0, u: 0, sp: 0, sh: 0, j: 0 },
     inputQueue: [],
     lastSeq: 0,
-    jumping: false
+    jumping: false,
+    campaignFuel: 0
   };
 }
 

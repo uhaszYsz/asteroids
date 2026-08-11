@@ -1473,6 +1473,7 @@ function startCampaignSolo(ws) {
   p.lives = SOLO_LIVES;
   p.hp = SOLO_MAX_HP;
   p.unlockedWeapons = freshUnlockedWeapons();
+  p.campaignFuel = CAMPAIGN_JUMP_FUEL_START;
   p.accountKey = ws.accountKey || null;
   room.players.set(id, p);
   room.clients.add(ws);
@@ -1491,7 +1492,8 @@ function startCampaignSolo(ws) {
     campaign: 1,
     mode: 'campaign',
     at: room.campaignStarId | 0,
-    jumps: 0
+    jumps: 0,
+    fuel: p.campaignFuel | 0
   });
   broadcastPresence();
   console.log(`Campaign solo room ${room.id}`);
@@ -1531,6 +1533,7 @@ function startCampaignCoop(members) {
     p.lives = SOLO_LIVES;
     p.hp = SOLO_MAX_HP;
     p.unlockedWeapons = freshUnlockedWeapons();
+    p.campaignFuel = CAMPAIGN_JUMP_FUEL_START;
     const pose = playerSpawnPose(id, room);
     p.x = pose.x;
     p.y = pose.y;
@@ -1557,7 +1560,8 @@ function startCampaignCoop(members) {
       campaign: 1,
       mode: 'campaign',
       at: room.campaignStarId | 0,
-      jumps: 0
+      jumps: 0,
+      fuel: p.campaignFuel | 0
     });
   }
   roomBroadcast(room, {

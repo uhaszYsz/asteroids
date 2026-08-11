@@ -694,6 +694,8 @@ const CAMPAIGN_ZONE_ORIGIN_X = 0;
 const CAMPAIGN_ZONE_ORIGIN_Y = H;
 const CAMPAIGN_ZONE_BASE_R = 70 * RES_SCALE;
 const CAMPAIGN_ZONE_GROW = 20 * RES_SCALE;
+/** Star-map travels available at campaign start. */
+const CAMPAIGN_JUMP_FUEL_START = 10;
 
 function campaignZoneRadius(jumpCount) {
   const n = jumpCount | 0;
