@@ -477,8 +477,8 @@ const ENEMY_GUNSHIP_MAGNET_AST_EVERY = Math.round(0.5 * TPS);
 const ENEMY_GUNSHIP_MAGNET_AST_ACCEL = 0.2;
 /** Void attack: 3 stop-and-shoot volleys with a random cruise between them. */
 const ENEMY_GUNSHIP_VOID_VOLLEYS = 3;
-const ENEMY_GUNSHIP_VOID_CRUISE_MIN = Math.round(0.5 * TPS);
-const ENEMY_GUNSHIP_VOID_CRUISE_MAX = Math.round(2 * TPS);
+const ENEMY_GUNSHIP_VOID_CRUISE_MIN = Math.round(1 * TPS);
+const ENEMY_GUNSHIP_VOID_CRUISE_MAX = Math.round(4 * TPS);
 /** Pause after the last void volley before next attack cycle. */
 const ENEMY_GUNSHIP_VOID_RELOAD = Math.round(1.25 * TPS);
 
