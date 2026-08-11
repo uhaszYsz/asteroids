@@ -501,6 +501,12 @@ function wormIsHolding(e) {
   return !!(e && e.kind === 'worm' && p >= 1 && p <= 3);
 }
 
+/** Gunship void pause / magnet — hold still so pull origin stays fixed. */
+function gunshipIsHolding(e) {
+  const p = e && (e.wormPhase | 0);
+  return !!(e && e.kind === 'gunship' && (p === 3 || p === 4));
+}
+
 /** Worm 3rd attack: 360° line shotgun while moving (phases 6–7). */
 function wormIsShotgunRush(e) {
   const p = e && (e.wormPhase | 0);
@@ -539,7 +545,7 @@ function packEnemy(e) {
     e.y,
     dir,
     packEnemyNetSpeed(e),
-    e.kind === 'worm' ? (e.wormPhase | 0) : 0,
+    (e.kind === 'worm' || e.kind === 'gunship') ? (e.wormPhase | 0) : 0,
     e.enteredPlay ? 1 : 0
   ];
 }
@@ -561,7 +567,7 @@ function packEnemySnap(e) {
     dir,
     e.enteredPlay ? 1 : 0,
     packEnemyNetSpeed(e),
-    e.kind === 'worm' ? (e.wormPhase | 0) : 0
+    (e.kind === 'worm' || e.kind === 'gunship') ? (e.wormPhase | 0) : 0
   ];
 }
 
@@ -620,7 +626,9 @@ function emitEnemyCharge(room, e, opts) {
     ? Math.round((ENEMY_UFO_CHARGE * 1000) / TPS)
     : e.kind === 'worm'
       ? Math.round((ENEMY_WORM_AIM_TICKS * 1000) / TPS)
-      : Math.round((ENEMY_COMMON_CHARGE * 1000) / TPS);
+      : e.kind === 'gunship'
+        ? Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS)
+        : Math.round((ENEMY_COMMON_CHARGE * 1000) / TPS);
   roomBroadcast(room, {
     t: 'ech',
     id: e.id | 0,
@@ -734,12 +742,15 @@ function makeEnemy(kind, wave, weapon) {
       ? ENEMY_COMMON1_SPEED * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
       : randomEnemyWanderSpeed(),
     // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
-    // wormAtk cycles 0=laser, 1=rockets, 2=shotgun.
+    // Gunship reuses wormPhase: 0 idle; 1 spray; 2 spray reload; 3 void pause; 4 magnet.
+    // wormAtk cycles 0=laser/spray, 1=rockets/voids, 2=shotgun/magnet.
     wormPhase: 0,
     wormAimLeft: 0,
     wormAtk: 0,
     spinAng: 0,
     astCheckLeft: 0,
+    magnetLeft: 0,
+    magnetMax: 0,
     lastHitBy: 0,
     // common1 post-shot flank (deg peak, ticks remaining / duration).
     flankDeg: 0,
@@ -1049,17 +1060,255 @@ function finishWormAttack(room, e) {
   emitEnemyUpdate(room, e);
 }
 
-/** Cancel worm attacks and restart the post-spawn fire delay (e.g. on player death). */
+function finishGunshipAttack(room, e) {
+  e.wormPhase = 0;
+  e.shootAmmo = 0;
+  e.shootCd = 0;
+  e.reloadLeft = 0;
+  e.magnetLeft = 0;
+  e.magnetMax = 0;
+  e.astCheckLeft = 0;
+  e.wormAtk = ((e.wormAtk | 0) + 1) % 3;
+  e.fireCd = Math.round(
+    (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
+  );
+  pickEnemyWanderTarget(e);
+  emitEnemyUpdate(room, e);
+}
+
+function beginGunshipSprayAttack(room, e) {
+  e.wormPhase = 1;
+  e.shootAmmo = ENEMY_GUNSHIP_SPRAY.ammo;
+  e.shootCd = 0;
+  e.reloadLeft = 0;
+  emitEnemyUpdate(room, e);
+}
+
+function beginGunshipVoidAttack(room, e) {
+  e.wormPhase = 3;
+  e.shootAmmo = 0;
+  e.shootCd = 0;
+  e.reloadLeft = ENEMY_GUNSHIP_VOID_RELOAD;
+  e.vx = 0;
+  e.vy = 0;
+  e.tx = e.x;
+  e.ty = e.y;
+  fireGunshipVoidVolley(room, e);
+  emitEnemyUpdate(room, e);
+}
+
+function beginGunshipMagnetAttack(room, e) {
+  e.wormPhase = 4;
+  e.magnetMax = ENEMY_GUNSHIP_MAGNET_TICKS;
+  e.magnetLeft = ENEMY_GUNSHIP_MAGNET_TICKS;
+  e.astCheckLeft = 0;
+  e.vx = 0;
+  e.vy = 0;
+  e.tx = e.x;
+  e.ty = e.y;
+  emitEnemyCharge(room, e, { side: 0 });
+  emitEnemyUpdate(room, e);
+}
+
+function beginGunshipAttack(room, e) {
+  const atk = e.wormAtk | 0;
+  if (atk === 1) beginGunshipVoidAttack(room, e);
+  else if (atk === 2) beginGunshipMagnetAttack(room, e);
+  else beginGunshipSprayAttack(room, e);
+}
+
+/** Sized line pellets: random kick ±15°, speed 3–6, size 3–7. */
+function fireGunshipSprayShot(room, e) {
+  const base = (e.dir != null && Number.isFinite(e.dir)) ? e.dir
+    : (Number.isFinite(e.angle) ? e.angle : 0);
+  const kick = ((Math.random() * 2) - 1) * (ENEMY_GUNSHIP_SPRAY.kickDeg * Math.PI / 180);
+  const ang = base + kick;
+  const spd = ENEMY_GUNSHIP_SPRAY.spdMin
+    + Math.random() * (ENEMY_GUNSHIP_SPRAY.spdMax - ENEMY_GUNSHIP_SPRAY.spdMin);
+  const sz = ENEMY_GUNSHIP_SPRAY.sizeMin
+    + Math.random() * (ENEMY_GUNSHIP_SPRAY.sizeMax - ENEMY_GUNSHIP_SPRAY.sizeMin);
+  const x = e.x + Math.cos(ang) * ((e.r || 10) + 4);
+  const y = e.y + Math.sin(ang) * ((e.r || 10) + 4);
+  const now = Date.now();
+  const b = {
+    id: room.nextBulletId++,
+    owner: 0,
+    enemyOwner: e.id | 0,
+    type: 'enemyWorm',
+    dmg: ENEMY_GUNSHIP_SPRAY.dmg,
+    length: sz,
+    width: sz,
+    x, y,
+    spawnX: x,
+    spawnY: y,
+    vx: Math.cos(ang) * spd,
+    vy: Math.sin(ang) * spd,
+    spawnSt: now
+  };
+  room.bullets.push(b);
+  roomBroadcast(room, { t: 'bf', b: packBullet(b) });
+}
+
+/** Four voids at 90° — player void speed/size/dmg. */
+function fireGunshipVoidVolley(room, e) {
+  const w = WEAPONS.voidcannon;
+  const spd = (w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE);
+  const dmg = (BULLET_TYPES.voidcannon && BULLET_TYPES.voidcannon.dmg) || 5;
+  const base = Math.random() * Math.PI * 2;
+  const now = Date.now();
+  for (let i = 0; i < 4; i++) {
+    const ang = base + i * (Math.PI * 0.5);
+    const x = e.x + Math.cos(ang) * ((e.r || 10) + 6);
+    const y = e.y + Math.sin(ang) * ((e.r || 10) + 6);
+    const b = {
+      id: room.nextBulletId++,
+      owner: 0,
+      enemyOwner: e.id | 0,
+      type: 'voidcannon',
+      dmg,
+      x, y,
+      spawnX: x,
+      spawnY: y,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      spawnSt: now
+    };
+    room.bullets.push(b);
+    roomBroadcast(room, { t: 'bf', b: packBullet(b) });
+  }
+}
+
+function gunshipMagnetPullSpeed(e) {
+  const maxT = Math.max(1, e.magnetMax | 0);
+  const left = Math.max(0, e.magnetLeft | 0);
+  const t = 1 - (left / maxT); // 0 → 1 over duration
+  const ease = t * t; // slow start, ramp up
+  return MAX_SPEED * ENEMY_GUNSHIP_MAGNET_PULL_FRAC * ease;
+}
+
+function gunshipApplyMagnetPull(room, e) {
+  const pull = gunshipMagnetPullSpeed(e);
+  if (!(pull > 0)) return;
+  const target = soloHumanTarget(room);
+  if (target && (target.hp | 0) > 0 && !(target.godLeft > 0)) {
+    const dx = e.x - target.x;
+    const dy = e.y - target.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    // Blend toward magnet velocity so cap ≈ pull (85% MAX_SPEED at end).
+    target.vx = (target.vx || 0) * 0.88 + (dx / dist) * pull * 0.12;
+    target.vy = (target.vy || 0) * 0.88 + (dy / dist) * pull * 0.12;
+  }
+  if (!room.asteroids) return;
+  for (let i = 0; i < room.asteroids.length; i++) {
+    const a = room.asteroids[i];
+    if (!a || a.hp <= 0 || a.noCollide) continue;
+    let frac = 1;
+    if (a.size === 'medium') frac = 0.5;
+    else if (a.size === 'big' || a.size === 'huge') frac = 1 / 3;
+    else if (a.size !== 'small') frac = 0.5;
+    const ap = pull * frac;
+    const dx = e.x - a.x;
+    const dy = e.y - a.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    a.vx = (a.vx || 0) * 0.88 + (dx / dist) * ap * 0.12;
+    a.vy = (a.vy || 0) * 0.88 + (dy / dist) * ap * 0.12;
+  }
+}
+
+function gunshipMagnetSpawnAsteroid(room, e) {
+  e.astCheckLeft = (e.astCheckLeft | 0) - 1;
+  if ((e.astCheckLeft | 0) > 0) return;
+  e.astCheckLeft = ENEMY_GUNSHIP_MAGNET_AST_EVERY;
+  const a = makeAsteroid({ size: 'small', offscreen: true, allowSpecial: false, special: null });
+  // Drift toward gunship so they don't sit forever off-rim.
+  const dx = e.x - a.x;
+  const dy = e.y - a.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const entry = Math.max(0.6, Math.hypot(a.vx || 0, a.vy || 0) || 1.2);
+  a.vx = (dx / dist) * entry;
+  a.vy = (dy / dist) * entry;
+  pushAsteroid(room, a);
+  emitAsteroidFire(room, a);
+}
+
+function updateGunshipAttack(room, e, target) {
+  if (!target) {
+    if ((e.wormPhase | 0) > 0 || (e.fireCd | 0) <= 0) {
+      e.wormPhase = 0;
+      e.shootAmmo = 0;
+      e.shootCd = 0;
+      e.reloadLeft = 0;
+      e.magnetLeft = 0;
+      e.fireCd = Math.round(
+        (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
+      );
+      pickEnemyWanderTarget(e);
+      emitEnemyUpdate(room, e);
+    }
+    return;
+  }
+
+  if ((e.wormPhase | 0) === 0) {
+    if ((e.fireCd | 0) > 0) return;
+    beginGunshipAttack(room, e);
+    return;
+  }
+
+  // —— Spray (phases 1–2) ——
+  if ((e.wormPhase | 0) === 1) {
+    if ((e.shootCd | 0) > 0) e.shootCd--;
+    if ((e.shootCd | 0) > 0 || (e.shootAmmo | 0) <= 0) return;
+    fireGunshipSprayShot(room, e);
+    e.shootAmmo--;
+    e.shootCd = ENEMY_GUNSHIP_SPRAY.cooldown;
+    if ((e.shootAmmo | 0) <= 0) {
+      e.wormPhase = 2;
+      e.reloadLeft = ENEMY_GUNSHIP_SPRAY.reload;
+      emitEnemyUpdate(room, e);
+    }
+    return;
+  }
+  if ((e.wormPhase | 0) === 2) {
+    if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
+    if ((e.reloadLeft | 0) > 0) return;
+    finishGunshipAttack(room, e);
+    return;
+  }
+
+  // —— Voids (phase 3): already fired on begin; wait then finish ——
+  if ((e.wormPhase | 0) === 3) {
+    if ((e.reloadLeft | 0) > 0) e.reloadLeft--;
+    if ((e.reloadLeft | 0) > 0) return;
+    finishGunshipAttack(room, e);
+    return;
+  }
+
+  // —— Magnet (phase 4) ——
+  if ((e.wormPhase | 0) === 4) {
+    e.magnetLeft = (e.magnetLeft | 0) - 1;
+    gunshipApplyMagnetPull(room, e);
+    gunshipMagnetSpawnAsteroid(room, e);
+    if ((e.magnetLeft | 0) <= 0) {
+      finishGunshipAttack(room, e);
+    }
+  }
+}
+
+/** Cancel worm / gunship attacks and restart the post-spawn fire delay (e.g. on player death). */
 function interruptAllWormAttacks(room) {
   if (!room || !room.enemies) return;
   for (const e of room.enemies) {
-    if (!e || e.kind !== 'worm') continue;
-    const wasHolding = wormIsHolding(e) || (e.wormPhase | 0) > 0;
+    if (!e || (e.kind !== 'worm' && e.kind !== 'gunship')) continue;
+    const wasHolding = (e.kind === 'worm' ? wormIsHolding(e) : gunshipIsHolding(e))
+      || (e.wormPhase | 0) > 0;
     e.wormPhase = 0;
     e.wormAimLeft = 0;
     e.shootAmmo = 0;
     e.shootCd = 0;
     e.reloadLeft = 0;
+    e.magnetLeft = 0;
+    e.magnetMax = 0;
+    e.astCheckLeft = 0;
     e.fireCd = Math.round(
       (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
     );
@@ -1524,6 +1773,11 @@ function enemyTryFire(room, e) {
     return;
   }
 
+  if (e.kind === 'gunship') {
+    updateGunshipAttack(room, e, target);
+    return;
+  }
+
   if (e.kind === 'spinner') {
     updateSpinnerWeapon(room, e);
     return;
@@ -1543,18 +1797,6 @@ function enemyTryFire(room, e) {
     );
     fireEnemyRocket(room, e, ang);
     e.fireCd = ENEMY_UFO_RELOAD;
-    return;
-  }
-
-  if (e.kind === 'gunship') {
-    // Twin-prong craft 224: same 3-spread as commons, along facing.
-    const baseG = (e.dir != null && Number.isFinite(e.dir)) ? e.dir
-      : (Number.isFinite(e.angle) ? e.angle : 0);
-    const spreadG = (15 * Math.PI) / 180;
-    fireEnemyLineBullet(room, e, baseG, ENEMY_COMMON_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
-    fireEnemyLineBullet(room, e, baseG - spreadG, ENEMY_COMMON_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
-    fireEnemyLineBullet(room, e, baseG + spreadG, ENEMY_COMMON_BULLET_SPEED, ENEMY_COMMON_BULLET_DMG);
-    e.fireCd = ENEMY_COMMON_RELOAD;
     return;
   }
 
@@ -1691,7 +1933,7 @@ function updateEnemies(room) {
     }
     if ((e.fireCd | 0) > 0) e.fireCd--;
     // Pre-shot charge telegraph (commons 1s, UFO turrets 0.5s).
-    if ((isCommonKind(e.kind) || e.kind === 'gunship') && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
+    if ((isCommonKind(e.kind)) && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
       emitEnemyCharge(room, e);
     }
     if (e.kind === 'ufo' && (e.fireCd | 0) === ENEMY_UFO_CHARGE) {
@@ -1699,13 +1941,13 @@ function updateEnemies(room) {
       emitEnemyCharge(room, e);
     }
 
-    if (wormIsHolding(e)) {
+    if (wormIsHolding(e) || gunshipIsHolding(e)) {
       wormHolding = true;
       e.vx = 0;
       e.vy = 0;
       e.tx = e.x;
       e.ty = e.y;
-      wormCrushAsteroids(room, e);
+      if (e.kind === 'worm') wormCrushAsteroids(room, e);
       enemyTryFire(room, e);
       continue;
     }
@@ -1761,10 +2003,10 @@ function damageEnemy(room, e, dmg, ownerId) {
 
   let coinGrant = 0;
   let coinVisual = 0;
-  if (kind === 'ufo' || kind === 'spinner' || kind === 'gunship') {
+  if (kind === 'ufo' || kind === 'spinner') {
     coinGrant = ENEMY_ELITE_COIN_GRANT;
     coinVisual = ENEMY_ELITE_COIN_VISUAL;
-  } else if (kind === 'worm') {
+  } else if (kind === 'worm' || kind === 'gunship') {
     coinGrant = ENEMY_WORM_COIN_GRANT;
     coinVisual = ENEMY_WORM_COIN_VISUAL;
   }

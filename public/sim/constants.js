@@ -396,7 +396,7 @@ const ENEMY_HP = {
   carrier: 90,
   worm: 1000,
   spinner: 320,
-  gunship: 220
+  gunship: 1000
 };
 /** Spinner: 2-way radial burst (180°); shoot angle advances `spin` degrees after each volley. */
 const ENEMY_SPINNER = {
@@ -452,6 +452,26 @@ const ENEMY_WORM_ROCKET = {
   hp: ENEMY_ROCKET_HP,
   dmg: 30
 };
+/** Gunship (craft 224) — 3 rotating attacks (spray / voids / magnet). */
+const ENEMY_GUNSHIP_SPRAY = {
+  ammo: 80,
+  cooldown: 1,
+  reload: Math.round(1 * TPS),
+  kickDeg: 15,
+  spdMin: 3,
+  spdMax: 6,
+  sizeMin: 3,
+  sizeMax: 7,
+  dmg: 14
+};
+/** Magnet pull duration; ramp 0 → 85% of player MAX_SPEED. */
+const ENEMY_GUNSHIP_MAGNET_TICKS = Math.round(10 * TPS);
+const ENEMY_GUNSHIP_MAGNET_PULL_FRAC = 0.85;
+/** Off-screen small asteroid during magnet. */
+const ENEMY_GUNSHIP_MAGNET_AST_EVERY = Math.round(0.5 * TPS);
+/** Pause after void volley before next attack cycle. */
+const ENEMY_GUNSHIP_VOID_RELOAD = Math.round(1.25 * TPS);
+
 /** common1 move speed: worm-rocket maxSpeed −20%, then −10%, then −15% (±10% rolled per ship). */
 const ENEMY_COMMON1_SPEED = ENEMY_WORM_ROCKET.maxSpeed * 0.8 * 0.9 * 0.85;
 const ENEMY_COMMON1_SPEED_JITTER = 0.1;

@@ -7117,7 +7117,7 @@ function enemyMaxHp(kind) {
   if (kind === 'carrier') return 90;
   if (kind === 'worm') return 1000;
   if (kind === 'spinner') return 320;
-  if (kind === 'gunship') return 220;
+  if (kind === 'gunship') return 1000;
   return 95;
 }
 
@@ -17879,7 +17879,7 @@ function unpackEnemy(row) {
     hp,
     speed: spd,
     enteredPlay,
-    wormPhase: kind === 'worm' ? (row[17] | 0) : 0
+    wormPhase: (kind === 'worm' || kind === 'gunship') ? (row[17] | 0) : 0
   };
 }
 
@@ -17954,7 +17954,7 @@ function applyEnemySnapList(list, st) {
     e.spawnSt = snapSt;
     e.travelDist = Math.hypot(e.tx - e.spawnX, e.ty - e.spawnY);
     const packedSpeed = row[14] != null ? +row[14] : 0;
-    e.wormPhase = kind === 'worm' ? (row[15] | 0) : 0;
+    e.wormPhase = (kind === 'worm' || kind === 'gunship') ? (row[15] | 0) : 0;
     if (packedSpeed > 0) e.speed = packedSpeed;
     else if (Math.hypot(e.vx, e.vy) > 0.05) {
       // Don't bake rush/crawl multipliers into stored base speed.
@@ -18674,7 +18674,7 @@ function beginEnemyCharge(id, ms, side, kind) {
   let k = 'common';
   if (kind === 'ufo') k = 'ufo';
   else if (kind === 'worm') k = 'worm';
-  else if (kind === 'gunship') k = 'common'; // nose charge like commons
+  else if (kind === 'gunship') k = 'gunship';
   enemyCharges.set(id | 0, {
     start: now,
     until: now + dur,
@@ -18686,6 +18686,10 @@ function beginEnemyCharge(id, ms, side, kind) {
   if (k === 'worm') {
     const e = enemies.get(id | 0);
     if (e && e.kind === 'worm' && (e.wormPhase | 0) < 1) e.wormPhase = 1;
+  }
+  if (k === 'gunship') {
+    const e = enemies.get(id | 0);
+    if (e && e.kind === 'gunship' && (e.wormPhase | 0) !== 4) e.wormPhase = 4;
   }
 }
 
@@ -19050,7 +19054,7 @@ function drawEnemyCommonCharges() {
       continue;
     }
     const kind = ch.kind || e.kind;
-    if (kind !== 'common' && kind !== 'common1' && kind !== 'ufo' && kind !== 'worm') {
+    if (kind !== 'common' && kind !== 'common1' && kind !== 'ufo' && kind !== 'worm' && kind !== 'gunship') {
       clearEnemyCharge(id);
       continue;
     }
@@ -19066,8 +19070,17 @@ function drawEnemyCommonCharges() {
       clearEnemyCharge(id);
       continue;
     }
+    if (kind === 'gunship' && e.kind !== 'gunship') {
+      clearEnemyCharge(id);
+      continue;
+    }
     // Worm laser aim charge: timed to ENEMY_WORM_AIM_TICKS (clear early once beam starts).
     if (kind === 'worm' && (e.wormPhase | 0) >= 2) {
+      clearEnemyCharge(id);
+      continue;
+    }
+    // Magnet charge ends when gunship leaves phase 4.
+    if (kind === 'gunship' && (e.wormPhase | 0) !== 4) {
       clearEnemyCharge(id);
       continue;
     }
@@ -19128,6 +19141,11 @@ function drawEnemyCommonCharges() {
       continue;
     }
 
+    if (kind === 'gunship') {
+      drawGunshipMagnetAura(p.x, p.y, t, now, id);
+      continue;
+    }
+
     for (let g = 0; g < ENEMY_COMMON_GUNS.length; g++) {
       const gunSc = e.kind === 'common1' ? ENEMY_COMMON1_SPRITE_SCALE : 1;
       const gun = (e.kind === 'common1')
@@ -19172,6 +19190,140 @@ function drawEnemyUfo(x, y, angle, color, id, dt) {
       strongEmit: false
     });
   }
+}
+
+/** Gunship magnet VFX — cyan/violet rings + room dust sucked to hull. */
+const COL_MAGNET_CORE = [0.55, 0.85, 1.0];
+const COL_MAGNET_RING = [0.72, 0.35, 1.0];
+const COL_MAGNET_DUST = [0.85, 0.92, 1.0];
+const GUNSHIP_MAGNET_PULL_FRAC = 0.85;
+const gunshipMagnetDust = []; // {x,y,vx,vy,life,maxLife,size}
+const GUNSHIP_MAGNET_DUST_MAX = 220;
+let gunshipMagnetDustAcc = 0;
+
+function gunshipMagnetProgress(e) {
+  if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4) return 0;
+  const ch = enemyCharges.get(e.id | 0);
+  if (ch && ch.kind === 'gunship' && ch.ms > 0) {
+    return Math.min(1, Math.max(0, (performance.now() - ch.start) / ch.ms));
+  }
+  if (e._magnetT == null) e._magnetT = 0;
+  return Math.min(1, e._magnetT);
+}
+
+function gunshipMagnetPullSpeedClient(e) {
+  const t = gunshipMagnetProgress(e);
+  return MAX_SPEED * GUNSHIP_MAGNET_PULL_FRAC * (t * t);
+}
+
+function activeGunshipMagnet() {
+  for (const e of enemies.values()) {
+    if (e && e.kind === 'gunship' && (e.wormPhase | 0) === 4 && (e.hp | 0) > 0) return e;
+  }
+  return null;
+}
+
+function applyLocalGunshipMagnetPull(o) {
+  const e = activeGunshipMagnet();
+  if (!e || !o || (o.hp | 0) <= 0 || (o.godLeft | 0) > 0) return;
+  const pull = gunshipMagnetPullSpeedClient(e);
+  if (!(pull > 0)) return;
+  const p = enemyAt(e);
+  const dx = p.x - o.x;
+  const dy = p.y - o.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  o.vx = (o.vx || 0) * 0.88 + (dx / dist) * pull * 0.12;
+  o.vy = (o.vy || 0) * 0.88 + (dy / dist) * pull * 0.12;
+}
+
+function drawGunshipMagnetAura(x, y, t, now, id) {
+  const ease = t * t;
+  const pulse = 0.5 + 0.5 * Math.sin(now * 0.008 + id);
+  const baseR = (18 + 55 * ease) * RES_SCALE;
+  for (let i = 0; i < 3; i++) {
+    const u = (i + 1) / 3;
+    const rr = baseR * (0.45 + 0.55 * u) * (0.92 + 0.08 * pulse);
+    const a = (0.08 + 0.18 * ease) * (1.1 - u * 0.35);
+    const col = i & 1 ? COL_MAGNET_RING : COL_MAGNET_CORE;
+    drawSoftOval(x, y, now * 0.0015 + i, rr, rr * 0.72, col, a, true, 0.55);
+  }
+  // Inward spoke ticks.
+  const spokes = 10;
+  const spokeA = now * 0.0022;
+  for (let i = 0; i < spokes; i++) {
+    const ang = spokeA + (i / spokes) * Math.PI * 2;
+    const c = Math.cos(ang);
+    const s = Math.sin(ang);
+    const r0 = baseR * (0.85 + 0.1 * Math.sin(now * 0.01 + i));
+    const r1 = r0 * (0.35 + 0.2 * ease);
+    drawThickSegment(
+      x + c * r0, y + s * r0,
+      x + c * r1, y + s * r1,
+      Math.max(0.8, 1.4 * RES_SCALE * (0.5 + 0.5 * ease)),
+      i & 1 ? COL_MAGNET_RING : COL_MAGNET_CORE,
+      0.2 + 0.35 * ease,
+      true
+    );
+  }
+  drawSoftOval(x, y, 0, 6 * RES_SCALE * (0.8 + 0.4 * pulse), 6 * RES_SCALE * (0.8 + 0.4 * pulse),
+    COL_MAGNET_CORE, 0.25 + 0.35 * ease, true, 0.7);
+}
+
+function updateGunshipMagnetDust(dt) {
+  const e = activeGunshipMagnet();
+  if (!e) {
+    gunshipMagnetDust.length = 0;
+    gunshipMagnetDustAcc = 0;
+    return;
+  }
+  const p = enemyAt(e);
+  const t = gunshipMagnetProgress(e);
+  e._magnetT = Math.min(1, (e._magnetT || 0) + dt / 10);
+  gunshipMagnetDustAcc += dt;
+  const spawnEvery = 0.028;
+  while (gunshipMagnetDustAcc >= spawnEvery && gunshipMagnetDust.length < GUNSHIP_MAGNET_DUST_MAX) {
+    gunshipMagnetDustAcc -= spawnEvery;
+    const n = 2 + ((Math.random() * 3) | 0);
+    for (let i = 0; i < n; i++) {
+      gunshipMagnetDust.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        vx: (Math.random() - 0.5) * 20,
+        vy: (Math.random() - 0.5) * 20,
+        life: 0.55 + Math.random() * 0.85,
+        maxLife: 1,
+        size: 1
+      });
+      const last = gunshipMagnetDust[gunshipMagnetDust.length - 1];
+      last.maxLife = last.life;
+    }
+  }
+  const pull = (90 + 280 * t * t) * RES_SCALE;
+  for (let i = gunshipMagnetDust.length - 1; i >= 0; i--) {
+    const d = gunshipMagnetDust[i];
+    d.life -= dt;
+    if (d.life <= 0) {
+      gunshipMagnetDust.splice(i, 1);
+      continue;
+    }
+    const dx = p.x - d.x;
+    const dy = p.y - d.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    d.vx += (dx / dist) * pull * dt;
+    d.vy += (dy / dist) * pull * dt;
+    d.vx *= Math.exp(-1.6 * dt);
+    d.vy *= Math.exp(-1.6 * dt);
+    d.x += d.vx * dt;
+    d.y += d.vy * dt;
+    if (dist < 10 * RES_SCALE) {
+      gunshipMagnetDust.splice(i, 1);
+    }
+  }
+}
+
+function drawGunshipMagnetDust() {
+  if (!gunshipMagnetDust.length) return;
+  drawPoints(gunshipMagnetDust, COL_MAGNET_DUST, 0.65);
 }
 
 /** Gunship: craft 224 on default 2 roof plates (same path as commons / UFO body). */
@@ -19285,6 +19437,8 @@ function drawEnemies(dt) {
     }
   }
   drawEnemyCommonCharges();
+  updateGunshipMagnetDust(dt);
+  drawGunshipMagnetDust();
 }
 
 /* ========== Seeded coins (match server buildCoinBurst — death xy only) ========== */
@@ -20552,6 +20706,7 @@ function applyInputTo(o, inp, opts) {
     o.vx += Math.cos(o.angle) * THRUST;
     o.vy += Math.sin(o.angle) * THRUST;
   }
+  if (opts && opts.localCollide && o === player) applyLocalGunshipMagnetPull(o);
   limitPlayerSpeed(o);
   o.x += o.vx;
   o.y += o.vy;
