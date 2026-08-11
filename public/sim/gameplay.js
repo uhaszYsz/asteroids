@@ -3062,10 +3062,11 @@ function spawnPickup(room, parent) {
   let kind = 'weapon';
   let weapon = null;
   let powerup = null;
-  if (roll < 0.28) {
+  // Campaign: weapons / health only — never drop shield/drone crates.
+  if (!room.campaign && roll < 0.28) {
     kind = 'powerup';
     powerup = POWERUP_TYPES[Math.random() * POWERUP_TYPES.length | 0];
-  } else if (roll < 0.64) {
+  } else if (roll < (room.campaign ? 0.5 : 0.64)) {
     kind = 'health';
   } else {
     weapon = WEAPON_SLOTS[Math.random() * WEAPON_SLOTS.length | 0];
