@@ -1399,7 +1399,7 @@ function updateGunshipAttack(room, e, target) {
     return;
   }
 
-  // —— Magnet (phase 4): grow pullPower += 0.05/tick; asteroids + player lenDir ——
+  // —— Magnet (phase 4): grow pullPower += 0.15/tick; asteroids + player lenDir ——
   if ((e.wormPhase | 0) === 4) {
     e.magnetPull = (+e.magnetPull || 0) + ENEMY_GUNSHIP_MAGNET_PULL_GROW;
     e.magnetLeft = (e.magnetLeft | 0) - 1;
