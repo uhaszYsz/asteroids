@@ -679,18 +679,35 @@ function rollCampaignStars() {
 /**
  * Special flag only: 4% chance per star, or 7% if within
  * CAMPAIGN_STAR_SPECIAL_CORNER_R of top-left or bottom-right.
+ * If the left half of the map has no special, reroll specials only (same layout).
  */
 function markCampaignSpecialStars(stars) {
   if (!stars || !stars.length) return;
   const r2 = CAMPAIGN_STAR_SPECIAL_CORNER_R * CAMPAIGN_STAR_SPECIAL_CORNER_R;
-  for (let i = 0; i < stars.length; i++) {
-    const a = stars[i];
-    const x = +a.x;
-    const y = +a.y;
-    const nearCorner = (x * x + y * y) <= r2
-      || ((x - W) * (x - W) + (y - H) * (y - H)) <= r2;
-    const chance = nearCorner ? 0.07 : 0.04;
-    a.special = Math.random() < chance ? 1 : 0;
+  const midX = W * 0.5;
+
+  function rollOnce() {
+    for (let i = 0; i < stars.length; i++) {
+      const a = stars[i];
+      const x = +a.x;
+      const y = +a.y;
+      const nearCorner = (x * x + y * y) <= r2
+        || ((x - W) * (x - W) + (y - H) * (y - H)) <= r2;
+      const chance = nearCorner ? 0.07 : 0.04;
+      a.special = Math.random() < chance ? 1 : 0;
+    }
+  }
+
+  function leftHalfHasSpecial() {
+    for (let i = 0; i < stars.length; i++) {
+      if (stars[i].special && (+stars[i].x) < midX) return true;
+    }
+    return false;
+  }
+
+  for (let attempt = 0; attempt < 256; attempt++) {
+    rollOnce();
+    if (leftHalfHasSpecial()) return;
   }
 }
 
