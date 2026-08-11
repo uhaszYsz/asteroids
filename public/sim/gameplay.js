@@ -1190,24 +1190,24 @@ function gunshipMagnetPullSpeed(e) {
   return ENEMY_GUNSHIP_MAGNET_PULL_MAX * (t * t);
 }
 
-/** Additive magnet on one ship — force ≤ ENEMY_GUNSHIP_MAGNET_PULL_MAX per tick. */
-function gunshipMagnetAddForce(target, e, pull) {
+/** Nudge pose toward gunship — position only, does not touch vx/vy. */
+function gunshipMagnetNudgePos(target, e, pull) {
   if (!target || !e || !(pull > 0)) return;
   const dx = e.x - target.x;
   const dy = e.y - target.y;
   const dist = Math.hypot(dx, dy) || 1;
-  target.vx = (target.vx || 0) + (dx / dist) * pull;
-  target.vy = (target.vy || 0) + (dy / dist) * pull;
+  target.x += (dx / dist) * pull;
+  target.y += (dy / dist) * pull;
 }
 
-/** Apply active gunship magnet to a player (call from applyInput, before speed limit). */
+/** Apply active gunship magnet to a player (after x+=vx / y+=vy). */
 function applyGunshipMagnetToPlayer(room, p) {
   if (!room || !room.practice || !room.enemies || !p) return;
   if ((p.hp | 0) <= 0 || (p.godLeft | 0) > 0) return;
   for (let i = 0; i < room.enemies.length; i++) {
     const e = room.enemies[i];
     if (!e || e.kind !== 'gunship' || (e.wormPhase | 0) !== 4) continue;
-    gunshipMagnetAddForce(p, e, gunshipMagnetPullSpeed(e));
+    gunshipMagnetNudgePos(p, e, gunshipMagnetPullSpeed(e));
     return;
   }
 }
@@ -1222,7 +1222,7 @@ function gunshipApplyMagnetAsteroids(room, e) {
     if (a.size === 'medium') frac = 0.5;
     else if (a.size === 'big' || a.size === 'huge') frac = 1 / 3;
     else if (a.size !== 'small') frac = 0.5;
-    gunshipMagnetAddForce(a, e, pull * frac);
+    gunshipMagnetNudgePos(a, e, pull * frac);
   }
 }
 
@@ -3377,8 +3377,6 @@ function applyInput(room, p) {
     p.vx += Math.cos(p.angle) * THRUST;
     p.vy += Math.sin(p.angle) * THRUST;
   }
-  // Magnet after thrust, before speed limit — same order as client predict.
-  applyGunshipMagnetToPlayer(room, p);
   limitPlayerSpeed(p);
 }
 

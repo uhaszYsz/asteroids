@@ -19233,9 +19233,9 @@ function applyLocalGunshipMagnetPull(o) {
   const dx = p.x - o.x;
   const dy = p.y - o.y;
   const dist = Math.hypot(dx, dy) || 1;
-  // Additive force only — match server (then limitPlayerSpeed caps ship speed).
-  o.vx = (o.vx || 0) + (dx / dist) * pull;
-  o.vy = (o.vy || 0) + (dy / dist) * pull;
+  // Position nudge only — same as server (does not touch vx/vy).
+  o.x += (dx / dist) * pull;
+  o.y += (dy / dist) * pull;
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
@@ -20708,11 +20708,11 @@ function applyInputTo(o, inp, opts) {
     o.vx += Math.cos(o.angle) * THRUST;
     o.vy += Math.sin(o.angle) * THRUST;
   }
-  // Always (live + reconcile replay) — same order as server applyInput.
-  applyLocalGunshipMagnetPull(o);
   limitPlayerSpeed(o);
   o.x += o.vx;
   o.y += o.vy;
+  // Magnet: position nudge toward gunship (after normal move, before wrap).
+  applyLocalGunshipMagnetPull(o);
   wrapEntity(o);
   // Leave shared spawn zone → godmode ends for everyone (matches server).
   if (o.godLeft > 0 && opts && opts.localCollide && o === player && myId != null) {

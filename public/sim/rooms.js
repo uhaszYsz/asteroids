@@ -59,6 +59,7 @@ function stepPlayerInputs(room, p) {
   p.prevY = p.y;
   p.x += p.vx;
   p.y += p.vy;
+  applyGunshipMagnetToPlayer(room, p);
   wrap(p);
   clearGodmodeIfLeftSpawn(room, p);
   p.inp.sp = 0;
@@ -608,6 +609,7 @@ function stepRoom(room) {
       p.prevY = p.y;
       p.x += p.vx;
       p.y += p.vy;
+      applyGunshipMagnetToPlayer(room, p);
       wrap(p);
       clearGodmodeIfLeftSpawn(room, p);
       p.inp.sp = 0;
