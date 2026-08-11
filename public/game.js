@@ -11987,6 +11987,17 @@ let jumpPulse = false;
 function armCampaignJumpPulse() {
   if (!campaignMode || campaignMapOpen) return;
   jumpPulse = true;
+  // Admin: skip charge locally so prediction matches instant server boost.
+  if (consoleAdmin && (player.hp | 0) > 0) {
+    if ((campaignJumpChargeLeft | 0) > 0 || campaignJumpChargeUntil > 0) {
+      campaignJumpChargeLeft = 0;
+      campaignJumpChargeUntil = 0;
+      campaignJumpChargeUntilById.delete(myId | 0);
+    } else if (!campaignJumping) {
+      campaignJumping = true;
+      emitCampaignJumpBurst();
+    }
+  }
 }
 
 const GAME_KEYS = new Set([
@@ -19676,7 +19687,7 @@ function applyLocalGunshipMagnetPull(o) {
   const dir = Math.atan2(p.y - o.y, p.x - o.x);
   o.vx = (o.vx || 0) + lenDirX(pull, dir);
   o.vy = (o.vy || 0) + lenDirY(pull, dir);
-  clampSpeed(o);
+  if (!(campaignMode && campaignJumping)) clampSpeed(o);
 }
 
 function drawGunshipMagnetAura(x, y, t, now, id) {
@@ -21162,11 +21173,12 @@ function applyInputTo(o, inp, opts) {
     o.vy += Math.sin(o.angle) * THRUST;
   }
   applyLocalGunshipMagnetPull(o);
-  if (!(campaignMode && campaignJumping)) limitPlayerSpeed(o);
   if (campaignMode && campaignJumping) {
     const accel = 0.4 * RES_SCALE;
     o.vx += Math.cos(o.angle) * accel;
     o.vy += Math.sin(o.angle) * accel;
+  } else {
+    limitPlayerSpeed(o);
   }
   o.x += o.vx;
   o.y += o.vy;

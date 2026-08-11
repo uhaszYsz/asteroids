@@ -761,11 +761,19 @@ function startCampaignJump(room, p) {
   return true;
 }
 
+function playerWsIsAdmin(room, p) {
+  if (!room || !p || !room.clients) return false;
+  for (const ws of room.clients) {
+    if (ws.playerId === p.id && ws.isAdmin) return true;
+  }
+  return false;
+}
+
 function beginCampaignJumpCharge(room, p) {
   if (!room || !room.campaign || room.campaignMapOpen || !p || (p.hp | 0) <= 0) return false;
   if (p.jumping || (p.jumpChargeLeft | 0) > 0) return false;
-  // Clear field → boost immediately (no 5s wait).
-  if (!soloWaveHasFieldThreats(room)) {
+  // Clear field or admin → boost immediately (no 5s wait).
+  if (!soloWaveHasFieldThreats(room) || playerWsIsAdmin(room, p)) {
     return startCampaignJump(room, p);
   }
   p.jumpChargeLeft = CAMPAIGN_JUMP_CHARGE_TICKS;
@@ -1826,7 +1834,8 @@ function applyGunshipMagnetToPlayer(room, p) {
     const dir = Math.atan2(e.y - p.y, e.x - p.x);
     p.vx = (p.vx || 0) + lenDirX(pull, dir);
     p.vy = (p.vy || 0) + lenDirY(pull, dir);
-    clampSpeed(p);
+    // Hyperspace jump: never hard-cap — speed ramps without limit.
+    if (!(room.campaign && p.jumping)) clampSpeed(p);
     return;
   }
 }
@@ -4187,9 +4196,10 @@ function applyInput(room, p) {
     p.vx += Math.cos(p.angle) * THRUST;
     p.vy += Math.sin(p.angle) * THRUST;
   }
+  // Jump first so this tick's boost is active before soft/hard speed caps.
+  if (room && room.campaign) tickCampaignPlayerJump(room, p);
   applyGunshipMagnetToPlayer(room, p);
   if (!(room && room.campaign && p.jumping)) limitPlayerSpeed(p);
-  if (room && room.campaign) tickCampaignPlayerJump(room, p);
 }
 
 /** True while still inside the shared center spawn circle. */
