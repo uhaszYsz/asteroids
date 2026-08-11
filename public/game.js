@@ -14509,7 +14509,8 @@ function applyCampaignMapMsg(msg) {
     campaignStars = msg.stars.map((row) => ({
       id: row[0] | 0,
       x: +row[1],
-      y: +row[2]
+      y: +row[2],
+      exit: !!(row[3] | 0)
     }));
   }
   if (msg.at != null) campaignAtStar = msg.at | 0;
@@ -14627,10 +14628,18 @@ function redrawCampaignMap() {
     const py = s.y * sy;
     const isAt = (s.id | 0) === (campaignAtStar | 0);
     const isHover = hover && (hover.id | 0) === (s.id | 0);
+    const isExit = !!s.exit;
     const inPick = !!(at && !isAt && Math.hypot(s.x - at.x, s.y - at.y) <= pickR);
+    if (isExit) {
+      ctx.beginPath();
+      ctx.arc(px, py, 9, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(120, 255, 170, 0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
     ctx.beginPath();
-    ctx.arc(px, py, isAt ? 5.5 : (isHover ? 4.5 : 2.8), 0, Math.PI * 2);
-    ctx.fillStyle = isAt ? '#ffe08a' : (inPick ? '#d8f0ff' : '#9aa8c0');
+    ctx.arc(px, py, isAt ? 5.5 : (isHover || isExit ? 4.5 : 2.8), 0, Math.PI * 2);
+    ctx.fillStyle = isAt ? '#ffe08a' : (isExit ? '#7dffb0' : (inPick ? '#d8f0ff' : '#9aa8c0'));
     ctx.fill();
     if (isAt || isHover) {
       ctx.beginPath();

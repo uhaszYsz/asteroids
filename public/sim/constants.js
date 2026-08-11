@@ -685,7 +685,10 @@ const coopQueue = [];
 const campaignCoopQueue = [];
 
 /** Campaign star map + hyperspace jump. */
-const CAMPAIGN_STAR_COUNT = 40;
+const CAMPAIGN_STAR_COUNT = 64;
+const CAMPAIGN_STAR_PATH_COUNT = 10;
+const CAMPAIGN_STAR_PATH_STEP = 60 * RES_SCALE;
+const CAMPAIGN_STAR_BRANCH_R = 75 * RES_SCALE;
 const CAMPAIGN_JUMP_ACCEL = 0.4 * RES_SCALE;
 /** Enter pulse charge time when the stage still has threats. */
 const CAMPAIGN_JUMP_CHARGE_TICKS = 5 * TPS;

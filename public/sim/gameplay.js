@@ -441,17 +441,178 @@ function createSoloWaveAsteroids(wave) {
   return list;
 }
 
-/** 40 stars; index 0 is fixed bottom-left start. */
-function rollCampaignStars() {
-  const margin = 36 * RES_SCALE;
-  const stars = [{ id: 0, x: margin, y: H - margin }];
-  for (let i = 1; i < CAMPAIGN_STAR_COUNT; i++) {
-    stars.push({
-      id: i,
-      x: margin + Math.random() * Math.max(1, W - 2 * margin),
-      y: margin + Math.random() * Math.max(1, H - 2 * margin)
-    });
+/** Clamp campaign star into the playable map margin. */
+function clampCampaignStarPos(x, y, minX, maxX, minY, maxY) {
+  return {
+    x: Math.max(minX, Math.min(maxX, +x)),
+    y: Math.max(minY, Math.min(maxY, +y))
+  };
+}
+
+/**
+ * Step exactly `dist` from (x,y) along `ang`. If the landing point would leave
+ * the screen, bounce the heading off the walls and retry from the same origin.
+ */
+function campaignStarStepBounced(x, y, ang, dist, minX, maxX, minY, maxY) {
+  let a = +ang;
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const nx = x + Math.cos(a) * dist;
+    const ny = y + Math.sin(a) * dist;
+    let bounced = false;
+    if (nx < minX || nx > maxX) {
+      a = Math.PI - a;
+      bounced = true;
+    }
+    if (ny < minY || ny > maxY) {
+      a = -a;
+      bounced = true;
+    }
+    if (!bounced) {
+      return { x: nx, y: ny, ang: a };
+    }
+    a = Math.atan2(Math.sin(a), Math.cos(a));
   }
+  const fallback = clampCampaignStarPos(
+    x + Math.cos(a) * dist,
+    y + Math.sin(a) * dist,
+    minX, maxX, minY, maxY
+  );
+  return { x: fallback.x, y: fallback.y, ang: a };
+}
+
+function nearestCampaignChainStar(x, y, chain) {
+  let best = chain[0];
+  let bestD = Infinity;
+  for (let i = 0; i < chain.length; i++) {
+    const s = chain[i];
+    const d = Math.hypot((+s.x) - x, (+s.y) - y);
+    if (d < bestD) {
+      bestD = d;
+      best = s;
+    }
+  }
+  return best;
+}
+
+/**
+ * Star map layout:
+ * 1) 10-star main path from bottom-left toward top-right (step 60, ±30°, wall bounce).
+ *    Last path star is the exit.
+ * 2) Each path star sprouts 1–4 children at random within radius 75.
+ * 3) Those children (35%) sprout 1–4 more away from the nearest path star (±30°, ≤75),
+ *    and newly created stars keep doing the same until 64 stars exist.
+ */
+function rollCampaignStars() {
+  const margin = 28 * RES_SCALE;
+  const minX = margin;
+  const maxX = W - margin;
+  const minY = margin;
+  const maxY = H - margin;
+  const goalX = maxX;
+  const goalY = minY; // top-right (y grows downward)
+  const step = CAMPAIGN_STAR_PATH_STEP;
+  const branchR = CAMPAIGN_STAR_BRANCH_R;
+  const target = CAMPAIGN_STAR_COUNT;
+  const pathN = CAMPAIGN_STAR_PATH_COUNT;
+
+  const stars = [];
+  const chain = [];
+  let x = minX;
+  let y = maxY; // bottom-left
+  const start = { id: 0, x, y, chain: 1, exit: 0 };
+  stars.push(start);
+  chain.push(start);
+
+  for (let i = 1; i < pathN; i++) {
+    const toward = Math.atan2(goalY - y, goalX - x);
+    const ang = toward + ((Math.random() * 2 - 1) * (Math.PI / 6));
+    const placed = campaignStarStepBounced(x, y, ang, step, minX, maxX, minY, maxY);
+    x = placed.x;
+    y = placed.y;
+    const s = { id: stars.length, x, y, chain: 1, exit: 0 };
+    stars.push(s);
+    chain.push(s);
+  }
+  // Final path star aims at the top-right corner (±30°) once more if we somehow
+  // undershot the path count — already applied per step; mark exit on last chain star.
+  const exitStar = chain[chain.length - 1];
+  exitStar.exit = 1;
+
+  function pushStar(px, py) {
+    if (stars.length >= target) return null;
+    const p = clampCampaignStarPos(px, py, minX, maxX, minY, maxY);
+    const s = { id: stars.length, x: p.x, y: p.y, chain: 0, exit: 0 };
+    stars.push(s);
+    return s;
+  }
+
+  // Phase A: each main-chain star sprouts 1–4 random stars within range 75.
+  let frontier = [];
+  for (let i = 0; i < chain.length && stars.length < target; i++) {
+    const main = chain[i];
+    const n = 1 + ((Math.random() * 4) | 0);
+    for (let k = 0; k < n && stars.length < target; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = Math.random() * branchR;
+      const child = pushStar(main.x + Math.cos(a) * d, main.y + Math.sin(a) * d);
+      if (child) frontier.push(child);
+    }
+  }
+
+  // Phase B: children keep 35% sprouting away from nearest chain star until 64.
+  let guard = 0;
+  while (stars.length < target && guard++ < 2048) {
+    const parents = frontier.length
+      ? frontier
+      : stars.filter((s) => !s.chain);
+    if (!parents.length) break;
+
+    const next = [];
+    let spawned = 0;
+    const useRoll = frontier.length > 0;
+    for (let i = 0; i < parents.length && stars.length < target; i++) {
+      const parent = parents[i];
+      if (useRoll && Math.random() >= 0.35) continue;
+      const nearest = nearestCampaignChainStar(parent.x, parent.y, chain);
+      let away = Math.atan2(parent.y - nearest.y, parent.x - nearest.x);
+      if (!Number.isFinite(away) || (parent.x === nearest.x && parent.y === nearest.y)) {
+        away = Math.random() * Math.PI * 2;
+      }
+      const n = 1 + ((Math.random() * 4) | 0);
+      for (let k = 0; k < n && stars.length < target; k++) {
+        const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
+        const d = Math.random() * branchR;
+        const placed = campaignStarStepBounced(parent.x, parent.y, ang, Math.max(d, 8 * RES_SCALE), minX, maxX, minY, maxY);
+        const child = pushStar(placed.x, placed.y);
+        if (child) {
+          next.push(child);
+          spawned++;
+        }
+      }
+    }
+    frontier = next;
+
+    if (!spawned && stars.length < target) {
+      // Guaranteed progress toward 64.
+      const parent = parents[(Math.random() * parents.length) | 0];
+      const nearest = nearestCampaignChainStar(parent.x, parent.y, chain);
+      let away = Math.atan2(parent.y - nearest.y, parent.x - nearest.x);
+      if (!Number.isFinite(away)) away = Math.random() * Math.PI * 2;
+      const ang = away + ((Math.random() * 2 - 1) * (Math.PI / 6));
+      const d = (0.35 + Math.random() * 0.65) * branchR;
+      const placed = campaignStarStepBounced(parent.x, parent.y, ang, d, minX, maxX, minY, maxY);
+      const child = pushStar(placed.x, placed.y);
+      frontier = child ? [child] : [];
+    }
+  }
+
+  // Safety: pad remaining slots near the exit if anything still missing.
+  while (stars.length < target) {
+    const a = Math.random() * Math.PI * 2;
+    const d = Math.random() * branchR;
+    pushStar(exitStar.x + Math.cos(a) * d, exitStar.y + Math.sin(a) * d);
+  }
+
   return stars;
 }
 
@@ -491,7 +652,7 @@ function playerOffPlayfield(p) {
 }
 
 function packCampaignStars(room) {
-  return (room.campaignStars || []).map((s) => [s.id | 0, +s.x, +s.y]);
+  return (room.campaignStars || []).map((s) => [s.id | 0, +s.x, +s.y, s.exit ? 1 : 0]);
 }
 
 function packCampaignFuels(room) {
