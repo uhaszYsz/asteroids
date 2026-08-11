@@ -17531,10 +17531,12 @@ function asteroidDrawAgeTicks(a) {
 /** Bake live poses into spawn clocks at `now` so freeze/unfreeze doesn't jump rocks. */
 function rebaseAsteroidsToTime(now) {
   for (const a of asteroids.values()) {
-    const age = Math.max(0, (now - a.spawnSt) / 1000 * TPS);
-    a.spawnX = a.spawnX + a.vx * age;
-    a.spawnY = a.spawnY + a.vy * age;
-    a.spawnAngle = a.spawnAngle + a.spin * age;
+    const p = asteroidAt(a);
+    a.spawnX = p.x;
+    a.spawnY = p.y;
+    a.spawnAngle = p.angle;
+    a.vx = p.vx;
+    a.vy = p.vy;
     a.spawnSt = now;
   }
 }
@@ -17639,6 +17641,64 @@ function predictAsteroidEdgeTeleports() {
 
 function asteroidAt(a) {
   const age = asteroidDrawAgeTicks(a);
+  const ax = +a.magnetAx || 0;
+  const ay = +a.magnetAy || 0;
+  const until = a.magnetUntil | 0;
+  if ((ax || ay) && until > (a.spawnSt | 0)) {
+    // Match server: each tick vx+=accel (while until), clamp max, then x+=vx.
+    let x = a.spawnX;
+    let y = a.spawnY;
+    let ang = a.spawnAngle;
+    let vx = a.vx;
+    let vy = a.vy;
+    const spin = a.spin || 0;
+    const spdMax = (+a.magnetSpdMax > 0) ? +a.magnetSpdMax : 1e9;
+    const tickMs = TICK_MS;
+    const n = Math.min(600, Math.max(0, age | 0));
+    const frac = Math.max(0, age - n);
+    for (let i = 0; i < n; i++) {
+      const tMs = (a.spawnSt | 0) + i * tickMs;
+      if (tMs < until) {
+        vx += ax;
+        vy += ay;
+        const s = Math.hypot(vx, vy);
+        if (s > spdMax && s > 1e-8) {
+          const k = spdMax / s;
+          vx *= k;
+          vy *= k;
+        }
+      }
+      x += vx;
+      y += vy;
+      ang += spin;
+    }
+    if (frac > 0) {
+      const tMs = (a.spawnSt | 0) + n * tickMs;
+      let fvx = vx;
+      let fvy = vy;
+      if (tMs < until) {
+        fvx += ax * frac;
+        fvy += ay * frac;
+        const s = Math.hypot(fvx, fvy);
+        if (s > spdMax && s > 1e-8) {
+          const k = spdMax / s;
+          fvx *= k;
+          fvy *= k;
+        }
+      }
+      x += fvx * frac;
+      y += fvy * frac;
+      ang += spin * frac;
+      vx = fvx;
+      vy = fvy;
+    }
+    return {
+      x, y, angle: ang,
+      pts: a.pts,
+      big: a.big,
+      vx, vy
+    };
+  }
   return {
     x: a.spawnX + a.vx * age,
     y: a.spawnY + a.vy * age,
@@ -19938,7 +19998,11 @@ function unpackAsteroid(row) {
     ownerId: row[18] != null ? (row[18] | 0) : 0,
     hue,
     // Create-time lifetime clock (wraps refresh spawnSt only).
-    bornAt: row[20] != null ? +row[20] : (row[10] || 0)
+    bornAt: row[20] != null ? +row[20] : (row[10] || 0),
+    magnetAx: row[21] != null ? +row[21] : 0,
+    magnetAy: row[22] != null ? +row[22] : 0,
+    magnetUntil: row[23] != null ? (row[23] | 0) : 0,
+    magnetSpdMax: row[24] != null ? +row[24] : 0
   };
 }
 
@@ -19988,6 +20052,10 @@ function applyAsteroidWrap(row) {
     else a.edgeWraps = Math.max(a.edgeWraps | 0, 1);
     if (row[10] != null) a.edgeWrapMax = row[10] | 0;
   }
+  if (row[11] != null) a.magnetAx = +row[11];
+  if (row[12] != null) a.magnetAy = +row[12];
+  if (row[13] != null) a.magnetUntil = row[13] | 0;
+  if (row[14] != null) a.magnetSpdMax = +row[14];
 }
 
 /** Periodic `es` live asteroid poses (packAsteroidLive rows). */
@@ -20015,11 +20083,13 @@ function applyAsteroidPoseSnap(rows, st) {
       if (row[16] != null) a.edgeWrapMax = row[16] | 0;
     }
     if (row[20] != null) a.bornAt = +row[20];
+    if (row[21] != null) a.magnetAx = +row[21];
+    if (row[22] != null) a.magnetAy = +row[22];
+    if (row[23] != null) a.magnetUntil = row[23] | 0;
+    if (row[24] != null) a.magnetSpdMax = +row[24];
     clearAsteroidGridIron(a);
-    const age = Math.max(0, (serverNow() - a.spawnSt) / 1000 * TPS);
-    const x = a.spawnX + a.vx * age;
-    const y = a.spawnY + a.vy * age;
-    a.entered = !asteroidOffScreenAt(a, x, y);
+    const p = asteroidAt(a);
+    a.entered = !asteroidOffScreenAt(a, p.x, p.y);
   }
 }
 

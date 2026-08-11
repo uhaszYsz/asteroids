@@ -636,6 +636,7 @@ function stepRoom(room) {
     if (asteroidLifeExpired(a) && a.portalTwinAid != null) {
       removePortalTwin(room, a);
     }
+    tickAsteroidMagnetAccel(a);
     a.x += a.vx;
     a.y += a.vy;
     a.angle += a.spin;

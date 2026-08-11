@@ -1062,6 +1062,7 @@ function finishWormAttack(room, e) {
 }
 
 function finishGunshipAttack(room, e) {
+  gunshipMagnetClearAllAsteroids(room);
   e.wormPhase = 0;
   e.shootAmmo = 0;
   e.shootCd = 0;
@@ -1111,6 +1112,7 @@ function beginGunshipMagnetAttack(room, e) {
   e.ty = e.y;
   emitEnemyCharge(room, e, { side: 0 });
   emitEnemyUpdate(room, e);
+  gunshipMagnetArmAllAsteroids(room, e);
 }
 
 function beginGunshipAttack(room, e) {
@@ -1212,17 +1214,83 @@ function applyGunshipMagnetToPlayer(room, p) {
   }
 }
 
-function gunshipApplyMagnetAsteroids(room, e) {
-  const pull = gunshipMagnetPullSpeed(e);
-  if (!(pull > 0) || !room.asteroids) return;
+function gunshipMagnetAstAccelFor(a) {
+  let frac = 1;
+  if (!a) return 0;
+  if (a.size === 'medium') frac = 0.5;
+  else if (a.size === 'big' || a.size === 'huge') frac = 1 / 3;
+  else if (a.size !== 'small') frac = 0.5;
+  return ENEMY_GUNSHIP_MAGNET_AST_ACCEL * frac;
+}
+
+function clampAsteroidVelMax(a) {
+  if (!a) return;
+  const { max } = asteroidSpeedBand(a.special);
+  const s = Math.hypot(a.vx || 0, a.vy || 0);
+  if (s > max && s > 1e-8) {
+    const k = max / s;
+    a.vx *= k;
+    a.vy *= k;
+  }
+}
+
+/** Apply magnet accel for this sim tick (before x+=vx). */
+function tickAsteroidMagnetAccel(a) {
+  if (!a) return;
+  const until = a.magnetUntil | 0;
+  if (!until) return;
+  if (Date.now() >= until) {
+    a.magnetAx = 0;
+    a.magnetAy = 0;
+    a.magnetUntil = 0;
+    a.magnetSpdMax = 0;
+    return;
+  }
+  const ax = +a.magnetAx || 0;
+  const ay = +a.magnetAy || 0;
+  if (!(ax || ay)) return;
+  a.vx = (a.vx || 0) + ax;
+  a.vy = (a.vy || 0) + ay;
+  clampAsteroidVelMax(a);
+}
+
+/** Arm one asteroid with constant accel toward gunship; rebase + one net wrap. */
+function gunshipMagnetArmAsteroid(room, e, a) {
+  if (!room || !e || !a || a.hp <= 0) return;
+  const dx = e.x - a.x;
+  const dy = e.y - a.y;
+  const dist = Math.hypot(dx, dy) || 1;
+  const accel = gunshipMagnetAstAccelFor(a);
+  if (!(accel > 0)) return;
+  a.magnetAx = (dx / dist) * accel;
+  a.magnetAy = (dy / dist) * accel;
+  a.magnetUntil = (e.magnetStartedAt | 0) + Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS);
+  a.magnetSpdMax = asteroidSpeedBand(a.special).max;
+  resyncAsteroidSpawn(a);
+  emitAsteroidWrap(room, a);
+}
+
+/** Arm all field asteroids once when magnet begins. */
+function gunshipMagnetArmAllAsteroids(room, e) {
+  if (!room || !e || !room.asteroids) return;
+  for (let i = 0; i < room.asteroids.length; i++) {
+    gunshipMagnetArmAsteroid(room, e, room.asteroids[i]);
+  }
+}
+
+/** Clear magnet accel (magnet ended); rebase so NTP stays linear. */
+function gunshipMagnetClearAllAsteroids(room) {
+  if (!room || !room.asteroids) return;
   for (let i = 0; i < room.asteroids.length; i++) {
     const a = room.asteroids[i];
-    if (!a || a.hp <= 0 || a.noCollide) continue;
-    let frac = 1;
-    if (a.size === 'medium') frac = 0.5;
-    else if (a.size === 'big' || a.size === 'huge') frac = 1 / 3;
-    else if (a.size !== 'small') frac = 0.5;
-    gunshipMagnetNudgePos(a, e, pull * frac);
+    if (!a) continue;
+    if (!(a.magnetUntil || a.magnetAx || a.magnetAy)) continue;
+    a.magnetAx = 0;
+    a.magnetAy = 0;
+    a.magnetUntil = 0;
+    a.magnetSpdMax = 0;
+    resyncAsteroidSpawn(a);
+    emitAsteroidWrap(room, a);
   }
 }
 
@@ -1240,6 +1308,7 @@ function gunshipMagnetSpawnAsteroid(room, e) {
   a.vy = (dy / dist) * entry;
   pushAsteroid(room, a);
   emitAsteroidFire(room, a);
+  gunshipMagnetArmAsteroid(room, e, a);
 }
 
 function updateGunshipAttack(room, e, target) {
@@ -1295,10 +1364,9 @@ function updateGunshipAttack(room, e, target) {
     return;
   }
 
-  // —— Magnet (phase 4): player pull is in applyInput; here asteroids + timer ——
+  // —— Magnet (phase 4): player pull is position nudge; asteroids use one-shot accel ——
   if ((e.wormPhase | 0) === 4) {
     e.magnetLeft = (e.magnetLeft | 0) - 1;
-    gunshipApplyMagnetAsteroids(room, e);
     gunshipMagnetSpawnAsteroid(room, e);
     if ((e.magnetLeft | 0) <= 0) {
       finishGunshipAttack(room, e);
@@ -1330,6 +1398,7 @@ function interruptAllWormAttacks(room) {
       emitEnemyUpdate(room, e);
     }
   }
+  gunshipMagnetClearAllAsteroids(room);
 }
 
 /** Every ~0.2s: crush overlapping asteroids (no coin credit). */

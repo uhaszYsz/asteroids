@@ -393,7 +393,12 @@ function packAsteroid(a) {
     a.ownerId != null ? (a.ownerId | 0) : 0,
     packAsteroidHue(a),
     // Create-time for 20s lifetime (wraps refresh spawnSt, not life).
-    asteroidBornAt(a)
+    asteroidBornAt(a),
+    // Gunship magnet constant accel (0 when idle).
+    +a.magnetAx || 0,
+    +a.magnetAy || 0,
+    a.magnetUntil | 0,
+    +a.magnetSpdMax || 0
   ];
 }
 
@@ -413,7 +418,11 @@ function packAsteroidWrap(a) {
     a.aid, a.spawnX, a.spawnY, a.vx, a.vy, a.spawnAngle, a.spin, a.spawnSt,
     a.portalOfAid ? 1 : 0,
     a.edgeWraps | 0,
-    asteroidEdgeWrapMax(a)
+    asteroidEdgeWrapMax(a),
+    +a.magnetAx || 0,
+    +a.magnetAy || 0,
+    a.magnetUntil | 0,
+    +a.magnetSpdMax || 0
   ];
 }
 

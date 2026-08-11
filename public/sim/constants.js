@@ -469,6 +469,8 @@ const ENEMY_GUNSHIP_MAGNET_TICKS = Math.round(10 * TPS);
 const ENEMY_GUNSHIP_MAGNET_PULL_MAX = 5;
 /** Off-screen small asteroid during magnet. */
 const ENEMY_GUNSHIP_MAGNET_AST_EVERY = Math.round(0.5 * TPS);
+/** Asteroid magnet: constant accel toward gunship (set once; NTP simulates). */
+const ENEMY_GUNSHIP_MAGNET_AST_ACCEL = 0.2;
 /** Pause after void volley before next attack cycle. */
 const ENEMY_GUNSHIP_VOID_RELOAD = Math.round(1.25 * TPS);
 
