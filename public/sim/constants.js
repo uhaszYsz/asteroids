@@ -372,7 +372,7 @@ const SOLO_MEDIUM_CAP = 8;
 /** Mediums spawned once at match start (not respawned). */
 const START_MEDIUM_COUNT = 3;
 /** Delay before a replacement big asteroid enters after one is destroyed. */
-const BIG_SPAWN_DELAY_TICKS = Math.round(7 * TPS);
+const BIG_SPAWN_DELAY_TICKS = Math.round(1 * TPS);
 /** Brief pause after clearing a solo wave before the next spawn. */
 const SOLO_WAVE_CLEAR_TICKS = Math.round(1.4 * TPS);
 /** Solo enemy line-bullet speed = player default base (15) × 0.7 — not linked to tuned player speed. */
