@@ -12953,14 +12953,11 @@ const FIXDRONE_LAG_FRAMES = 5;
 const FIXDRONE_BEAM_MAX_DIST = 64;
 /** Snap back to the ship beyond this distance. */
 const FIXDRONE_TELEPORT_DIST = 100;
-/** Beam end: random spot this many px ahead of ship (min..max). */
-const FIXDRONE_BEAM_FWD_MIN = 10;
-const FIXDRONE_BEAM_FWD_MAX = 28;
-/** Beam end: random lateral width in front of ship. */
-const FIXDRONE_BEAM_WIDTH = 36;
+/** Beam end: ship position ± this many px each sim tick. */
+const FIXDRONE_BEAM_JITTER = 7;
 /** Repair beam alpha. */
-const FIXDRONE_BEAM_ALPHA = 0.6;
-/** ownerId → { repairing, spawned, x, y, trail, beamFwd, beamSide } */
+const FIXDRONE_BEAM_ALPHA = 0.7;
+/** ownerId → { repairing, spawned, x, y, trail, beamTick, aimX, aimY } */
 const fixdroneFx = new Map();
 
 function ownerCurrentHp(ownerId) {
@@ -12974,17 +12971,11 @@ function drawFixBeamSeg(x0, y0, x1, y1, alpha) {
   if (a < 0.02) return;
   const col = COL.powerDrone;
   const w = Math.max(1, Math.round(2.2 * RES_SCALE));
-  drawThickSegment(x0, y0, x1, y1, w, col, 0.55 * a, false);
-  drawThickSegment(x0, y0, x1, y1, Math.max(1, w - 1), col, 0.85 * a, true);
+  drawThickSegment(x0, y0, x1, y1, w, col, a, false);
+  drawThickSegment(x0, y0, x1, y1, Math.max(1, w - 1), col, a, true);
   const mx = x1;
   const my = y1;
-  drawThickSegment(mx - 1, my, mx + 1, my, 2, col, 0.7 * a, true);
-}
-
-function fixdronePickBeamAim(st) {
-  st.beamFwd = FIXDRONE_BEAM_FWD_MIN
-    + Math.random() * (FIXDRONE_BEAM_FWD_MAX - FIXDRONE_BEAM_FWD_MIN);
-  st.beamSide = (Math.random() - 0.5) * FIXDRONE_BEAM_WIDTH;
+  drawThickSegment(mx - 1, my, mx + 1, my, 2, col, a, true);
 }
 
 function fixdroneSpawnBehind(st, x, y, cs, sn) {
@@ -12992,7 +12983,6 @@ function fixdroneSpawnBehind(st, x, y, cs, sn) {
   st.x = x - cs * FIXDRONE_SPAWN_BACK - sn * side;
   st.y = y - sn * FIXDRONE_SPAWN_BACK + cs * side;
   st.spawned = true;
-  fixdronePickBeamAim(st);
 }
 
 function drawFixDrones(x, y, ownerId, shipAngle, dt) {
@@ -13044,9 +13034,13 @@ function drawFixDrones(x, y, ownerId, shipAngle, dt) {
     dist = Math.hypot(st.x - x, st.y - y);
   }
 
-  if (st.beamFwd == null || st.beamSide == null) fixdronePickBeamAim(st);
-  const aimX = x + cs * st.beamFwd - sn * st.beamSide;
-  const aimY = y + sn * st.beamFwd + cs * st.beamSide;
+  if (st.beamTick !== syncTick) {
+    st.beamTick = syncTick;
+    st.aimX = x + (Math.random() * 2 - 1) * FIXDRONE_BEAM_JITTER;
+    st.aimY = y + (Math.random() * 2 - 1) * FIXDRONE_BEAM_JITTER;
+  }
+  const aimX = st.aimX;
+  const aimY = st.aimY;
 
   const opt = getShipOptionById(FIXDRONE_SPRITE_ID);
   const canSprite = !!(opt && opt.kind === 'sprite' && opt.sprite
