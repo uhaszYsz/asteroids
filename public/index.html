@@ -627,6 +627,7 @@
       justify-content: center;
       gap: 10px;
     }
+    #mode-panel .mode-list button[hidden] { display: none; }
     #mode-panel .mode-list .mode-name {
       font-size: 28px; letter-spacing: 0.06em;
     }
@@ -2370,10 +2371,10 @@
       <button type="button" id="mode-solo-btn">
         <span class="mode-name">Solo</span>
       </button>
-      <button type="button" id="mode-campaign-solo-btn">
+      <button type="button" id="mode-campaign-solo-btn" hidden>
         <span class="mode-name">Solo Campaign</span>
       </button>
-      <button type="button" id="mode-campaign-coop-btn">
+      <button type="button" id="mode-campaign-coop-btn" hidden>
         <span class="mode-name">Coop Campaign</span>
         <span class="mode-meta" id="mode-campaign-coop-meta">ingame: 0 · in queue: 0</span>
       </button>
