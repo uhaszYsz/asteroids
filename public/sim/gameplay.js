@@ -2490,13 +2490,14 @@ function fireEnemyLineBullet(room, e, ang, spd, dmg, typeName) {
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
-/** UFO lead-aim rocket (tiny, skips asteroids). Launch 0 → ENEMY_UFO_ROCKET_ACCEL → cruise. */
+/** UFO lead-aim rocket (tiny, skips asteroids). Kick → ENEMY_UFO_ROCKET_ACCEL → cruise. */
 function fireEnemyRocket(room, e, ang, _spdIgnored, dmg) {
   const damage = dmg != null ? dmg : BULLET_TYPES.enemyRocket.dmg;
   const maxSpd = (WEAPONS.rocket && WEAPONS.rocket.speed > 0) ? WEAPONS.rocket.speed : 15;
   const x = e.x;
   const y = e.y;
   const now = Date.now();
+  const kick = ENEMY_UFO_ROCKET_KICK;
   const b = {
     id: room.nextBulletId++,
     owner: 0,
@@ -2507,9 +2508,8 @@ function fireEnemyRocket(room, e, ang, _spdIgnored, dmg) {
     x, y,
     spawnX: x,
     spawnY: y,
-    // Kick 0 — accel in applyRocketFlight.
-    vx: 0,
-    vy: 0,
+    vx: Math.cos(ang) * kick,
+    vy: Math.sin(ang) * kick,
     accel: ENEMY_UFO_ROCKET_ACCEL,
     maxSpeed: maxSpd,
     homing: 0,
@@ -2574,7 +2574,7 @@ function enemyTryFire(room, e) {
   if ((e.fireCd | 0) > 0) return;
 
   if (e.kind === 'ufo') {
-    // Lead with accel travel (0 → ENEMY_UFO_ROCKET_ACCEL → boost → cruise).
+    // Lead with accel travel (kick → ENEMY_UFO_ROCKET_ACCEL → boost → cruise).
     const cruise = (WEAPONS.rocket && WEAPONS.rocket.speed > 0) ? WEAPONS.rocket.speed : 15;
     const ang = leadInterceptAccelRocket(
       e.x, e.y,
@@ -2583,7 +2583,8 @@ function enemyTryFire(room, e) {
       ENEMY_UFO_ROCKET_ACCEL,
       cruise,
       ROCKET_ACCEL_BOOST_SPEED,
-      ROCKET_ACCEL_BOOST_MULT
+      ROCKET_ACCEL_BOOST_MULT,
+      ENEMY_UFO_ROCKET_KICK
     );
     fireEnemyRocket(room, e, ang);
     e.fireCd = ENEMY_UFO_RELOAD;

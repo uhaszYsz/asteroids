@@ -140,19 +140,20 @@ function leadInterceptFromDelta(dx, dy, tvx, tvy, speed) {
 }
 
 /**
- * Lead aim for rockets that launch at 0 and accelerate (UFO / player curve).
+ * Lead aim for rockets that launch at kick speed and accelerate (UFO / player curve).
  * Finds tick t where accel travel distance ≈ range to predicted target pose.
  */
-function leadInterceptAccelRocket(ox, oy, tx, ty, tvx, tvy, accel, maxSpd, boostSpd, boostMult) {
+function leadInterceptAccelRocket(ox, oy, tx, ty, tvx, tvy, accel, maxSpd, boostSpd, boostMult, kickSpd) {
   const dx0 = tx - ox;
   const dy0 = ty - oy;
   const a0 = accel > 0 ? +accel : 0;
   const max = maxSpd > 0 ? +maxSpd : 1e9;
   const boost = boostSpd != null ? +boostSpd : 0;
   const mult = boostMult != null && boostMult > 0 ? +boostMult : 1;
+  const kick = kickSpd != null && kickSpd > 0 ? +kickSpd : 0;
   if (!(a0 > 0)) return leadInterceptAngle(ox, oy, tx, ty, tvx, tvy, max < 1e9 ? max : 15);
 
-  let spd = 0;
+  let spd = kick;
   let dist = 0;
   let bestT = null;
   let bestErr = Infinity;

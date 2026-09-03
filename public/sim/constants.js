@@ -379,6 +379,8 @@ const SOLO_WAVE_CLEAR_TICKS = Math.round(1.4 * TPS);
 const ENEMY_BULLET_SPEED = 15 * 0.7;
 /** UFO micro-rocket: legacy constant-speed value (unused — accel cruise now). */
 const ENEMY_UFO_ROCKET_SPEED = ENEMY_BULLET_SPEED * 0.85;
+/** UFO rocket launch kick (px/tick) along aim. */
+const ENEMY_UFO_ROCKET_KICK = 4;
 /** UFO rocket base accel (px/tick); same boost/cruise caps as player rockets. */
 const ENEMY_UFO_ROCKET_ACCEL = 0.15;
 /** Common enemy spread shots: half that speed, 45 damage. */
