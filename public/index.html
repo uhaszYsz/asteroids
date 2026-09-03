@@ -654,7 +654,18 @@
       letter-spacing: 0.04em;
       color: #7aa8c0;
       text-align: center;
-      line-height: 1.4;
+      line-height: 1.45;
+    }
+    #mode-panel .mode-wait-hint .mode-wait-alert {
+      display: block;
+      color: #ff8c1a;
+      font-weight: 700;
+    }
+    #mode-panel .mode-wait-hint .mode-wait-aim {
+      display: block;
+      margin-top: 4px;
+      color: #7aa8c0;
+      font-weight: 400;
     }
     #campaign-map {
       position: fixed; inset: 0; z-index: 8;
@@ -2390,7 +2401,10 @@
         <span class="mode-name">Continue</span>
       </button>
     </div>
-    <div class="mode-wait-hint">Choosing PvP or Coop will start solo mode for waiting time</div>
+    <div class="mode-wait-hint">
+      <span class="mode-wait-alert">Choosing PvP or Coop will start solo mode for waiting time</span>
+      <span class="mode-wait-aim">Shift or Down Arrow for precise aiming</span>
+    </div>
   </div>
 </div>
 <div id="campaign-map" aria-hidden="true">
