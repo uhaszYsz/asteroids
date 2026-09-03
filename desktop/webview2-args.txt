@@ -1,0 +1,1 @@
+--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-ipc-flooding-protection --enable-gpu --enable-gpu-rasterization --ignore-gpu-blocklist --use-angle=d3d11

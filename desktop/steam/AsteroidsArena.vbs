@@ -13,7 +13,7 @@ If Not fso.FileExists(script) Then
   MsgBox "Missing steam\launch-game.js", 16, "Asteroids Arena Online"
   WScript.Quit 1
 End If
-' Low-latency WebView2 hints for the game process tree
-sh.Environment("PROCESS")("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") = "--disable-features=CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-ipc-flooding-protection --enable-gpu-rasterization --enable-zero-copy --ignore-gpu-blocklist"
+' WebView2: GPU + no background throttle (keep WebGL-safe — no disable-direct-composition)
+sh.Environment("PROCESS")("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") = "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-ipc-flooding-protection --enable-gpu --enable-gpu-rasterization --ignore-gpu-blocklist --use-angle=d3d11"
 ' WindowStyle 0 = hidden (no console flash)
 sh.Run """" & node & """ """ & script & """", 0, False

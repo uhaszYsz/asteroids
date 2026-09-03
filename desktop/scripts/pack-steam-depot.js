@@ -1,15 +1,14 @@
 'use strict';
 
 /**
- * Build SteamPipe-ready depot folders:
- *   desktop/dist/steam-depot-windows/
- *   desktop/dist/steam-depot-linux/
- *   desktop/dist/steam-depot-macos/
+ * Build SteamPipe-ready depot folders + Web Upload ZIPs:
+ *   desktop/dist/steam-depot-windows|linux|macos/
+ *   desktop/dist/steam-web-upload/depot-5069921-windows.zip (etc.)
  *
  * Also mirrors Windows → desktop/dist/steam-depot/ (compat).
  *
  * Usage (repo root):
- *   node desktop/scripts/pack-steam-depot.js
+ *   npm run desktop:pack:steam
  *   node desktop/scripts/pack-steam-depot.js --windows-only
  */
 
@@ -135,20 +134,56 @@ function writeCommonSteamFiles(outDir, launchHint) {
   copyDir(path.join(STEAM_DIR, 'node_modules'), path.join(steamOut, 'node_modules'));
 
   fs.writeFileSync(path.join(outDir, 'steam_appid.txt'), APP_ID + '\n');
+  const packId = require('crypto').randomBytes(16).toString('hex');
+  const packedAt = new Date().toISOString();
   fs.writeFileSync(path.join(outDir, 'steam_session.json'), JSON.stringify({
     ok: 0,
     err: 'no_session',
     detail: 'Run ' + launchHint + ' to fetch a Steam ticket',
-    at: Date.now()
+    at: Date.now(),
+    packId
   }, null, 2));
   // Unique per pack so SteamPipe/Web Upload never treats rebuilds as identical.
-  fs.writeFileSync(path.join(outDir, 'BUILD_STAMP.txt'), [
+  const stamp = [
     'appId=' + APP_ID,
-    'packedAt=' + new Date().toISOString(),
+    'packId=' + packId,
+    'packedAt=' + packedAt,
     'launch=' + launchHint,
     'host=' + require('os').hostname(),
     ''
-  ].join('\n'));
+  ].join('\n');
+  fs.writeFileSync(path.join(outDir, 'BUILD_STAMP.txt'), stamp);
+  fs.writeFileSync(path.join(steamOut, 'BUILD_STAMP.txt'), stamp);
+}
+
+function zipDepot(srcDir, zipPath) {
+  fs.mkdirSync(path.dirname(zipPath), { recursive: true });
+  if (fs.existsSync(zipPath)) fs.rmSync(zipPath, { force: true });
+  // Drop Neutralino runtime junk if the depot was launched locally.
+  const tmpDir = path.join(srcDir, '.tmp');
+  if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+
+  // Steam Web Upload is picky: no "./" prefixes (tar -a), and prefer "/" path
+  // separators (Compress-Archive writes "\" which often ends as Failure).
+  const ps = [
+    '-NoProfile', '-Command',
+    `$ErrorActionPreference='Stop'; ` +
+    `Add-Type -AssemblyName System.IO.Compression; ` +
+    `Add-Type -AssemblyName System.IO.Compression.FileSystem; ` +
+    `$src='${srcDir.replace(/'/g, "''")}'; $dst='${zipPath.replace(/'/g, "''")}'; ` +
+    `if (Test-Path $dst) { Remove-Item -Force $dst }; ` +
+    `$zip=[IO.Compression.ZipFile]::Open($dst, [IO.Compression.ZipArchiveMode]::Create); ` +
+    `try { ` +
+    `  Get-ChildItem -LiteralPath $src -Recurse -Force -File | ForEach-Object { ` +
+    `    $rel = $_.FullName.Substring($src.Length).TrimStart('\\','/').Replace('\\','/'); ` +
+    `    if ($rel -match '^(\\.tmp|README-STEAM\\.txt)(/|$)') { return }; ` +
+    `    [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $rel, [IO.Compression.CompressionLevel]::Optimal); ` +
+    `  }; ` +
+    `} finally { $zip.Dispose() }`
+  ];
+  const r = spawnSync('powershell', ps, { stdio: 'inherit', shell: false });
+  if (r.status) throw new Error('Failed to zip ' + srcDir);
+  console.log('ZIP:', zipPath);
 }
 
 function copySharedResources(neuDist, outDir) {
@@ -303,12 +338,20 @@ async function main() {
     await packMac(neuDist);
   }
 
-  console.log('=== 3/3 Done ===');
-  console.log('Upload each folder as its own SteamPipe depot (OS filter in Steamworks).');
-  console.log('  Windows:', path.join(DIST, 'steam-depot-windows'));
+  console.log('=== 3/3 Zipping for Steam Web Upload ===');
+  const uploadDir = path.join(DIST, 'steam-web-upload');
+  fs.mkdirSync(uploadDir, { recursive: true });
+  zipDepot(path.join(DIST, 'steam-depot-windows'), path.join(uploadDir, 'depot-5069921-windows.zip'));
   if (!WINDOWS_ONLY) {
-    console.log('  Linux:  ', path.join(DIST, 'steam-depot-linux'));
-    console.log('  macOS:  ', path.join(DIST, 'steam-depot-macos'));
+    zipDepot(path.join(DIST, 'steam-depot-linux'), path.join(uploadDir, 'depot-5069922-linux.zip'));
+    zipDepot(path.join(DIST, 'steam-depot-macos'), path.join(uploadDir, 'depot-5069923-macos.zip'));
+  }
+
+  console.log('Done. Upload ZIPs from:', uploadDir);
+  console.log('  Windows: depot-5069921-windows.zip');
+  if (!WINDOWS_ONLY) {
+    console.log('  Linux:   depot-5069922-linux.zip');
+    console.log('  macOS:   depot-5069923-macos.zip');
   }
 }
 

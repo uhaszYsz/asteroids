@@ -1,0 +1,11 @@
+"DepotBuildConfig"
+{
+	"DepotID" "5069922"
+	"ContentRoot" "..\\..\\dist\\steam-depot-linux\\"
+	"FileMapping"
+	{
+		"LocalPath" "*"
+		"DepotPath" "."
+		"recursive" "1"
+	}
+}

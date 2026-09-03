@@ -1,0 +1,14 @@
+"AppBuild"
+{
+	"AppID" "5069920"
+	"Desc" "Asteroids Arena Online — first multi-OS build"
+	"Preview" "0"
+	"ContentRoot" "..\\content\\"
+	"BuildOutput" "..\\output\\"
+	"Depots"
+	{
+		"5069921" "depot_build_5069921.vdf"
+		"5069922" "depot_build_5069922.vdf"
+		"5069923" "depot_build_5069923.vdf"
+	}
+}
