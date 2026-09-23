@@ -6,12 +6,14 @@ function takePlayerInput(p) {
     p.inp.r = next.r;
     p.inp.u = next.u;
     p.inp.sp = next.sp;
+    p.inp.sp2 = next.sp2 ? 1 : 0;
     p.inp.sh = next.sh ? 1 : 0;
     p.inp.j = next.j ? 1 : 0;
     p.lastSeq = next.seq;
   } else {
     // Hold last movement/turn under jitter — never invent shoot pulses.
     p.inp.sp = 0;
+    p.inp.sp2 = 0;
     p.inp.j = 0;
   }
 }
@@ -21,8 +23,10 @@ function drainPlayerInputQueue(p) {
   while (p.inputQueue.length) {
     takePlayerInput(p);
     p.inp.sp = 0;
+    p.inp.sp2 = 0;
   }
   p.inp.sp = 0;
+  p.inp.sp2 = 0;
 }
 
 /**
@@ -44,9 +48,12 @@ function stepPlayerInputs(room, p) {
     p.inp.l = 0;
     p.inp.r = 0;
     p.inp.sp = 0;
+    p.inp.sp2 = 0;
     p.inp.j = 0;
     p.bursting = false;
     p.railChargeLeft = 0;
+    p.bursting2 = false;
+    p.railChargeLeft2 = 0;
     p.prevX = p.x;
     p.prevY = p.y;
     return;
@@ -54,10 +61,14 @@ function stepPlayerInputs(room, p) {
 
   takePlayerInput(p);
   demoRecorder.recordInput(room, p);
-  if (live && p.inp.sp) tryStartBurst(p);
+  if (live && p.inp.sp) tryStartBurstSlot(p, 1);
+  if (live && p.inp.sp2) tryStartBurstSlot(p, 2);
   applyInput(room, p);
   if (live && p.hp > 0 && p.inp.u) fireThrustRay(room, p);
-  if (live) updateShooting(room, p);
+  if (live) {
+    updateShootingSlot(room, p, 1);
+    updateShootingSlot(room, p, 2);
+  }
   p.prevX = p.x;
   p.prevY = p.y;
   p.x += p.vx;
@@ -69,6 +80,7 @@ function stepPlayerInputs(room, p) {
   }
   clearGodmodeIfLeftSpawn(room, p);
   p.inp.sp = 0;
+  p.inp.sp2 = 0;
   p.inp.j = 0;
 }
 
@@ -549,7 +561,10 @@ function stepRoom(room) {
       p.av = 0;
       p.bursting = false;
       p.railChargeLeft = 0;
+      p.bursting2 = false;
+      p.railChargeLeft2 = 0;
       p.inp.sp = 0;
+      p.inp.sp2 = 0;
     }
     if (room.pauseCountdown > 0) tickPauseCountdown(room);
     else burnPauseBudget(room);
@@ -569,7 +584,10 @@ function stepRoom(room) {
       p.av = 0;
       p.bursting = false;
       p.railChargeLeft = 0;
+      p.bursting2 = false;
+      p.railChargeLeft2 = 0;
       p.inp.sp = 0;
+      p.inp.sp2 = 0;
     }
     // Freeze the world — no asteroid / bullet / pickup / big-spawn updates.
 
@@ -634,7 +652,6 @@ function stepRoom(room) {
     }
     // Humans: one cmd/step per tick (backlog drains over time — no thrust stack).
     stepPlayerInputs(room, p);
-    if (room.matchLive && !room.campaignMapOpen) tickPlayerShield(room, p);
   }
   if (room.matchLive && !roomPreRoundFrozen(room)) processPendingRailBounces(room);
   // Move asteroids first, rebuild spatial hash once, then bullets + collisions
@@ -807,7 +824,6 @@ function stepRoom(room) {
   rebuildAsteroidSpatialHash(room);
   if (room.matchLive) {
     updateBullets(room);
-    updateFixDrones(room);
     updatePickups(room);
     if (room.practice && !room.shopOpen) updateEnemies(room);
     tickWorldPoseSnap(room);
@@ -964,13 +980,15 @@ function captureWaitingSnapshot(ws) {
       hp: p.hp, lives: p.lives | 0, coins: p.coins | 0,
       coinsCollected: p.coinsCollected | 0,
       weapon: p.weapon || 'default',
+      weapon2: p.weapon2 || null,
       weaponLevels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
       unlockedWeapons: Object.assign({}, ensureUnlockedWeapons(p)),
-      powerups: Object.assign({}, p.powerups || freshPowerups()),
-      shieldHp: playerHasPowerup(p, 'shield') ? Math.max(0, +(p.shieldHp != null ? p.shieldHp : SHIELD_MAX_HP)) : 0,
       shootAmmo: p.shootAmmo | 0,
       shootCd: p.shootCd | 0,
-      reloadLeft: p.reloadLeft | 0
+      reloadLeft: p.reloadLeft | 0,
+      shootAmmo2: p.shootAmmo2 | 0,
+      shootCd2: p.shootCd2 | 0,
+      reloadLeft2: p.reloadLeft2 | 0
     },
     asteroids: room.asteroids.map((a) => ({
       aid: a.aid,
@@ -1009,7 +1027,7 @@ function captureWaitingSnapshot(ws) {
     })),
     pickups: room.pickups.map((u) => ({
       id: u.id, x: u.x, y: u.y, vx: u.vx, vy: u.vy, r: u.r,
-      weapon: u.weapon || null, powerup: u.powerup || null, kind: u.kind || null,
+      weapon: u.weapon || null, kind: u.kind || null,
       bounces: u.bounces | 0,
       angle: u.angle || 0, spin: u.spin || 0
     })),
@@ -1033,22 +1051,21 @@ function applySnapshotToRoom(room, p, snap) {
   p.coinsCollected = sp.coinsCollected | 0;
   p.weapon = sp.weapon || 'default';
   if (WEAPON_SLOTS.indexOf(p.weapon) < 0) p.weapon = 'default';
+  p.weapon2 = (sp.weapon2 && WEAPON_SLOTS.indexOf(sp.weapon2) >= 0 && sp.weapon2 !== p.weapon) ? sp.weapon2 : null;
   p.weaponLevels = Object.assign(freshWeaponLevels(), sp.weaponLevels || {});
   p.unlockedWeapons = Object.assign(freshUnlockedWeapons(), sp.unlockedWeapons || {});
-  if (!p.weapon) p.weapon = 'default';
-  ownOnlyWeapon(p, p.weapon, getWeaponLevel(p, p.weapon));
-  p.powerups = Object.assign(freshPowerups(), sp.powerups || {});
-  delete p.powerups.shieldHp;
-  if (p.powerups.shield) {
-    p.shieldHp = sp.shieldHp != null ? Math.max(0, Math.min(SHIELD_MAX_HP, +sp.shieldHp)) : SHIELD_MAX_HP;
-  } else {
-    p.shieldHp = 0;
-  }
+  p.unlockedWeapons[p.weapon] = true;
+  if (p.weapon2) p.unlockedWeapons[p.weapon2] = true;
   p.shootAmmo = sp.shootAmmo | 0;
   p.shootCd = sp.shootCd | 0;
   p.reloadLeft = sp.reloadLeft | 0;
   p.bursting = false;
   p.railChargeLeft = 0;
+  p.shootAmmo2 = sp.shootAmmo2 | 0;
+  p.shootCd2 = sp.shootCd2 | 0;
+  p.reloadLeft2 = sp.reloadLeft2 | 0;
+  p.bursting2 = false;
+  p.railChargeLeft2 = 0;
   p.godLeft = GODMODE_TICKS;
 
   room.wave = Math.max(1, snap.wave | 0);
@@ -1131,12 +1148,12 @@ function applySnapshotToRoom(room, p, snap) {
   // Pickups restored loosely — skip complex kinds if make fails.
   for (const row of snap.pickups || []) {
     try {
+      if (row.kind === 'powerup') continue; // removed mechanic — drop stale saved crates
       const u = {
         id: row.id | 0,
         x: row.x, y: row.y, vx: row.vx || 0, vy: row.vy || 0,
         r: row.r || 10,
         weapon: row.weapon || null,
-        powerup: row.powerup || null,
         kind: row.kind || null,
         angle: row.angle || 0,
         spin: row.spin || 0,
@@ -1268,7 +1285,6 @@ function startPractice(ws, queueKind, opts) {
   });
   notifyPlayerCoins(room, p);
   notifyPlayerWeapon(room, p, false);
-  notifyPowerups(room, p);
   // sv_demo 2: record coop-queue / pvp-queue wait waves (not dedicated solo).
   if ((svDemo | 0) >= 2) {
     demoRecorder.start(room, { tps: TPS, w: W, h: H });
@@ -1630,14 +1646,7 @@ function sendWelcome(ws, room, p, extra) {
     bullets: room.bullets.map(packBullet),
     asteroids: room.asteroids.map(packAsteroid),
     pickups: room.pickups.map(packPickup),
-    enemies: (room.enemies || []).filter(enemyIsSpawned).map(packEnemy),
-    powerupsByPlayer: (() => {
-      const m = {};
-      for (const pl of room.players.values()) {
-        m[pl.id] = packPowerupsNet(pl);
-      }
-      return m;
-    })()
+    enemies: (room.enemies || []).filter(enemyIsSpawned).map(packEnemy)
   }, extra || {}));
 }
 

@@ -11,6 +11,7 @@
   <style>
     * { margin: 0; box-sizing: border-box; }
     body {
+      position: relative;
       background: #000;
       overflow: hidden; display: flex; justify-content: center; align-items: center;
       height: 100vh; font-family: Consolas, "Courier New", monospace;
@@ -22,6 +23,15 @@
       /* width/height set in JS — contain-fit to the window */
       touch-action: none;
     }
+    #fluid-bg {
+      /* left/top/width/height set in JS to match the game canvas's contain-fit box exactly. */
+      position: absolute;
+      z-index: 0;
+      display: none;
+      pointer-events: none;
+    }
+    #fluid-bg.show { display: block; }
+    canvas#c { position: relative; z-index: 1; }
     #touch-controls {
       display: none;
       position: fixed;
@@ -82,6 +92,20 @@
       font-variant-numeric: tabular-nums;
     }
     #fps-hud.low { color: #ff6a6a; }
+    #loadout-hud {
+      position: fixed; top: 24px; left: 8px; z-index: 19;
+      display: flex; flex-direction: column; gap: 2px;
+      font: 12px Consolas, "Courier New", monospace;
+      letter-spacing: 0.04em; pointer-events: none;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+    }
+    #loadout-hud.hidden { display: none; }
+    #loadout-hud .loadout-row { display: flex; gap: 6px; align-items: center; }
+    #loadout-hud .loadout-key {
+      color: #7ee8ff; font-weight: 700;
+    }
+    #loadout-hud .loadout-row:last-child .loadout-key { color: #ff9a3c; }
+    #loadout-hud span:last-child { color: #d0f8ff; text-transform: uppercase; }
     #score-hud {
       position: fixed; left: 50%; top: 36px; transform: translateX(-50%);
       color: #ff9ad8; font: 700 18px Consolas, "Courier New", monospace;
@@ -711,6 +735,54 @@
     #cancel-btn:hover { background: #4a2c2c; }
     #cancel-btn.visible { display: inline-block; }
 
+    #first-help {
+      position: fixed; inset: 0; z-index: 21;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(5, 8, 12, 0.92);
+      opacity: 0; visibility: hidden;
+      pointer-events: none;
+      transition: opacity 0.3s ease, visibility 0.3s;
+    }
+    #first-help.show {
+      opacity: 1; visibility: visible;
+      pointer-events: auto;
+    }
+    #first-help .fh-card {
+      text-align: center;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #d8ece8;
+      max-width: 460px;
+      padding: 28px 32px;
+      border: 1px solid #3a6a88;
+      background: rgba(10, 16, 24, 0.96);
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+    }
+    #first-help .fh-tag {
+      font-size: 12px; letter-spacing: 0.28em; color: #7ee8ff;
+      margin-bottom: 10px; font-weight: 600;
+    }
+    #first-help .fh-title {
+      font-size: clamp(20px, 4vw, 26px); font-weight: 800;
+      letter-spacing: 0.02em; color: #e8f6ff;
+      margin: 0 0 18px;
+    }
+    #first-help .fh-body {
+      font-size: 16px; line-height: 1.7; color: #c0dce4;
+      margin-bottom: 24px;
+    }
+    #first-help .fh-hl {
+      color: #ff9a3c;
+      font-weight: 800;
+      text-shadow: 0 0 12px rgba(255, 154, 60, 0.4);
+    }
+    #first-help #fh-dismiss-btn {
+      appearance: none; border: 1px solid #3a6a88;
+      background: #122030; color: #e8f6ff;
+      font-size: 15px; font-weight: 600; letter-spacing: 0.08em;
+      padding: 12px 28px; cursor: pointer;
+      text-transform: uppercase;
+    }
+    #first-help #fh-dismiss-btn:hover { background: #1a3848; border-color: #7ee8ff; }
     #solo-over {
       position: fixed; inset: 0; z-index: 9;
       display: flex; align-items: center; justify-content: center;
@@ -762,7 +834,8 @@
     }
     #solo-shop {
       position: fixed; inset: 0; z-index: 9;
-      display: flex; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 12px;
       background: rgba(4, 2, 10, 0.88);
       opacity: 0; visibility: hidden;
       pointer-events: none;
@@ -810,13 +883,9 @@
       font-family: Consolas, "Courier New", monospace;
       color: #b8f0ff;
       height: 100%;
-      max-height: min(80vh, 780px);
-      overflow: auto;
-      overscroll-behavior: contain;
-      contain: layout paint;
+      overflow: hidden;
       padding: 14px 16px 16px;
       background: #0a1220;
-      -webkit-overflow-scrolling: touch;
     }
     #solo-shop .ss-tag {
       font-family: "Press Start 2P", Consolas, monospace;
@@ -857,42 +926,6 @@
     }
     #solo-shop .ss-stat-coins b { color: #ffd060; }
     #solo-shop .ss-meta { display: none; }
-    #solo-shop .ss-loadout {
-      display: flex; flex-direction: column; gap: 8px;
-      margin-bottom: 14px;
-      padding: 10px 12px;
-      border: 1px solid #234858;
-      background: #081018;
-    }
-    #solo-shop .ss-equipped {
-      display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
-    }
-    #solo-shop .ss-equipped .ss-preview {
-      width: 112px; height: 112px; flex: 0 0 auto;
-      max-width: none;
-      margin: 0;
-      aspect-ratio: 1 / 1;
-      object-fit: fill;
-      background: #020810;
-      border: 1px solid #3a90b0;
-    }
-    #solo-shop .ss-equipped-info { flex: 1 1 140px; min-width: 0; align-self: flex-start; padding-top: 2px; }
-    #solo-shop .ss-equipped-label {
-      font-family: "Press Start 2P", Consolas, monospace;
-      font-size: 9px; letter-spacing: 0.08em; color: #5ad8ff;
-      margin-bottom: 4px;
-    }
-    #solo-shop .ss-equipped-name {
-      font-family: "Press Start 2P", Consolas, monospace;
-      font-size: 14px; letter-spacing: 0.04em;
-      text-transform: uppercase; color: #fff8b0;
-      line-height: 1.4;
-    }
-    #solo-shop .ss-equipped-lvl {
-      font-size: 16px; color: #6ad8ff; margin-top: 4px;
-    }
-    #solo-shop .ss-equipped button,
-    #solo-shop .ss-row button,
     #solo-shop .ss-continue {
       appearance: none;
       font-family: "Press Start 2P", Consolas, monospace;
@@ -901,52 +934,8 @@
       cursor: pointer;
       border: 1px solid #1a3848;
     }
-    #solo-shop .ss-equipped button {
-      background: #208028;
-      color: #e8ffe0;
-      border-color: #2a9030;
-      font-size: 9px;
-      padding: 13px 12px;
-      min-height: calc(1em + 26px);
-      width: auto;
-      max-width: 100%;
-      white-space: normal;
-      line-height: 1.35;
-      text-align: center;
-      box-sizing: border-box;
-      align-self: flex-end;
-    }
-    #solo-shop .ss-equipped button:hover:not(:disabled),
-    #solo-shop .ss-row button:hover:not(:disabled),
     #solo-shop .ss-continue:hover:not(:disabled) {
       filter: brightness(1.12);
-    }
-    #solo-shop .ss-equipped button:disabled,
-    #solo-shop .ss-row button:disabled {
-      opacity: 0.4; cursor: default;
-    }
-    #solo-shop .ss-owned-pu {
-      display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-      padding-top: 8px;
-      border-top: 1px solid #1e3a48;
-    }
-    #solo-shop .ss-owned-pu-label {
-      font-family: "Press Start 2P", Consolas, monospace;
-      font-size: 8px; letter-spacing: 0.08em; color: #8ec8e0;
-      margin-right: 4px;
-    }
-    #solo-shop .ss-owned-chip {
-      display: inline-flex; align-items: center; justify-content: center;
-      padding: 4px;
-      border: 1px solid #345868;
-      background: #0c1824;
-    }
-    #solo-shop .ss-owned-chip canvas {
-      width: 40px; height: 40px; display: block; background: #020810;
-      border: none;
-    }
-    #solo-shop .ss-owned-empty {
-      font-size: 12px; color: #486878;
     }
     #solo-shop .ss-section {
       margin-bottom: 14px;
@@ -968,17 +957,42 @@
       #solo-shop .ss-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     #solo-shop .ss-row {
-      display: flex; flex-direction: column; align-items: stretch; justify-content: space-between;
-      gap: 5px;
+      position: relative;
+      display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start;
+      gap: 3px;
       padding: 6px;
       border: 1px solid #234858;
       background: #081018;
+      cursor: pointer;
     }
     #solo-shop .ss-row:hover:not(.ss-owned) {
       border-color: #3a90b0;
     }
+    #solo-shop .ss-row.ss-current {
+      border-color: #ffd060;
+      box-shadow: 0 0 8px rgba(255, 208, 96, 0.35) inset;
+    }
     #solo-shop .ss-row.ss-owned {
       opacity: 0.4;
+      cursor: default;
+      pointer-events: none;
+    }
+    #solo-shop .ss-row.ss-focus,
+    #solo-shop .ss-continue.ss-focus {
+      outline: 2px solid #7ee8ff;
+      outline-offset: 1px;
+      box-shadow: 0 0 10px rgba(126, 232, 255, 0.55);
+    }
+    #solo-shop .ss-price {
+      position: absolute;
+      top: 4px; right: 4px;
+      font-family: "Press Start 2P", Consolas, monospace;
+      font-size: 8px;
+      letter-spacing: 0.02em;
+      color: #ffd060;
+      background: rgba(4, 8, 12, 0.75);
+      padding: 3px 4px;
+      border: 1px solid #4a3a10;
       pointer-events: none;
     }
     #solo-shop .ss-preview {
@@ -1002,16 +1016,13 @@
       line-height: 1.35;
       min-height: 1.4em;
     }
-    #solo-shop .ss-row button {
-      background: #8a5800;
-      color: #fff8d0;
-      font-size: 8px;
-      padding: 7px 6px;
-      white-space: nowrap;
-      width: 100%;
+    #solo-shop .ss-row .ss-lvl {
+      font-size: 12px; color: #6ad8ff;
+      text-align: center;
+      line-height: 1.2;
     }
     #solo-shop .ss-continue {
-      width: 100%; margin-top: 14px;
+      width: min(880px, 96vw);
       background: #208028;
       color: #e8ffe0;
       font-size: clamp(10px, 2vw, 12px);
@@ -1744,9 +1755,25 @@
 <body>
   <div id="status" class="hidden"></div>
   <div id="fps-hud">-- fps</div>
+<div id="loadout-hud" class="hidden">
+  <div class="loadout-row"><span class="loadout-key">[Z]</span><span id="loadout-z-name">DEFAULT</span></div>
+  <div class="loadout-row"><span class="loadout-key">[X]</span><span id="loadout-x-name">—</span></div>
+</div>
 <div id="score-hud" class="hidden"><span id="score-me">0</span><span class="sep">—</span><span id="score-foe">0</span><span class="sep" id="score-limit"></span></div>
 <div id="wait-banner" class="hidden">Waiting for player...</div>
 <div id="now-playing" aria-live="polite"></div>
+
+<div id="first-help" aria-hidden="true">
+  <div class="fh-card">
+    <div class="fh-tag">BEFORE YOU GO</div>
+    <div class="fh-title">You should know this</div>
+    <div class="fh-body">
+      It's better to use <b class="fh-hl">arrow keys</b> instead of WASD.<br>
+      Hold <b class="fh-hl">down arrow</b> for precise aim mode.
+    </div>
+    <button type="button" id="fh-dismiss-btn">Got it</button>
+  </div>
+</div>
 
 <div id="solo-over" aria-hidden="true">
   <div class="so-card">
@@ -1778,10 +1805,6 @@
           <div class="ss-stat"><span class="ss-stat-label">SCORE</span><b id="ss-score">0</b></div>
           <div class="ss-stat"><span class="ss-stat-label">LIVES</span><b id="ss-lives">3</b></div>
         </div>
-        <div class="ss-loadout">
-          <div class="ss-equipped" id="ss-equipped"></div>
-          <div class="ss-owned-pu" id="ss-owned-powerups"></div>
-        </div>
         <div class="ss-section">
           <div class="ss-section-title">Vitals</div>
           <div class="ss-list" id="ss-vital"></div>
@@ -1790,10 +1813,10 @@
           <div class="ss-section-title">Weapons</div>
           <div class="ss-list" id="ss-weapons"></div>
         </div>
-        <button type="button" class="ss-continue" id="ss-continue-btn">START WAVE</button>
       </div>
     </div>
   </div>
+  <button type="button" class="ss-continue" id="ss-continue-btn">START WAVE [ENTER]</button>
 </div>
 
 <div id="match-intro" aria-hidden="true">
@@ -1888,6 +1911,78 @@
   </div>
 
   <div class="gp-pane show" id="gp-pane-grid" data-gp-pane="grid">
+    <div class="gp-section" data-section="bgmode">
+      <div class="gp-sec-head">
+        <div class="gp-sec-title">Background</div>
+      </div>
+      <div class="gp-shapes" id="bg-mode-buttons">
+        <button type="button" data-bgmode="grid" class="active">grid</button>
+        <button type="button" data-bgmode="fluid">fluid</button>
+      </div>
+    </div>
+
+    <div class="gp-section" id="gp-section-fluid" data-section="fluid" style="display:none">
+      <div class="gp-sec-head">
+        <div class="gp-sec-title">Fluid settings</div>
+      </div>
+      <div class="gp-row">
+        <div class="gp-label">refresh rate</div>
+      </div>
+      <div class="gp-shapes" id="fluid-fps-buttons">
+        <button type="button" data-fluid-fps="30">30 fps</button>
+        <button type="button" data-fluid-fps="60" class="active">60 fps</button>
+      </div>
+      <div class="gp-row">
+        <div class="gp-label">density diffusion</div>
+        <input type="range" data-fluid="DENSITY_DISSIPATION" min="0" max="4" step="0.05" value="1" />
+        <span class="gp-val" data-fluid-val="DENSITY_DISSIPATION">1</span>
+      </div>
+      <div class="gp-row">
+        <div class="gp-label">velocity diffusion</div>
+        <input type="range" data-fluid="VELOCITY_DISSIPATION" min="0" max="4" step="0.05" value="0" />
+        <span class="gp-val" data-fluid-val="VELOCITY_DISSIPATION">0</span>
+      </div>
+      <div class="gp-row">
+        <div class="gp-label">pressure</div>
+        <input type="range" data-fluid="PRESSURE" min="0" max="1" step="0.01" value="0" />
+        <span class="gp-val" data-fluid-val="PRESSURE">0</span>
+      </div>
+      <div class="gp-row">
+        <div class="gp-label">vorticity (curl)</div>
+        <input type="range" data-fluid="CURL" min="0" max="50" step="1" value="30" />
+        <span class="gp-val" data-fluid-val="CURL">30</span>
+      </div>
+      <div class="gp-row">
+        <div class="gp-label">splat radius</div>
+        <input type="range" data-fluid="SPLAT_RADIUS" min="0.01" max="1" step="0.01" value="0.04" />
+        <span class="gp-val" data-fluid-val="SPLAT_RADIUS">0.04</span>
+      </div>
+      <div class="gp-row">
+        <div class="gp-label">color speed</div>
+        <input type="range" data-fluid="COLOR_UPDATE_SPEED" min="0" max="30" step="1" value="10" />
+        <span class="gp-val" data-fluid-val="COLOR_UPDATE_SPEED">10</span>
+      </div>
+      <label class="gp-check">
+        <input type="checkbox" data-fluid-check="SHADING" checked />
+        <span>shading<span class="gp-check-sub">3D-ish lighting on the fluid surface</span></span>
+      </label>
+      <label class="gp-check">
+        <input type="checkbox" data-fluid-check="COLORFUL" checked />
+        <span>colorful<span class="gp-check-sub">Cycle splat colors automatically</span></span>
+      </label>
+      <label class="gp-check">
+        <input type="checkbox" data-fluid-check="BLOOM" />
+        <span>bloom<span class="gp-check-sub">Glow on bright dye — costs more GPU</span></span>
+      </label>
+      <label class="gp-check">
+        <input type="checkbox" data-fluid-check="SUNRAYS" />
+        <span>sunrays<span class="gp-check-sub">God-ray streaks — costs more GPU</span></span>
+      </label>
+      <div class="gp-row">
+        <button type="button" id="fluid-random-splat">Random splats</button>
+      </div>
+    </div>
+
     <p class="gp-hint">LMB = suck · RMB = blow · MMB = enemy explosion particles. Radial/square/star/hex/rays/full = click · directional = drag · line = two taps. Full distorts the whole grid.</p>
     <div class="gp-section" data-section="globals">
       <div class="gp-sec-head">
@@ -2414,6 +2509,7 @@
 <div id="top-btns">
   <button id="cancel-btn" type="button">Cancel</button>
 </div>
+<canvas id="fluid-bg"></canvas>
 <canvas id="c"></canvas>
 <div id="touch-controls" aria-hidden="true">
   <button type="button" id="touch-slow-left" class="touch-btn touch-slow" aria-label="Slow turn left">‹</button>
@@ -2441,7 +2537,7 @@
 
   function registerSw() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register(dir + 'sw.js?v=4', { scope: dir }).then(function (reg) {
+    navigator.serviceWorker.register(dir + 'sw.js?v=6', { scope: dir }).then(function (reg) {
       function sync() {
         var w = navigator.serviceWorker.controller || reg.active;
         if (w) w.postMessage({ type: 'SYNC_ASSETS' });
@@ -2472,10 +2568,11 @@
 
     try {
       await loadScript('lib/bassoonplayer.js');
+      await loadScript('lib/webgl-fluid-bg.js?v=18');
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
-      await loadScript('sim/local-server.js?v=89');
-      await loadScript('game.js?v=1043');
+      await loadScript('sim/local-server.js?v=92');
+      await loadScript('game.js?v=1059');
     } catch (err) {
       console.error(err);
     }

@@ -395,25 +395,14 @@ function mediumAsteroidCap(room) {
 
 /**
  * Solo wave composition:
+ *   big = medium = wave + 1
  *   always 3 smalls
- *   odd (no-enemy) waves: 2,3,4,5… bigs
- *   mediums = half of bigs (cap 8)
- *   even enemy / boss waves: half of the previous odd wave (min 1 big)
  */
 function soloWaveCounts(wave) {
   const n = Math.max(1, wave | 0);
-  // Count for the current-or-previous odd wave (1→2, 3→3, 5→4…).
-  const oddN = (n % 2 === 1) ? n : (n - 1);
-  let big = ((oddN + 1) >> 1) + 1;
-  let medium = Math.min(SOLO_MEDIUM_CAP, big >> 1);
-  // Enemy waves: half the previous odd wave — never floor a lone big to zero.
-  if (n % 2 === 0) {
-    big = Math.max(1, Math.ceil(big / 2));
-    medium = (medium / 2) | 0;
-  }
   return {
-    big,
-    medium,
+    big: n + 1,
+    medium: n + 1,
     small: 3
   };
 }
@@ -1312,25 +1301,20 @@ function makeEnemy(kind, wave, weapon) {
 }
 
 /**
- * Even waves = enemy waves (commons). Every 2nd enemy wave (4, 8, 12…) is special:
- * one UFO/spinner + half the commons. Boss waves 10 / 20 / 30 use room.bossPlan
- * (worm/gunship roster rolled at game start — no commons/specials).
+ * Every wave spawns commons = wave number (capped at MAX_COMMON_ON_FIELD).
+ * Wave 3 is special: one UFO/spinner + half the commons.
+ * Wave 6 is the boss wave (room.bossPlan — no commons/specials).
  * Wave ends only when asteroids and enemies are all cleared.
  */
 const MAX_COMMON_ON_FIELD = 6;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
 const SOLO_BOSS_KINDS = ['worm', 'gunship'];
 
-/** Roll once per match: wave 10 one boss, 20 the other, 30 two random (dupes ok). */
+/** Roll once per match: wave 6 gets one random boss. */
 function rollSoloBossPlan() {
-  const first = Math.random() < 0.5 ? 'worm' : 'gunship';
-  const second = first === 'worm' ? 'gunship' : 'worm';
-  const a = SOLO_BOSS_KINDS[(Math.random() * SOLO_BOSS_KINDS.length) | 0];
-  const b = SOLO_BOSS_KINDS[(Math.random() * SOLO_BOSS_KINDS.length) | 0];
+  const kind = SOLO_BOSS_KINDS[(Math.random() * SOLO_BOSS_KINDS.length) | 0];
   return {
-    10: [first],
-    20: [second],
-    30: [a, b]
+    6: [kind]
   };
 }
 
@@ -1342,7 +1326,7 @@ function ensureSoloBossPlan(room) {
 
 function isSoloBossWave(wave) {
   const n = wave | 0;
-  return n === 10 || n === 20 || n === 30;
+  return n === 6;
 }
 
 function soloBossKindsForWave(room, wave) {
@@ -1355,17 +1339,16 @@ function soloEnemyCounts(wave) {
   const n = Math.max(1, wave | 0);
   if (isSoloBossWave(n)) return { common: 0, ufo: 0, carrier: 0 };
   return {
-    common: n % 2 === 0 ? Math.min(MAX_COMMON_ON_FIELD, n) : 0,
+    common: Math.min(MAX_COMMON_ON_FIELD, n),
     ufo: 0,
     carrier: 0
   };
 }
 
-/** 2nd, 4th, 6th… enemy waves → world waves 4, 8, 12, 16… (not boss 10/20/30). */
+/** Wave 3: one special (UFO/spinner) + half the commons. */
 function isSpecialEnemyWave(wave) {
   const n = Math.max(1, wave | 0);
-  if (isSoloBossWave(n) || n % 2 !== 0) return false;
-  return (n / 2) % 2 === 0;
+  return n === 3;
 }
 
 function enemyIsSpawned(e) {
@@ -1459,7 +1442,7 @@ function spawnSoloWaveEnemies(room, wave) {
   let commonN = c.common | 0;
   const n = Math.max(1, wave | 0);
 
-  // Boss waves 10 / 20 / 30 — roster from room.bossPlan (no commons / specials).
+  // Boss wave 6 — roster from room.bossPlan (no commons / specials).
   const bosses = soloBossKindsForWave(room, n);
   if (bosses) {
     for (let i = 0; i < bosses.length; i++) {
@@ -1609,7 +1592,10 @@ function fireWormLaserBeam(room, e) {
     rays.push([o.x, o.y, x1, y1, hitKind]);
     if (i === 0) midHit = hit;
     if (!hit || !hit.target) continue;
-    const tid = hit.target.id != null ? (hit.target.id | 0) : null;
+    // Asteroids key off `aid`, not `id` — using `id` here always left it null,
+    // so this beam silently dealt zero damage to every asteroid it hit.
+    const rawId = hit.kind === 'asteroid' ? hit.target.aid : hit.target.id;
+    const tid = rawId != null ? (rawId | 0) : null;
     if (tid == null) continue;
     const key = hit.kind + ':' + tid;
     if (damaged.has(key)) continue;
@@ -3066,7 +3052,7 @@ function tickSoloWaves(room) {
     room.waveClearLeft--;
     if (room.waveClearLeft <= 0) {
       const next = (room.wave | 0) + 1;
-      if (next >= 5 && next % 5 === 0) {
+      if (next % 2 === 0) {
         openSoloShop(room, next);
       } else {
         beginSoloWave(room, next);
@@ -3125,7 +3111,7 @@ function ensureUnlockedWeapons(p) {
   return p.unlockedWeapons;
 }
 
-/** Exactly one owned weapon; all other unlocks/levels wiped. */
+/** Exactly one owned weapon in slot 1 (Z); slot 2 (X) wiped empty. */
 function ownOnlyWeapon(p, name, level) {
   if (!name || WEAPON_SLOTS.indexOf(name) < 0) name = 'default';
   const lvl = Math.max(1, Math.min(WEAPON_MAX_LEVEL, level != null ? (level | 0) : 1));
@@ -3137,16 +3123,123 @@ function ownOnlyWeapon(p, name, level) {
     p.weaponLevels[k] = k === name ? lvl : 1;
   }
   p.weapon = name;
+  p.weapon2 = null;
+  p.shootAmmo2 = 0;
+  p.shootCd2 = 0;
+  p.reloadLeft2 = 0;
+  p.bursting2 = false;
+  p.railChargeLeft2 = 0;
+}
+
+/** Refill ammo / clear cooldown+reload+burst for one gun slot (1 = Z, 2 = X). */
+function resetWeaponSlotRuntime(p, slot) {
+  const name = slot === 2 ? p.weapon2 : p.weapon;
+  const w = effectiveWeapon(p, name);
+  if (slot === 2) {
+    p.shootAmmo2 = w.ammo;
+    p.shootCd2 = 0;
+    p.reloadLeft2 = 0;
+    p.bursting2 = false;
+    p.railChargeLeft2 = 0;
+  } else {
+    p.shootAmmo = w.ammo;
+    p.shootCd = 0;
+    p.reloadLeft = 0;
+    p.bursting = false;
+    p.railChargeLeft = 0;
+  }
+}
+
+/**
+ * What acquiring `name` (pickup or shop buy) does to a dual-gun loadout:
+ *  - already equipped in slot 1 or 2 → upgrade that slot.
+ *  - slot 2 (X) empty → mount there as the second weapon.
+ *  - both slots full with a different type → replace slot 1 (Z / "current").
+ */
+function classifyWeaponAcquire(p, name) {
+  if (p.weapon === name) return { kind: 'upgrade', slot: 1 };
+  if (p.weapon2 === name) return { kind: 'upgrade', slot: 2 };
+  if (!p.weapon2) return { kind: 'mount', slot: 2 };
+  return { kind: 'replace', slot: 1 };
+}
+
+/** Field-pickup rule: always affects slot 1 (Z) — slot 2 (X) is shop-only, never
+ *  auto-mounted by a pickup even when it's empty. Already in slot 1 → upgrade it;
+ *  anything else → slot 1 gets replaced with it. */
+function classifyWeaponPickup(p, name) {
+  if (p.weapon === name) return { kind: 'upgrade', slot: 1 };
+  return { kind: 'replace', slot: 1 };
+}
+
+function equipWeaponAcquire(p, name) {
+  if (!name || WEAPON_SLOTS.indexOf(name) < 0) return null;
+  ensureUnlockedWeapons(p);
+  if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+  const info = classifyWeaponPickup(p, name);
+
+  if (info.kind === 'upgrade') {
+    p.weaponLevels[name] = Math.min(WEAPON_MAX_LEVEL, (getWeaponLevel(p, name) | 0 || 1) + 1);
+  } else {
+    // replace slot 1 — drop the old slot-1 weapon's unlock unless slot 2 also holds it.
+    if (p.weapon && p.weapon !== p.weapon2) p.unlockedWeapons[p.weapon] = false;
+    p.weapon = name;
+    p.weaponLevels[name] = 1;
+    p.unlockedWeapons[name] = true;
+  }
+  resetWeaponSlotRuntime(p, info.slot);
+  info.name = name;
+  info.lvl = getWeaponLevel(p, name);
+  return info;
 }
 
 function shopWeaponCost(p, weaponName) {
   ensureUnlockedWeapons(p);
-  // Only the currently equipped gun can be upgraded; anything else is a fresh buy.
-  if (p.weapon !== weaponName || !p.unlockedWeapons[weaponName]) return 800;
+  const info = classifyWeaponAcquire(p, weaponName);
+  if (info.kind !== 'upgrade') return 800;
   const lvl = getWeaponLevel(p, weaponName);
   if (lvl >= WEAPON_MAX_LEVEL) return -1;
-  const next = lvl + 1;
-  return 800 + 200 * next;
+  return 800 + 200 * (lvl + 1);
+}
+
+/**
+ * Shop-only: buy `name` directly into slot 1 (Z) or slot 2 (X), player's explicit choice —
+ * no auto mount/upgrade/replace guessing. Same weapon already in that slot → upgrade it;
+ * anything else → that slot now holds `name` at level 1 (the other slot is untouched).
+ */
+function equipWeaponIntoSlot(p, name, slot) {
+  if (!name || WEAPON_SLOTS.indexOf(name) < 0) return null;
+  ensureUnlockedWeapons(p);
+  if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+  const s = slot === 2 ? 2 : 1;
+  const curName = s === 2 ? p.weapon2 : p.weapon;
+  let kind;
+  if (curName === name) {
+    kind = 'upgrade';
+    p.weaponLevels[name] = Math.min(WEAPON_MAX_LEVEL, (getWeaponLevel(p, name) | 0 || 1) + 1);
+  } else {
+    kind = curName ? 'replace' : 'mount';
+    if (s === 1) {
+      if (p.weapon && p.weapon !== p.weapon2) p.unlockedWeapons[p.weapon] = false;
+      p.weapon = name;
+    } else {
+      if (p.weapon2 && p.weapon2 !== p.weapon) p.unlockedWeapons[p.weapon2] = false;
+      p.weapon2 = name;
+    }
+    p.weaponLevels[name] = 1;
+    p.unlockedWeapons[name] = true;
+  }
+  resetWeaponSlotRuntime(p, s);
+  return { kind, slot: s, name, lvl: getWeaponLevel(p, name) };
+}
+
+function shopWeaponCostForSlot(p, name, slot) {
+  ensureUnlockedWeapons(p);
+  const s = slot === 2 ? 2 : 1;
+  const curName = s === 2 ? p.weapon2 : p.weapon;
+  if (curName !== name) return 800;
+  const lvl = getWeaponLevel(p, name);
+  if (lvl >= WEAPON_MAX_LEVEL) return -1;
+  return 800 + 200 * (lvl + 1);
 }
 
 function packShopState(room, p) {
@@ -3157,9 +3250,9 @@ function packShopState(room, p) {
     score: p.coinsCollected | 0,
     lives: p.lives | 0,
     weapon: p.weapon || 'default',
+    weapon2: p.weapon2 || null,
     levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
-    unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
-    powerups: packPowerupsNet(p)
+    unlocked: Object.assign({}, ensureUnlockedWeapons(p))
   };
 }
 
@@ -3226,9 +3319,9 @@ function openSoloShop(room, nextWave) {
     p.av = 0;
     p.bursting = false;
     p.railChargeLeft = 0;
+    p.bursting2 = false;
+    p.railChargeLeft2 = 0;
     if (p.bot) continue;
-    // Normalize legacy multi-unlock loadouts to a single owned gun.
-    if (p.weapon) ownOnlyWeapon(p, p.weapon, getWeaponLevel(p, p.weapon));
     for (const ws of room.clients) {
       if (ws.playerId === p.id && ws.readyState === 1) {
         send(ws, packShopState(room, p));
@@ -3266,7 +3359,7 @@ function markShopDone(room, playerId) {
 }
 
 /**
- * Shop purchase. item: 'weapon'|'powerup'|'life', name: weapon/powerup id.
+ * Shop purchase. item: 'weapon'|'life', name: weapon id.
  * Returns { ok, err? } and syncs buyer.
  */
 function playerShopSessionOpen(room, p) {
@@ -3275,11 +3368,10 @@ function playerShopSessionOpen(room, p) {
   return !!(room.pvpShopOpen && room.pvpShopOpen.has(p.id));
 }
 
-function handleShopBuy(room, p, item, name) {
+function handleShopBuy(room, p, item, name, slot) {
   if (!room || !p || p.hp <= 0 || !playerShopSessionOpen(room, p)) return { ok: 0, err: 'closed' };
   ensureUnlockedWeapons(p);
   if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
-  if (!p.powerups) p.powerups = freshPowerups();
 
   if (item === 'life') {
     const cost = 2400;
@@ -3302,49 +3394,16 @@ function handleShopBuy(room, p, item, name) {
     return { ok: 1, hp: p.hp | 0 };
   }
 
-  if (item === 'powerup') {
-    if (!POWERUP_TYPES.includes(name)) return { ok: 0, err: 'item' };
-    if (p.powerups[name]) return { ok: 0, err: 'owned' };
-    const cost = 1000;
-    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
-    p.coins = (p.coins | 0) - cost;
-    if (name === 'shield') grantShield(room, p);
-    else {
-      p.powerups[name] = true;
-      notifyPowerups(room, p);
-    }
-    notifyPlayerCoins(room, p);
-    return { ok: 1 };
-  }
-
   if (item === 'weapon') {
     if (WEAPON_SLOTS.indexOf(name) < 0) return { ok: 0, err: 'item' };
-    const cost = shopWeaponCost(p, name);
+    const wantSlot = slot === 2 ? 2 : 1;
+    const cost = shopWeaponCostForSlot(p, name, wantSlot);
     if (cost < 0) return { ok: 0, err: 'max' };
     if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
     p.coins = (p.coins | 0) - cost;
-    const upgrading = p.weapon === name && ensureUnlockedWeapons(p)[name];
-    if (upgrading) {
-      const next = Math.min(WEAPON_MAX_LEVEL, (getWeaponLevel(p, name) | 0) + 1);
-      ownOnlyWeapon(p, name, next);
-      const w = effectiveWeapon(p, name);
-      p.shootAmmo = w.ammo;
-      p.shootCd = 0;
-      p.reloadLeft = 0;
-      p.bursting = false;
-      p.railChargeLeft = 0;
-    } else {
-      // Buy / switch: wipe previous gun completely, start at level 1.
-      ownOnlyWeapon(p, name, 1);
-      const w = effectiveWeapon(p, name);
-      p.shootAmmo = w.ammo;
-      p.shootCd = 0;
-      p.reloadLeft = 0;
-      p.bursting = false;
-      p.railChargeLeft = 0;
-    }
+    const info = equipWeaponIntoSlot(p, name, wantSlot);
     notifyPlayerCoins(room, p);
-    notifyPlayerWeapon(room, p, false);
+    notifyPlayerWeapon(room, p, false, info && info.slot);
     return { ok: 1 };
   }
 
@@ -3467,18 +3526,14 @@ function splitAsteroid(room, parent) {
 }
 
 function spawnPickup(room, parent) {
-  // Campaign stages never drop crates (weapons / health / powerups).
+  // Campaign stages never drop crates (weapons / health).
   if (!room || room.campaign) return;
   const ang = Math.random() * Math.PI * 2;
   const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
   const roll = Math.random();
   let kind = 'weapon';
   let weapon = null;
-  let powerup = null;
-  if (roll < 0.28) {
-    kind = 'powerup';
-    powerup = POWERUP_TYPES[Math.random() * POWERUP_TYPES.length | 0];
-  } else if (roll < 0.64) {
+  if (roll < 0.36) {
     kind = 'health';
   } else {
     weapon = WEAPON_SLOTS[Math.random() * WEAPON_SLOTS.length | 0];
@@ -3493,48 +3548,12 @@ function spawnPickup(room, parent) {
     id: room.nextPickupId++,
     kind,
     weapon,
-    powerup,
     x, y, vx, vy,
     angle,
     spin: (Math.random() - 0.5) * 0.12,
     r: PICKUP_R,
     spawnX: x,
     spawnY: y,
-    spawnAngle: angle,
-    spawnSt: now,
-    bounces: 0
-  };
-  clampSpeed(u);
-  u.spawnX = u.x;
-  u.spawnY = u.y;
-  room.pickups.push(u);
-  emitPickupFire(room, u);
-}
-
-/** F1 debug: spawn a random powerup pickup at world pose with given velocity. */
-function spawnDebugPowerup(room, x, y, vx, vy, powerupName) {
-  let powerup = powerupName;
-  if (!POWERUP_TYPES.includes(powerup)) {
-    powerup = POWERUP_TYPES[Math.random() * POWERUP_TYPES.length | 0];
-  }
-  const px = Math.max(PICKUP_R, Math.min(W - PICKUP_R, Number(x) || W * 0.5));
-  const py = Math.max(PICKUP_R, Math.min(H - PICKUP_R, Number(y) || H * 0.5));
-  const angle = Math.random() * Math.PI * 2;
-  const now = Date.now();
-  const u = {
-    id: room.nextPickupId++,
-    kind: 'powerup',
-    weapon: null,
-    powerup,
-    x: px,
-    y: py,
-    vx: Number(vx) || 0,
-    vy: Number(vy) || 0,
-    angle,
-    spin: (Math.random() - 0.5) * 0.18,
-    r: PICKUP_R,
-    spawnX: px,
-    spawnY: py,
     spawnAngle: angle,
     spawnSt: now,
     bounces: 0
@@ -3558,23 +3577,9 @@ function applyPickupToPlayer(room, p, u) {
     }
     return;
   }
-  if (u.kind === 'powerup') {
-    if (!p.powerups) p.powerups = freshPowerups();
-    const name = u.powerup;
-    if (!name || !POWERUP_TYPES.includes(name)) return;
-    if (name === 'shield') {
-      if (p.powerups.shield) return; // already owned — collect still removes pickup
-      grantShield(room, p);
-      return;
-    }
-    if (p.powerups[name]) return; // already owned — collect still removes pickup
-    p.powerups[name] = true;
-    notifyPowerups(room, p);
-    return;
-  }
-  const slot = WEAPON_SLOTS.indexOf(u.weapon) + 1;
-  setPlayerWeapon(p, slot, true);
-  notifyPlayerWeapon(room, p, true);
+  const info = equipWeaponAcquire(p, u.weapon);
+  if (!info) return;
+  notifyPlayerWeapon(room, p, true, info.slot);
 }
 
 function isOffScreen(a) {
@@ -3651,7 +3656,8 @@ function asteroidWouldWrap(room, a) {
   if (a.size === 'medium' && !a.centerRock && countMediumAsteroids(room) > mediumAsteroidCap(room)) {
     return false;
   }
-  if (a.size === 'small' && !room.practice) return false;
+  // Smalls never wrap/portal through edges, in any room — they're culled on exit instead.
+  if (a.size === 'small') return false;
   return true;
 }
 
@@ -3909,18 +3915,21 @@ function spawnPlayer(id, name, colors, room) {
     shopTimeLeft: 0,
     lives: 0,
     weapon: wpn,
+    /** Second weapon slot (X) — null when empty. */
+    weapon2: null,
     weaponLevels: levels,
-    powerups: freshPowerups(),
-    shieldHp: 0,
     shootAmmo: w.ammo, shootCd: 0, reloadLeft: 0, bursting: false,
     railChargeLeft: 0,
+    /** Slot 2 (X) runtime firing state — mirrors the slot-1 fields above. */
+    shootAmmo2: 0, shootCd2: 0, reloadLeft2: 0, bursting2: false,
+    railChargeLeft2: 0,
     /** Legacy snap pad (always 0 — ground coin pools removed). */
     coinPoolPickup: 0,
     /** Fire origin lead ticks (sv_predict_shoot_step). */
     predictShootStep: 1,
     /** Aim lead ticks via av (sv_predict_shoot_angle). */
     predictShootAngle: 1,
-    inp: { l: 0, r: 0, u: 0, sp: 0, sh: 0, j: 0 },
+    inp: { l: 0, r: 0, u: 0, sp: 0, sp2: 0, sh: 0, j: 0 },
     inputQueue: [],
     lastSeq: 0,
     jumping: false,
@@ -3939,55 +3948,27 @@ function respawnPlayer(room, p, keepLoadout, maxHp) {
   p.lastHitBy = 0;
   p.hp = maxHp != null ? maxHp : MAX_HP;
   if (keepLoadout) {
-    // Round winner: keep equipped weapon + its level only; wipe other guns.
+    // Round winner: keep both equipped guns (Z + X) and their levels.
     if (!p.weapon) p.weapon = 'default';
     if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
-    ownOnlyWeapon(p, p.weapon, getWeaponLevel(p, p.weapon));
-    if (!p.powerups) p.powerups = freshPowerups();
+    ensureUnlockedWeapons(p);
+    p.unlockedWeapons[p.weapon] = true;
+    if (p.weapon2) p.unlockedWeapons[p.weapon2] = true;
+    resetWeaponSlotRuntime(p, 1);
+    if (p.weapon2) resetWeaponSlotRuntime(p, 2);
   } else {
-    // Round loser (or fresh): default gun, no upgrades, no powerups.
+    // Round loser (or fresh): default gun, no upgrades, no second weapon.
     ownOnlyWeapon(p, 'default', 1);
-    p.powerups = freshPowerups();
-    p.shieldHp = 0;
+    resetWeaponSlotRuntime(p, 1);
   }
-  const w = effectiveWeapon(p, p.weapon);
-  p.shootAmmo = w.ammo;
-  p.shootCd = 0; p.reloadLeft = 0; p.bursting = false;
-  p.railChargeLeft = 0;
   p.inputQueue = [];
 }
 
-/**
- * Equip a weapon slot.
- * Same weapon + pickup → upgrade level (max 3).
- * Different weapon → wipe old gun completely and start at level 1.
- */
-function setPlayerWeapon(p, slot, fromPickup) {
-  const name = WEAPON_SLOTS[(slot | 0) - 1];
-  if (!name) return false;
-  if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
-  ensureUnlockedWeapons(p);
-
-  if (fromPickup && p.weapon === name) {
-    ownOnlyWeapon(p, name, Math.min(WEAPON_MAX_LEVEL, (getWeaponLevel(p, name) | 0 || 1) + 1));
-  } else if (p.weapon !== name) {
-    ownOnlyWeapon(p, name, 1);
-  } else {
-    ownOnlyWeapon(p, name, getWeaponLevel(p, name));
-  }
-
-  const w = effectiveWeapon(p, name);
-  p.shootAmmo = w.ammo;
-  p.shootCd = 0;
-  p.reloadLeft = 0;
-  p.bursting = false;
-  p.railChargeLeft = 0;
-  return true;
-}
-
-function notifyPlayerWeapon(room, p, fromPickup) {
+/** changedSlot: which gun slot (1 = Z, 2 = X) this update is actually about — drives client FX. */
+function notifyPlayerWeapon(room, p, fromPickup, changedSlot) {
   const slot = WEAPON_SLOTS.indexOf(p.weapon) + 1;
   const lvl = getWeaponLevel(p, p.weapon);
+  const cs = changedSlot === 2 ? 2 : 1;
   for (const ws of room.clients) {
     if (ws.playerId === p.id && ws.readyState === 1) {
       send(ws, {
@@ -3995,6 +3976,11 @@ function notifyPlayerWeapon(room, p, fromPickup) {
         w: slot,
         weapon: p.weapon,
         lvl,
+        weapon2: p.weapon2 || null,
+        lvl2: p.weapon2 ? getWeaponLevel(p, p.weapon2) : 0,
+        changed: cs,
+        changedWeapon: cs === 2 ? p.weapon2 : p.weapon,
+        changedLvl: cs === 2 ? (p.weapon2 ? getWeaponLevel(p, p.weapon2) : 0) : lvl,
         levels: p.weaponLevels,
         unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
         pickup: !!fromPickup
@@ -4022,12 +4008,6 @@ function resolveAdminGiveItem(raw) {
   };
   if (weaponAlias[s]) return { kind: 'weapon', name: weaponAlias[s] };
   if (WEAPON_SLOTS.indexOf(s) >= 0) return { kind: 'weapon', name: s };
-  const powerAlias = {
-    shield: 'shield',
-    drone: 'drone', fixing: 'drone', fixdrone: 'drone', repair: 'drone'
-  };
-  if (powerAlias[s]) return { kind: 'powerup', name: powerAlias[s] };
-  if (POWERUP_TYPES.indexOf(s) >= 0) return { kind: 'powerup', name: s };
   return null;
 }
 
@@ -4078,7 +4058,7 @@ function handleAdminSpawn(ws, kindRaw) {
 }
 
 /**
- * Admin console `give <item>` — equip weapon, grant vitals (shield/drone), or lives.
+ * Admin console `give <item>` — equip weapon, or lives.
  */
 function handleAdminGive(ws, itemRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -4091,7 +4071,7 @@ function handleAdminGive(ws, itemRaw) {
   if (!item) {
     return {
       ok: 0,
-      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | vitals: shield drone | live'
+      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | live'
     };
   }
 
@@ -4103,27 +4083,17 @@ function handleAdminGive(ws, itemRaw) {
   }
 
   if (item.kind === 'weapon') {
-    const slot = WEAPON_SLOTS.indexOf(item.name) + 1;
-    // Same as world pickup: new gun → L1, same gun again → upgrade (max 3).
-    if (!setPlayerWeapon(p, slot, true)) return { ok: 0, err: 'bad weapon' };
-    notifyPlayerWeapon(room, p, false);
+    // Same dual-gun rules as a world pickup (see equipWeaponAcquire).
+    const info = equipWeaponAcquire(p, item.name);
+    if (!info) return { ok: 0, err: 'bad weapon' };
+    notifyPlayerWeapon(room, p, false, info.slot);
     return {
       ok: 1,
       kind: 'weapon',
       item: item.name,
-      lvl: getWeaponLevel(p, item.name),
-      w: slot
+      lvl: info.lvl,
+      w: info.slot
     };
-  }
-
-  if (item.kind === 'powerup') {
-    if (!p.powerups) p.powerups = freshPowerups();
-    if (item.name === 'shield') grantShield(room, p);
-    else {
-      p.powerups[item.name] = true;
-      notifyPowerups(room, p);
-    }
-    return { ok: 1, kind: 'powerup', item: item.name };
   }
 
   return { ok: 0, err: 'unknown item' };
@@ -4664,7 +4634,6 @@ function applyShipCrash(room, p, nx, ny, overlap, dmg, bounceScale) {
     p.y += ny * (overlap + 3);
     wrap(p);
   }
-  // Hull crashes (asteroids / meteors / gunship / ship) ignore shield.
   p.hp -= dmg;
   p.av = spinDir * STUN_SPIN;
   p.turnDecelStep = 0;
@@ -4748,9 +4717,6 @@ function handlePlayerDeath(room, victim) {
   victim.vy = 0;
   victim.bursting = false;
   victim.railChargeLeft = 0;
-  victim.powerups = freshPowerups();
-  victim.shieldHp = 0;
-  notifyPowerups(room, victim);
   if (room.practice) {
     victim.lives = Math.max(0, (victim.lives | 0) - 1);
   }
@@ -4765,7 +4731,10 @@ function handlePlayerDeath(room, victim) {
     p.vy = 0;
     p.bursting = false;
     p.railChargeLeft = 0;
+    p.bursting2 = false;
+    p.railChargeLeft2 = 0;
     p.inp.sp = 0;
+    p.inp.sp2 = 0;
   }
 
   for (const b of room.bullets) {
@@ -5017,10 +4986,6 @@ function emitRoundReset(room) {
   const scores = packScoreboard(room);
   const asteroids = room.asteroids.map(packAsteroid);
   const players = packSnap(room).players;
-  const powerupsByPlayer = {};
-  for (const pl of room.players.values()) {
-    powerupsByPlayer[pl.id] = packPowerupsNet(pl);
-  }
   for (const ws of room.clients) {
     if (ws.readyState !== 1) continue;
     const p = room.players.get(ws.playerId);
@@ -5034,10 +4999,10 @@ function emitRoundReset(room) {
         p.av || 0, 0, p.godLeft | 0
       ],
       w: wpnSlot,
+      weapon2: p.weapon2 || null,
       levels: p.weaponLevels,
       ammo: p.shootAmmo,
-      powerups: packPowerupsNet(p),
-      powerupsByPlayer,
+      ammo2: p.weapon2 ? p.shootAmmo2 : 0,
       asteroids,
       players,
       lives: p.lives | 0
@@ -5071,10 +5036,9 @@ function broadcastSvDynamicPrediction() {
 }
 
 function teleportAsteroidToEdge(room, a, preferSide) {
-  // PvP smalls are culled off-screen — never edge-teleport them back in.
-  // Waves smalls may wrap once (same as medium/big).
+  // Smalls are always culled off-screen, in any room — never edge-teleport them back in.
   // Player meteor-gun shots always teleport (they are size small).
-  if (a && a.size === 'small' && !room.practice && !a.playerShot) {
+  if (a && a.size === 'small' && !a.playerShot) {
     if (a.portalOfAid != null) {
       const parent = findAsteroidByAid(room, a.portalOfAid);
       if (parent && parent.portalTwinAid === a.aid) parent.portalTwinAid = null;
@@ -5132,8 +5096,8 @@ function oppositeEdgeFromExit(a) {
  * rock) + velocity aimed at arena center ±150.
  */
 function teleportAsteroidSpawnClear(room, a) {
-  // PvP: smalls cull instead of bounce. Waves: eject all sizes.
-  if (a && a.size === 'small' && !room.practice) {
+  // Smalls cull instead of bounce, in any room.
+  if (a && a.size === 'small') {
     if (a.portalOfAid != null) {
       const parent = findAsteroidByAid(room, a.portalOfAid);
       if (parent && parent.portalTwinAid === a.aid) parent.portalTwinAid = null;
@@ -5566,6 +5530,56 @@ function updatePerfBotInput(room, p) {
   // Fire when roughly lined up (or occasionally spray).
   if (target && Math.abs(diff) < (targetIsShip ? 0.38 : 0.48)) p.inp.sp = 1;
   else if (Math.random() < 0.04) p.inp.sp = 1;
+}
+
+/**
+ * Slot 2 (X) reuses every slot-1 firing function by temporarily swapping the
+ * "active weapon" fields onto the primary ones, then swapping the results back.
+ * Avoids duplicating fireOneShot/consumeShot/updateShooting/tryStartBurst.
+ */
+function swapToWeaponSlot(p, slot) {
+  if (slot !== 2) return null;
+  const ctx = {
+    weapon: p.weapon,
+    shootAmmo: p.shootAmmo, shootCd: p.shootCd, reloadLeft: p.reloadLeft,
+    bursting: p.bursting, railChargeLeft: p.railChargeLeft
+  };
+  p.weapon = p.weapon2;
+  p.shootAmmo = p.shootAmmo2;
+  p.shootCd = p.shootCd2;
+  p.reloadLeft = p.reloadLeft2;
+  p.bursting = p.bursting2;
+  p.railChargeLeft = p.railChargeLeft2;
+  return ctx;
+}
+
+function restoreWeaponSlot(p, slot, ctx) {
+  if (slot !== 2 || !ctx) return;
+  p.shootAmmo2 = p.shootAmmo;
+  p.shootCd2 = p.shootCd;
+  p.reloadLeft2 = p.reloadLeft;
+  p.bursting2 = p.bursting;
+  p.railChargeLeft2 = p.railChargeLeft;
+  p.weapon = ctx.weapon;
+  p.shootAmmo = ctx.shootAmmo;
+  p.shootCd = ctx.shootCd;
+  p.reloadLeft = ctx.reloadLeft;
+  p.bursting = ctx.bursting;
+  p.railChargeLeft = ctx.railChargeLeft;
+}
+
+function tryStartBurstSlot(p, slot) {
+  if (slot === 2 && !p.weapon2) return;
+  const ctx = swapToWeaponSlot(p, slot);
+  tryStartBurst(p);
+  restoreWeaponSlot(p, slot, ctx);
+}
+
+function updateShootingSlot(room, p, slot) {
+  if (slot === 2 && !p.weapon2) return;
+  const ctx = swapToWeaponSlot(p, slot);
+  updateShooting(room, p);
+  restoreWeaponSlot(p, slot, ctx);
 }
 
 function tryStartBurst(p) {
@@ -6034,7 +6048,9 @@ function fireLaser(room, p, weaponName) {
   const wide = getWeaponLevel(p, name) >= 2;
 
   if (!wide) {
-    const width = 2 + (Math.random() * 4 | 0);
+    // Slight per-shot flicker width — must be RES_SCALE'd like the wide beam (ENEMY_WORM_LASER.width),
+    // or a raw 2-6px value renders as a hairline (own Z-laser hides this by ignoring the server width).
+    const width = (2 + (Math.random() * 4 | 0)) * RES_SCALE;
     const hit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining);
     if (!hit) {
       roomBroadcast(room, {
@@ -6080,7 +6096,10 @@ function fireLaser(room, p, weaponName) {
     const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
     rays.push([o.x, o.y, x1, y1, hitKind]);
     if (!hit || !hit.target) continue;
-    const tid = hit.target.id != null ? (hit.target.id | 0) : null;
+    // Asteroids key off `aid`, not `id` — using `id` here always left it null,
+    // so the wide L2+ player laser silently dealt zero damage to every asteroid it hit.
+    const rawId = hit.kind === 'asteroid' ? hit.target.aid : hit.target.id;
+    const tid = rawId != null ? (rawId | 0) : null;
     if (tid == null) continue;
     const key = hit.kind + ':' + tid;
     if (damaged.has(key)) continue;
@@ -6711,7 +6730,7 @@ function packAdminStatus(ws) {
   }
   out.waveProgress = {
     wave: room.wave | 0,
-    nextShopAt: room.practice ? (Math.ceil(((room.wave | 0) + 1) / 5) * 5) : 0,
+    nextShopAt: room.practice ? (((room.wave | 0) + 1) + (((room.wave | 0) + 1) % 2)) : 0,
     blocked: !!(room.practice && (
       room.shopOpen
       || (room.deathShakeLeft | 0) > 0
@@ -6827,42 +6846,6 @@ function asteroidBlocksRay(room, ox, oy, ang, maxDist) {
   return false;
 }
 
-/** Fixing-drone: latch on at ≤90% HP, heal 1/1.25s until 100%, then dismiss. */
-function updateFixDrones(room) {
-  for (const p of room.players.values()) {
-    if (p.hp <= 0 || !playerHasPowerup(p, 'drone')) {
-      p.fixdroneActive = false;
-      p.fixdroneCd = 0;
-      continue;
-    }
-    const cap = room.practice ? SOLO_MAX_HP : MAX_HP;
-    const hp = p.hp | 0;
-    if (hp >= cap) {
-      p.fixdroneActive = false;
-      p.fixdroneCd = 0;
-      continue;
-    }
-    const thresh = Math.floor(cap * FIXDRONE_HP_FRAC);
-    if (!p.fixdroneActive) {
-      if (hp > thresh) continue; // wait until ≤90%
-      p.fixdroneActive = true;
-      p.fixdroneCd = FIXDRONE_HEAL_TICKS;
-      continue;
-    }
-    // Active: keep repairing all the way to full HP.
-    if ((p.fixdroneCd | 0) > 0) {
-      p.fixdroneCd--;
-      if ((p.fixdroneCd | 0) > 0) continue;
-    }
-    p.hp = Math.min(cap, hp + 1);
-    p.fixdroneCd = FIXDRONE_HEAL_TICKS;
-    if ((p.hp | 0) >= cap) {
-      p.fixdroneActive = false;
-      p.fixdroneCd = 0;
-    }
-  }
-}
-
 function rocketHomingTarget(room, b) {
   if ((b.enemyOwner | 0) > 0) return soloHumanTarget(room);
   let best = null;
@@ -6975,7 +6958,7 @@ function updateBullets(room) {
         active.add(key);
         applyVoidOverlapPulse(b, key, (dmg) => {
           let d = dmg;
-          dealDamageToPlayer(room, p, d, b.owner | 0, { bypassShield: true });
+          dealDamageToPlayer(room, p, d, b.owner | 0);
           voidScramblePlayerAim(p, 4);
           roomBroadcast(room, { t: 'vd', k: 'p', id: p.id | 0, x: p.x, y: p.y });
         });
@@ -7188,16 +7171,11 @@ function updatePickups(room) {
       applyPickupToPlayer(room, p, u);
       if (u.kind === 'health') {
         emitPickupDead(room, u.id, u.x, u.y, { kind: 'health' });
-      } else if (u.kind === 'powerup') {
-        emitPickupDead(room, u.id, u.x, u.y, {
-          kind: 'powerup',
-          powerup: u.powerup
-        });
       } else {
         emitPickupDead(room, u.id, u.x, u.y, {
           kind: 'weapon',
-          weapon: p.weapon,
-          lvl: getWeaponLevel(p, p.weapon)
+          weapon: u.weapon,
+          lvl: getWeaponLevel(p, u.weapon)
         });
       }
       pickups.splice(i, 1);

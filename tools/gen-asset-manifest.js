@@ -7,7 +7,6 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
 const REPO_PUBLIC = 'public';
@@ -42,17 +41,8 @@ function sha256file(fp) {
   return sha256buf(fs.readFileSync(fp));
 }
 
-/** Hash the git blob (LF) when tracked — avoids Windows CRLF poisoning CDN hashes. */
+/** Hash the actual file on disk — must match exactly what the server serves. */
 function sha256rel(rel) {
-  try {
-    const blob = execSync(`git show HEAD:${REPO_PUBLIC}/${rel}`, {
-      cwd: ROOT,
-      encoding: 'buffer',
-      maxBuffer: 32 * 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'ignore']
-    });
-    if (blob && blob.length) return sha256buf(blob);
-  } catch (_) { /* untracked or missing */ }
   return sha256file(path.join(PUBLIC, rel));
 }
 

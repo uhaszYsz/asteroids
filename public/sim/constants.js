@@ -201,95 +201,9 @@ function effectiveBulletDmg(p, typeName) {
   return dmg;
 }
 
-function freshPowerups() {
-  return {
-    shield: false,
-    drone: false
-  };
-}
-
-/** Shield vitals: absorbs projectile / laser / ray damage only (not rocks / void / meteors). */
-const SHIELD_MAX_HP = 100;
-/** Recharge while equipped: 3 HP per second. */
-const SHIELD_RECHARGE_PER_SEC = 3;
-const SHIELD_RECHARGE_PER_TICK = SHIELD_RECHARGE_PER_SEC / TPS;
-
 /** Magazine reload ticks. */
 function effectiveReloadTicks(p, baseReload) {
   return Math.max(1, baseReload | 0);
-}
-
-function playerHasPowerup(p, name) {
-  return !!(p && p.powerups && p.powerups[name]);
-}
-
-function packPowerupsNet(p) {
-  const pu = Object.assign({}, (p && p.powerups) || freshPowerups());
-  pu.shieldHp = playerHasPowerup(p, 'shield')
-    ? Math.max(0, Math.min(SHIELD_MAX_HP, +(p.shieldHp != null ? p.shieldHp : SHIELD_MAX_HP)))
-    : 0;
-  return pu;
-}
-
-function notifyPowerups(room, p) {
-  roomBroadcast(room, {
-    t: 'pwr',
-    id: p.id,
-    powerups: packPowerupsNet(p)
-  });
-}
-
-function clearShield(room, p) {
-  if (!p) return;
-  if (p.powerups) p.powerups.shield = false;
-  p.shieldHp = 0;
-  if (room) notifyPowerups(room, p);
-}
-
-function grantShield(room, p) {
-  if (!p) return;
-  if (!p.powerups) p.powerups = freshPowerups();
-  p.powerups.shield = true;
-  p.shieldHp = SHIELD_MAX_HP;
-  if (room) notifyPowerups(room, p);
-}
-
-/**
- * Apply projectile/laser/ray damage to the shield first.
- * Returns true if player HP was fully blocked (shield still up or just broke).
- */
-function absorbShieldDamage(room, p, dmg) {
-  if (!playerHasPowerup(p, 'shield')) return false;
-  let hp = p.shieldHp != null ? +p.shieldHp : SHIELD_MAX_HP;
-  if (!(hp > 0)) {
-    clearShield(room, p);
-    return false;
-  }
-  const hit = Math.max(0, +dmg || 0);
-  hp -= hit;
-  if (hp <= 0) {
-    clearShield(room, p);
-    return true;
-  }
-  p.shieldHp = hp;
-  notifyPowerups(room, p);
-  return true;
-}
-
-/** Passive shield recharge while equipped. */
-function tickPlayerShield(room, p) {
-  if (!p || !playerHasPowerup(p, 'shield') || (p.hp | 0) <= 0) return;
-  if (p.shieldHp == null) p.shieldHp = SHIELD_MAX_HP;
-  if (p.shieldHp >= SHIELD_MAX_HP) {
-    p.shieldHp = SHIELD_MAX_HP;
-    return;
-  }
-  const prev = p.shieldHp;
-  p.shieldHp = Math.min(SHIELD_MAX_HP, p.shieldHp + SHIELD_RECHARGE_PER_TICK);
-  // Notify on whole-HP steps so the bar updates without flooding.
-  if ((p.shieldHp | 0) !== (prev | 0) || p.shieldHp >= SHIELD_MAX_HP) {
-    notifyPowerups(room, p);
-  }
 }
 
 /** Stamp PvP frag credit (last player who damaged this ship). */
@@ -300,14 +214,10 @@ function notePlayerAttacker(victim, attackerId) {
 }
 
 /**
- * Apply HP damage. Shield absorbs bullets / lasers / rays unless `opts.bypassShield`
- * (asteroids, meteor-gun rocks, void, hull crashes).
- * Returns true if HP was reduced.
+ * Apply HP damage. Returns true if HP was reduced.
  */
-function dealDamageToPlayer(room, p, dmg, attackerId, opts) {
+function dealDamageToPlayer(room, p, dmg, attackerId) {
   if (!p || p.hp <= 0 || p.godLeft > 0) return false;
-  const bypass = !!(opts && opts.bypassShield);
-  if (!bypass && absorbShieldDamage(room, p, dmg)) return false;
   notePlayerAttacker(p, attackerId);
   p.hp -= dmg;
   if (p.hp <= 0) handlePlayerDeath(room, p);
@@ -608,20 +518,13 @@ ASTEROID_R.huge = ASTEROID_R.big * 2;
 const ASTEROID_HIT_SCALE = 0.9;
 const PICKUP_R = 7 * RES_SCALE;
 const PICKUP_DROP_CHANCE = 0.2;
-/** Powerup crates bounce this many times, then drift off-screen and despawn.
- *  Applies to weapons / powerups — health pickups bounce forever. */
+/** Weapon crates bounce this many times, then drift off-screen and despawn.
+ *  Health pickups bounce forever. */
 const PICKUP_BOUNCE_MAX = 3;
 /** Heal amount from health pickups (HP capped at MAX_HP). */
 const HEALTH_PICKUP_HEAL = 30;
-/** Pickup type codes in network packs: 1+ weapons by slot, 99 health, 100+ vitals/powerups.
- *  Remaining collectible buffs: shield + fixing drone (sold under shop Vitals). */
+/** Pickup type codes in network packs: 1+ weapons by slot, 99 health. */
 const PICKUP_CODE_HEALTH = 99;
-const POWERUP_TYPES = ['shield', 'drone'];
-const PICKUP_CODE_POWERUP_BASE = 100;
-/** Fixing-drone: 1 HP every 1.25s. */
-const FIXDRONE_HEAL_TICKS = Math.round(1.25 * TPS);
-/** Appear / start repair at this fraction of max HP (inclusive). */
-const FIXDRONE_HP_FRAC = 0.9;
 const ASTEROID_HP = 50;
 /** Coins granted to the destroyer when a world asteroid is killed. */
 const ASTEROID_COIN_GRANT = 32;

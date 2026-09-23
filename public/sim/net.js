@@ -134,11 +134,12 @@ function sanitizeInputFrame(frame, lastSeq, maxQueuedSeq) {
   const r = coerceInputBit(frame.r);
   const u = coerceInputBit(frame.u);
   const sp = coerceInputBit(frame.sp);
+  const sp2 = coerceInputBit(frame.sp2);
   const sh = coerceInputBit(frame.sh);
   const j = coerceInputBit(frame.j);
-  if (l < 0 || r < 0 || u < 0 || sp < 0 || sh < 0 || j < 0) return null;
+  if (l < 0 || r < 0 || u < 0 || sp < 0 || sp2 < 0 || sh < 0 || j < 0) return null;
 
-  return { seq, l, r, u, sp, sh, j };
+  return { seq, l, r, u, sp, sp2, sh, j };
 }
 
 /**
@@ -150,11 +151,14 @@ function trimInputQueue(pl, maxLen) {
   if (!pl || !pl.inputQueue || pl.inputQueue.length <= cap) return;
   const q = pl.inputQueue;
   let gotShoot = 0;
+  let gotShoot2 = 0;
   while (q.length > cap) {
     const dropped = q.shift();
     if ((dropped.sp | 0) === 1) gotShoot = 1;
+    if ((dropped.sp2 | 0) === 1) gotShoot2 = 1;
   }
   if (gotShoot && q.length) q[0].sp = 1;
+  if (gotShoot2 && q.length) q[0].sp2 = 1;
 }
 
 function enqueuePlayerInputs(ws, pl, frames) {
@@ -194,6 +198,7 @@ function enqueuePlayerInputs(ws, pl, frames) {
       r: cleaned.r,
       u: cleaned.u,
       sp: cleaned.sp,
+      sp2: cleaned.sp2,
       sh: cleaned.sh,
       j: cleaned.j
     });
@@ -469,10 +474,7 @@ function emitAsteroidWrap(room, a) {
 function packPickup(u) {
   let code = 0;
   if (u.kind === 'health') code = PICKUP_CODE_HEALTH;
-  else if (u.kind === 'powerup') {
-    const idx = POWERUP_TYPES.indexOf(u.powerup);
-    code = PICKUP_CODE_POWERUP_BASE + (idx >= 0 ? idx : 0);
-  } else code = WEAPON_SLOTS.indexOf(u.weapon) + 1;
+  else code = WEAPON_SLOTS.indexOf(u.weapon) + 1;
   return [
     u.id, u.spawnX, u.spawnY, u.vx, u.vy,
     u.spawnAngle, u.spin, code, u.spawnSt,

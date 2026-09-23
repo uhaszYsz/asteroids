@@ -511,7 +511,8 @@ wss.on('connection', (ws) => {
       if (!p || !playerShopSessionOpen(room, p)) return;
       const item = String(msg.item || '');
       const name = msg.name != null ? String(msg.name) : '';
-      const result = handleShopBuy(room, p, item, name);
+      const slot = msg.slot === 2 ? 2 : 1;
+      const result = handleShopBuy(room, p, item, name, slot);
       send(ws, Object.assign({ t: 'shopBuy' }, result, {
         item,
         name,
@@ -521,9 +522,9 @@ wss.on('connection', (ws) => {
         lives: p.lives | 0,
         hp: p.hp | 0,
         weapon: p.weapon || 'default',
+        weapon2: p.weapon2 || null,
         levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
         unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
-        powerups: packPowerupsNet(p),
         shopTimeLeft: p.shopTimeLeft | 0,
         pvp: room.practice ? 0 : 1
       }));
@@ -606,15 +607,6 @@ wss.on('connection', (ws) => {
       const room = ws.room;
       if (!room || ws.state !== 'playing') return;
       markPlayerReady(room, ws.playerId);
-      return;
-    }
-
-    if (msg.t === 'dbgPwr') {
-      if (!ws.isAdmin) return;
-      if (!allowAction(ws, 'dbgPwr', 50)) return;
-      const room = ws.room;
-      if (!room || (ws.state !== 'playing' && ws.state !== 'practice')) return;
-      spawnDebugPowerup(room, msg.x, msg.y, msg.vx, msg.vy, msg.powerup);
       return;
     }
 

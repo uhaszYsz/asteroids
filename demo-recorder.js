@@ -163,6 +163,7 @@ function recordInput(room, p) {
     r: inp.r ? 1 : 0,
     u: inp.u ? 1 : 0,
     sp: inp.sp ? 1 : 0,
+    sp2: inp.sp2 ? 1 : 0,
     sh: inp.sh ? 1 : 0
   });
 }

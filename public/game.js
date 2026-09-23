@@ -308,7 +308,9 @@ function startBcastFx(mode, color) {
   if (!bcastFx.raf) bcastFx.raf = requestAnimationFrame(tickBcastFx);
 }
 
-const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: true });
+// alpha:true so the fluid background (a separate canvas behind #c) can show through
+// when bgMode === 'fluid' — grid mode still clears fully opaque (alpha 1), no visual change.
+const gl = canvas.getContext('webgl', { antialias: false, alpha: true, depth: true });
 
 /** Internal framebuffer scale vs fixed world size (W×H). Physics unchanged. */
 const RENDER_SCALE_KEY = 'asteroids_render_scale';
@@ -368,6 +370,10 @@ function applyRenderResolution(scale) {
   } catch (_) {}
   invalidateGridBake();
   syncSettingsResolutionUi();
+  // syncFluidCanvasBox is hoisted but closes over `const fluidBgCanvasEl` declared later
+  // in this file — at boot (loadRenderResolution → applyRenderResolution, called before
+  // that declaration runs) it's still in its temporal dead zone, so typeof isn't enough.
+  try { syncFluidCanvasBox(); } catch (_) { /* not ready yet at boot */ }
 }
 
 function loadRenderResolution() {
@@ -409,6 +415,7 @@ fitCanvasIntegerScale();
 
 addEventListener('resize', () => {
   fitCanvasIntegerScale();
+  if (typeof syncFluidCanvasBox === 'function') syncFluidCanvasBox();
   if (bcastFx.mode || bcastFx.parts.length) resizeBcastFx();
 });
 
@@ -453,7 +460,6 @@ const SFX = {
   collide: 'sounds/impact1.wav',
   /** Asteroid↔asteroid (incl. asteroid-gun rocks); not ship hits. */
   asteroidCollide: 'sounds/explosion1.wav',
-  shieldOff: 'sounds/shield.wav',
   /** Meteor-gun rock vs world asteroid — only asteroid↔asteroid collision sting. */
   meteorCrash: 'sounds/explosion1.wav',
   voidHit: 'sounds/voidHit.wav',
@@ -1670,9 +1676,7 @@ const COL = {
   voidcannon: [0.55, 0.25, 1.0],
   powerDamage: [1.0, 0.35, 0.55],
   powerTurret: [0.95, 0.85, 0.3],
-  powerShield: [0.4, 0.85, 1.0],
   powerReload: [0.45, 1.0, 0.4],
-  powerDrone: [0.35, 1.0, 0.72],
   enemy: [1.0, 0.55, 0.25],
   enemyUfo: [0.55, 1.0, 0.65],
   enemyCarrier: [0.85, 0.7, 1.0],
@@ -2880,6 +2884,44 @@ function tickThrustGrid(thrusting, x, y, angle) {
   pushGridShock(x, y, Object.assign(gridBlastThrustOpts(angle), { ironWake: false }));
 }
 
+const fluidThrustNextAtById = new Map();
+const FLUID_THRUST_INTERVAL_MS = 45;
+
+/** While thrusting: narrow warm exhaust splat on the fluid background, throttled to a
+ *  fixed interval (unlike the grid's every-frame implosion) so it reads as a thin jet
+ *  trailing behind the ship instead of one big puff. No-op unless fluid mode is active.
+ *  `throttleId` keeps local / remote / enemy jets on independent timers. */
+function tickThrustFluid(thrusting, x, y, angle, color, throttleId) {
+  if (!thrusting || bgMode !== 'fluid' || !window.WebGLFluidBG) return;
+  const now = performance.now();
+  const key = throttleId != null ? throttleId : 'local';
+  if (now < (fluidThrustNextAtById.get(key) || 0)) return;
+  fluidThrustNextAtById.set(key, now + FLUID_THRUST_INTERVAL_MS);
+  // Same exhaust-nozzle offset as emitThrustFx/emitThrustIdleFx, so the splat originates
+  // at the ship's engine instead of its center.
+  const ox = x - Math.cos(angle) * 6 * RES_SCALE;
+  const oy = y - Math.sin(angle) * 6 * RES_SCALE;
+  const ux = ox / canvas.width;
+  const uy = 1 - oy / canvas.height;
+  const pc = color || ownerPlayerColor(myId) || COL.self;
+  WebGLFluidBG.thrustSplat(ux, uy, angle, {
+    color: { r: pc[0] * 2.2, g: pc[1] * 2.2, b: pc[2] * 2.2 }
+  });
+}
+
+/** Enemy NPCs: when moving forward along their nose, splat fluid exhaust in their color. */
+function emitEnemyThrustFluid() {
+  if (bgMode !== 'fluid' || !window.WebGLFluidBG) return;
+  if (deathSpectating || matchPaused || soloShopOpen) return;
+  for (const e of enemies.values()) {
+    if ((e.hp | 0) <= 0) continue;
+    const p = enemyAt(e);
+    const forwardThrust = (p.vx || 0) * Math.cos(p.angle) + (p.vy || 0) * Math.sin(p.angle) > 0.4 * RES_SCALE;
+    if (!forwardThrust) continue;
+    tickThrustFluid(true, p.x, p.y, p.angle, enemyThrustColor(e.kind || p.kind), 'e' + e.id);
+  }
+}
+
 function clearGridShocks() {
   resetSynthGrid();
 }
@@ -3831,6 +3873,66 @@ function bindSceneLightUniforms(u) {
   if (u.ships) gl.uniform4fv(u.ships, _gridShipLight);
   if (u.wrap) gl.uniform2f(u.wrap, W, H);
 }
+const BG_MODE_KEY = 'asteroids_bg_mode';
+const FLUID_FPS_KEY = 'asteroids_fluid_fps';
+let bgMode = 'grid';
+let fluidFps = 60;
+const fluidBgCanvasEl = document.getElementById('fluid-bg');
+
+/** Keep the fluid canvas's box (position + size) pinned to the game canvas's own
+ *  contain-fit box, so the fluid sim always exactly covers the visible game world —
+ *  letterbox bars included/excluded the same way — without touching canvas #c itself. */
+function syncFluidCanvasBox() {
+  if (!fluidBgCanvasEl) return;
+  const r = canvas.getBoundingClientRect();
+  fluidBgCanvasEl.style.left = r.left + 'px';
+  fluidBgCanvasEl.style.top = r.top + 'px';
+  fluidBgCanvasEl.style.width = r.width + 'px';
+  fluidBgCanvasEl.style.height = r.height + 'px';
+  // Pin the fluid canvas's own backing-buffer resolution to the game world's internal
+  // render resolution (not the display/devicePixelRatio size) so it upscales blocky —
+  // pixel art, like the rest of the game — instead of rendering at native screen res.
+  if (window.WebGLFluidBG) WebGLFluidBG.setTargetResolution(canvas.width, canvas.height);
+}
+syncFluidCanvasBox();
+
+/** Switch the menu/game background between the synth grid and the WebGL fluid sim. */
+function applyBgMode(mode) {
+  bgMode = mode === 'fluid' ? 'fluid' : 'grid';
+  try { localStorage.setItem(BG_MODE_KEY, bgMode); } catch (_) { /* ignore */ }
+  if (bgMode === 'fluid') {
+    if (fluidBgCanvasEl && window.WebGLFluidBG) {
+      // Must be laid out (display:block) before init() so its first resize/framebuffer
+      // pass sees real dimensions instead of a display:none 0×0 / default 300×150 canvas.
+      syncFluidCanvasBox();
+      fluidBgCanvasEl.classList.add('show');
+      WebGLFluidBG.init(fluidBgCanvasEl, { width: canvas.width, height: canvas.height });
+      WebGLFluidBG.setConfig({ FPS: fluidFps });
+      WebGLFluidBG.start();
+    }
+  } else {
+    if (fluidBgCanvasEl) fluidBgCanvasEl.classList.remove('show');
+    if (window.WebGLFluidBG) WebGLFluidBG.stop();
+  }
+  const modeButtons = document.getElementById('bg-mode-buttons');
+  if (modeButtons) {
+    modeButtons.querySelectorAll('button[data-bgmode]').forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-bgmode') === bgMode);
+    });
+  }
+  const fluidSection = document.getElementById('gp-section-fluid');
+  if (fluidSection) fluidSection.style.display = bgMode === 'fluid' ? '' : 'none';
+}
+try {
+  const _bgm = localStorage.getItem(BG_MODE_KEY);
+  if (_bgm === 'fluid' || _bgm === 'grid') bgMode = _bgm;
+  const _fps = Number(localStorage.getItem(FLUID_FPS_KEY));
+  if (_fps === 30 || _fps === 60) fluidFps = _fps;
+} catch (_) { /* ignore */ }
+// Deferred: window.WebGLFluidBG must exist before this can actually start the sim,
+// so this only takes effect once the DOM/script boot sequence below reaches it.
+if (bgMode === 'fluid') requestAnimationFrame(() => applyBgMode('fluid'));
+
 const DYN_LIGHT_KEY = 'asteroids_dyn_light';
 const NIGHT_MODE_KEY = 'asteroids_night_mode';
 const AIM_CONE_COLOR_KEY = 'asteroids_aim_cone_color';
@@ -6149,93 +6251,6 @@ function drawFxLabels(now) {
   }
 }
 
-/** Persistent world shiny text (powerup pickups). */
-const powerupLabelCache = Object.create(null);
-function powerupLetter(name) {
-  switch (name) {
-    case 'shield': return 'S';
-    case 'drone': return 'F';
-    default: return '?';
-  }
-}
-
-/**
- * Per-vital text orbit: unique glyph/name, count, mount pattern, and cage shape.
- */
-const POWERUP_ORBIT = {
-  // 8 corner mounts — cube cage
-  shield: { text: 'S', pattern: 'cube8', orbit: 'cube', textScale: 0.82, orbitR: 1.08 },
-  // 8 equatorial ring — flat ring cage
-  drone: { text: 'FIX', pattern: 'ring8', orbit: 'ring', textScale: 0.42, orbitR: 1.12 }
-};
-
-function powerupOrbitStyle(name) {
-  return POWERUP_ORBIT[name] || POWERUP_ORBIT.shield;
-}
-
-function getPowerupLabelBake(name) {
-  const style = powerupOrbitStyle(name);
-  const text = style.text || powerupLetter(name);
-  const key = name + '::' + text;
-  let baked = powerupLabelCache[key];
-  if (baked) return baked;
-  baked = bakeFxLabelTexture(text, powerupColor(name));
-  powerupLabelCache[key] = baked;
-  return baked;
-}
-
-function norm3(v) {
-  const len = Math.hypot(v[0], v[1], v[2]) || 1;
-  return [v[0] / len, v[1] / len, v[2] / len];
-}
-
-function powerupOrbitDirs(pattern) {
-  if (pattern === 'cube8') {
-    const o = [];
-    for (const x of [-1, 1]) {
-      for (const y of [-1, 1]) {
-        for (const z of [-1, 1]) o.push(norm3([x, y, z]));
-      }
-    }
-    return o;
-  }
-  if (pattern === 'ring8' || pattern === 'ring8poles') {
-    const o = [];
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      o.push([Math.cos(a), Math.sin(a), 0]);
-    }
-    if (pattern === 'ring8poles') o.push([0, 0, 1], [0, 0, -1]);
-    return o;
-  }
-  if (pattern === 'dual5') {
-    const o = [];
-    for (let ring = 0; ring < 2; ring++) {
-      const z = ring === 0 ? 0.42 : -0.42;
-      const off = ring * (Math.PI / 5);
-      const rr = Math.sqrt(Math.max(0, 1 - z * z));
-      for (let i = 0; i < 5; i++) {
-        const a = off + (i / 5) * Math.PI * 2;
-        o.push([Math.cos(a) * rr, Math.sin(a) * rr, z]);
-      }
-    }
-    return o;
-  }
-  if (pattern === 'triPrism6') {
-    const s = Math.sqrt(3) * 0.5;
-    return [
-      norm3([1, 0, 0.55]), norm3([-0.5, s, 0.55]), norm3([-0.5, -s, 0.55]),
-      norm3([1, 0, -0.55]), norm3([-0.5, s, -0.55]), norm3([-0.5, -s, -0.55])
-    ];
-  }
-  // cube6 default — face centers
-  return [
-    [1, 0, 0], [-1, 0, 0],
-    [0, 1, 0], [0, -1, 0],
-    [0, 0, 1], [0, 0, -1]
-  ];
-}
-
 function drawShinyWorldText(x, y, angle, baked, scale) {
   if (!baked || !baked.tex) return;
   const sc = scale != null ? scale : 1;
@@ -6316,438 +6331,6 @@ function drawShinyWorldQuad(sx0, sy0, sx1, sy1, sx2, sy2, sx3, sy3, baked, alpha
   gl.drawArrays(gl.TRIANGLES, 0, 6);
   gl.disable(gl.BLEND);
   gl.disableVertexAttribArray(fxTAUV);
-}
-
-/* ========== Powerup LOD sphere + 6 sticking letters ========== */
-const POWERUP_VIS_SCALE = (0.5 + 0.7) * 0.3 * 1.5; // whole pickup; was 0.3×, now +50% (1.5×)
-const POWERUP_SPHERE_R = 6.2 * RES_SCALE * POWERUP_VIS_SCALE;
-/** Invisible letter orbit — 20% smaller than original 9.4, then × VIS_SCALE. */
-const POWERUP_LETTER_R = 7.52 * RES_SCALE * POWERUP_VIS_SCALE;
-const POWERUP_SPHERE_LIFT = 0.72;
-const POWERUP_LETTER_SCALE = 0.95 * POWERUP_VIS_SCALE * 0.7;
-
-function tumbleRotateLocal(x, y, z, cyaw, syaw, cp, sp, cr, sr) {
-  // roll X → pitch Y → yaw Z
-  const y1 = y * cr - z * sr;
-  const z1 = y * sr + z * cr;
-  const x2 = x * cp + z1 * sp;
-  const z2 = -x * sp + z1 * cp;
-  const wx = x2 * cyaw - y1 * syaw;
-  const wy = x2 * syaw + y1 * cyaw;
-  return { wx, wy, wz: z2 };
-}
-
-function finalizePowerupMesh(rawVerts, faces) {
-  let maxR = 1e-6;
-  for (let i = 0; i < rawVerts.length; i++) {
-    const v = rawVerts[i];
-    const r = Math.hypot(v[0], v[1], v[2]);
-    if (r > maxR) maxR = r;
-  }
-  const inv = 1 / maxR;
-  const verts = rawVerts.map((v) => [v[0] * inv, v[1] * inv, v[2] * inv]);
-  const edgeSet = new Set();
-  const edges = [];
-  for (let f = 0; f < faces.length; f++) {
-    const tri = faces[f];
-    for (let e = 0; e < 3; e++) {
-      const a = tri[e], b = tri[(e + 1) % 3];
-      const key = a < b ? a + ',' + b : b + ',' + a;
-      if (edgeSet.has(key)) continue;
-      edgeSet.add(key);
-      edges.push([a, b]);
-    }
-  }
-  return { verts, faces, edges };
-}
-
-function buildIcosphere(subdiv) {
-  const t = (1 + Math.sqrt(5)) * 0.5;
-  let verts = [
-    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
-    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
-    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]
-  ];
-  for (let i = 0; i < verts.length; i++) {
-    const v = verts[i];
-    const inv = 1 / Math.hypot(v[0], v[1], v[2]);
-    verts[i] = [v[0] * inv, v[1] * inv, v[2] * inv];
-  }
-  let faces = [
-    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
-    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
-    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
-    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]
-  ];
-  const midCache = new Map();
-  function mid(a, b) {
-    const i0 = Math.min(a, b), i1 = Math.max(a, b);
-    const key = i0 + ',' + i1;
-    if (midCache.has(key)) return midCache.get(key);
-    const va = verts[a], vb = verts[b];
-    let x = va[0] + vb[0], y = va[1] + vb[1], z = va[2] + vb[2];
-    const inv = 1 / Math.hypot(x, y, z);
-    const idx = verts.length;
-    verts.push([x * inv, y * inv, z * inv]);
-    midCache.set(key, idx);
-    return idx;
-  }
-  for (let s = 0; s < subdiv; s++) {
-    midCache.clear();
-    const next = [];
-    for (let f = 0; f < faces.length; f++) {
-      const a = faces[f][0], b = faces[f][1], c = faces[f][2];
-      const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a);
-      next.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]);
-    }
-    faces = next;
-  }
-  return finalizePowerupMesh(verts, faces);
-}
-
-/** Diamond / octahedron — damage. */
-function buildOctahedronMesh() {
-  const verts = [
-    [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]
-  ];
-  const faces = [
-    [4, 0, 2], [4, 2, 1], [4, 1, 3], [4, 3, 0],
-    [5, 2, 0], [5, 1, 2], [5, 3, 1], [5, 0, 3]
-  ];
-  return finalizePowerupMesh(verts, faces);
-}
-
-/** Cube — shield. */
-function buildCubeMesh() {
-  const verts = [
-    [-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1],
-    [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]
-  ];
-  const faces = [
-    [0, 1, 2], [0, 2, 3],
-    [4, 6, 5], [4, 7, 6],
-    [0, 4, 5], [0, 5, 1],
-    [2, 6, 7], [2, 7, 3],
-    [0, 3, 7], [0, 7, 4],
-    [1, 5, 6], [1, 6, 2]
-  ];
-  return finalizePowerupMesh(verts, faces);
-}
-
-/** Tetrahedron — fixing drone pickup. */
-function buildTetrahedronMesh() {
-  const verts = [
-    [1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]
-  ];
-  const faces = [
-    [0, 1, 2], [0, 3, 1], [0, 2, 3], [1, 3, 2]
-  ];
-  return finalizePowerupMesh(verts, faces);
-}
-
-/** Hexagonal bipyramid (8 verts) — reload. */
-function buildHexBipyramidMesh() {
-  const verts = [[0, 0, 1.15], [0, 0, -1.15]];
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2;
-    verts.push([Math.cos(a), Math.sin(a), 0]);
-  }
-  const faces = [];
-  for (let i = 0; i < 6; i++) {
-    const a = 2 + i;
-    const b = 2 + ((i + 1) % 6);
-    faces.push([0, a, b], [1, b, a]);
-  }
-  return finalizePowerupMesh(verts, faces);
-}
-
-const POWERUP_SPHERE_LODS = [
-  buildIcosphere(0), // 20 tris
-  buildIcosphere(1), // 80 tris
-  buildIcosphere(2)  // 320 tris
-];
-
-/** Hardcoded silhouette per powerup (turret keeps LOD sphere). */
-const POWERUP_SHAPE_MESH = {
-  damage: buildOctahedronMesh(),
-  turret: null, // sphere LODs
-  shield: buildCubeMesh(),
-  reload: buildHexBipyramidMesh(),
-  drone: buildTetrahedronMesh()
-};
-
-/** Flat octagon wire used as "ring" letter cage. */
-function buildRingOrbitMesh() {
-  const verts = [];
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
-    verts.push([Math.cos(a), Math.sin(a), 0]);
-  }
-  const faces = [];
-  for (let i = 1; i < 7; i++) faces.push([0, i, i + 1]);
-  return finalizePowerupMesh(verts, faces);
-}
-const POWERUP_RING_ORBIT_MESH = buildRingOrbitMesh();
-
-function powerupOrbitShellMesh(orbit) {
-  if (orbit === 'cube') return POWERUP_SHAPE_MESH.shield;
-  if (orbit === 'octa') return POWERUP_SHAPE_MESH.damage;
-  if (orbit === 'hex') return POWERUP_SHAPE_MESH.reload;
-  if (orbit === 'ring') return POWERUP_RING_ORBIT_MESH;
-  return POWERUP_SPHERE_LODS[0];
-}
-
-function powerupShapeMesh(name, lod) {
-  if (name === 'turret' || !POWERUP_SHAPE_MESH[name]) {
-    return POWERUP_SPHERE_LODS[lod] || POWERUP_SPHERE_LODS[0];
-  }
-  return POWERUP_SHAPE_MESH[name];
-}
-
-/** @deprecated kept as fallback — prefer powerupOrbitDirs(style.pattern) */
-const POWERUP_LETTER_DIRS = [
-  [1, 0, 0],
-  [-1, 0, 0],
-  [0, 1, 0],
-  [0, -1, 0],
-  [0, 0, 1],
-  [0, 0, -1]
-];
-
-function powerupSphereLod(x, y) {
-  const dx = x - player.x;
-  const dy = y - player.y;
-  const d2 = dx * dx + dy * dy;
-  const near = 110 * RES_SCALE;
-  const mid = 220 * RES_SCALE;
-  if (d2 < near * near) return 2;
-  if (d2 < mid * mid) return 1;
-  return 0;
-}
-
-function powerupTumbleAngles(angle, id) {
-  const t = performance.now() * 0.001;
-  const seed = (id | 0) * 1.6180339887;
-  return {
-    yaw: (angle || 0) + t * 1.15 + seed * 0.7,
-    pitch: t * 0.95 + seed * 1.4,
-    roll: t * 0.72 + seed * 0.5
-  };
-}
-
-function projectPowerupMesh(verts, cx, cy, scale, yaw, pitch, roll, outXY, outDepth) {
-  const cyaw = Math.cos(yaw), syaw = Math.sin(yaw);
-  const cp = Math.cos(pitch), sp = Math.sin(pitch);
-  const cr = Math.cos(roll), sr = Math.sin(roll);
-  for (let i = 0; i < verts.length; i++) {
-    const v = verts[i];
-    const r = tumbleRotateLocal(v[0] * scale, v[1] * scale, v[2] * scale, cyaw, syaw, cp, sp, cr, sr);
-    outXY[i * 2] = cx + r.wx;
-    outXY[i * 2 + 1] = cy + r.wy - r.wz * POWERUP_SPHERE_LIFT;
-    outDepth[i] = r.wz;
-  }
-}
-
-const _pwrSphXY = new Float64Array(320 * 3 * 2); // enough for lod2 verts (~162)
-const _pwrSphDepth = new Float64Array(320 * 3);
-const _pwrFaceOrder = [];
-const _pwrTriScratch = [0, 0, 0, 0, 0, 0];
-const _pwrCol = [0, 0, 0];
-const _pwrEdgeCol = [0, 0, 0];
-
-function drawPowerupSphereMesh(cx, cy, color, yaw, pitch, roll, lod, alpha, powerupName) {
-  const mesh = powerupShapeMesh(powerupName, lod);
-  const xy = _pwrSphXY;
-  const depth = _pwrSphDepth;
-  const sphR = POWERUP_SPHERE_R * _shopVisScale;
-  const aMul = alpha == null ? 1 : alpha;
-  projectPowerupMesh(mesh.verts, cx, cy, sphR, yaw, pitch, roll, xy, depth);
-
-  const faces = mesh.faces;
-  while (_pwrFaceOrder.length < faces.length) _pwrFaceOrder.push({ i: 0, z: 0 });
-  let zMin = Infinity, zMax = -Infinity;
-  for (let i = 0; i < faces.length; i++) {
-    const f = faces[i];
-    const z = (depth[f[0]] + depth[f[1]] + depth[f[2]]) / 3;
-    _pwrFaceOrder[i].i = i;
-    _pwrFaceOrder[i].z = z;
-    if (z < zMin) zMin = z;
-    if (z > zMax) zMax = z;
-  }
-  const used = _pwrFaceOrder.slice(0, faces.length);
-  used.sort((a, b) => a.z - b.z);
-  const zSpan = Math.max(1e-4, zMax - zMin);
-  const base = color || COL.pickup;
-  const t = performance.now() * 0.001;
-  const pulse = 0.55 + 0.45 * Math.sin(t * 6.5 + cx * 0.07 + cy * 0.05);
-
-  const dark = [
-    base[0] * 0.22,
-    base[1] * 0.22,
-    base[2] * 0.22
-  ];
-
-  _pwrEdgeCol[0] = Math.min(1, base[0] * 0.4 + 0.6);
-  _pwrEdgeCol[1] = Math.min(1, base[1] * 0.4 + 0.6);
-  _pwrEdgeCol[2] = Math.min(1, base[2] * 0.4 + 0.6);
-  // Always show wireframe; slightly thicker on unique low-poly shapes.
-  const isSphere = powerupName === 'turret' || !powerupName;
-  const ew = (isSphere
-    ? (lod === 0 ? 0.75 : 0.5)
-    : 1.05) * RES_SCALE * POWERUP_VIS_SCALE * 2 * _shopVisScale;
-
-  // Far → near faces.
-  for (let o = 0; o < used.length; o++) {
-    const f = faces[used[o].i];
-    const ax = xy[f[1] * 2] - xy[f[0] * 2];
-    const ay = xy[f[1] * 2 + 1] - xy[f[0] * 2 + 1];
-    const bx = xy[f[2] * 2] - xy[f[0] * 2];
-    const by = xy[f[2] * 2 + 1] - xy[f[0] * 2 + 1];
-    // Screen Y-down: front faces wind clockwise.
-    if (ax * by - ay * bx >= 0) continue;
-    const shade = 0.28 + 0.72 * ((used[o].z - zMin) / zSpan);
-    const shine = Math.max(0, shade - 0.68) * 2.4 * pulse;
-    _pwrCol[0] = dark[0] + (base[0] - dark[0]) * shade;
-    _pwrCol[1] = dark[1] + (base[1] - dark[1]) * shade;
-    _pwrCol[2] = dark[2] + (base[2] - dark[2]) * shade;
-    _pwrCol[0] = Math.min(1, _pwrCol[0] + shine * 0.75 + shade * 0.08);
-    _pwrCol[1] = Math.min(1, _pwrCol[1] + shine * 0.7 + shade * 0.08);
-    _pwrCol[2] = Math.min(1, _pwrCol[2] + shine * 0.65 + shade * 0.08);
-    const tri = _pwrTriScratch;
-    tri[0] = xy[f[0] * 2]; tri[1] = xy[f[0] * 2 + 1];
-    tri[2] = xy[f[1] * 2]; tri[3] = xy[f[1] * 2 + 1];
-    tri[4] = xy[f[2] * 2]; tri[5] = xy[f[2] * 2 + 1];
-    drawFilledPoly(tri, _pwrCol, aMul);
-  }
-  // Full wireframe overlay (visible on every powerup shape / LOD).
-  const edges = mesh.edges;
-  for (let i = 0; i < edges.length; i++) {
-    const e = edges[i];
-    drawThickSegment(
-      xy[e[0] * 2], xy[e[0] * 2 + 1],
-      xy[e[1] * 2], xy[e[1] * 2 + 1],
-      ew, _pwrEdgeCol, aMul
-    );
-  }
-}
-
-function collectPowerupSideLetters(cx, cy, baked, yaw, pitch, roll, powerupName) {
-  if (!baked) return [];
-  const style = powerupOrbitStyle(powerupName);
-  const dirs = powerupOrbitDirs(style.pattern);
-  const cyaw = Math.cos(yaw), syaw = Math.sin(yaw);
-  const cp = Math.cos(pitch), sp = Math.sin(pitch);
-  const cr = Math.cos(roll), sr = Math.sin(roll);
-  const textScale = (style.textScale != null ? style.textScale : 1) * POWERUP_LETTER_SCALE * _shopVisScale;
-  const worldH = 14 * RES_SCALE * textScale;
-  const worldW = worldH * (baked.tw / Math.max(1, baked.th));
-  const hw = worldW * 0.5;
-  const hh = worldH * 0.5;
-  const R = POWERUP_LETTER_R * (style.orbitR != null ? style.orbitR : 1) * _shopVisScale;
-
-  const batch = [];
-  for (let d = 0; d < dirs.length; d++) {
-    const dir = dirs[d];
-    let ux = 0, uy = 0, uz = 1;
-    let rx = dir[1] * uz - dir[2] * uy;
-    let ry = dir[2] * ux - dir[0] * uz;
-    let rz = dir[0] * uy - dir[1] * ux;
-    let rlen = Math.hypot(rx, ry, rz);
-    if (rlen < 1e-4) {
-      ux = 1; uy = 0; uz = 0;
-      rx = dir[1] * uz - dir[2] * uy;
-      ry = dir[2] * ux - dir[0] * uz;
-      rz = dir[0] * uy - dir[1] * ux;
-      rlen = Math.hypot(rx, ry, rz) || 1;
-    }
-    rx /= rlen; ry /= rlen; rz /= rlen;
-    const upx = dir[1] * rz - dir[2] * ry;
-    const upy = dir[2] * rx - dir[0] * rz;
-    const upz = dir[0] * ry - dir[1] * rx;
-
-    const corners = [
-      [dir[0] * R - rx * hw + upx * hh, dir[1] * R - ry * hw + upy * hh, dir[2] * R - rz * hw + upz * hh],
-      [dir[0] * R + rx * hw + upx * hh, dir[1] * R + ry * hw + upy * hh, dir[2] * R + rz * hw + upz * hh],
-      [dir[0] * R + rx * hw - upx * hh, dir[1] * R + ry * hw - upy * hh, dir[2] * R + rz * hw - upz * hh],
-      [dir[0] * R - rx * hw - upx * hh, dir[1] * R - ry * hw - upy * hh, dir[2] * R - rz * hw - upz * hh]
-    ];
-    const sx = new Float64Array(4);
-    const sy = new Float64Array(4);
-    let zSum = 0;
-    for (let i = 0; i < 4; i++) {
-      const r = tumbleRotateLocal(corners[i][0], corners[i][1], corners[i][2], cyaw, syaw, cp, sp, cr, sr);
-      sx[i] = cx + r.wx;
-      sy[i] = cy + r.wy - r.wz * POWERUP_SPHERE_LIFT;
-      zSum += r.wz;
-    }
-    const ax = sx[1] - sx[0], ay = sy[1] - sy[0];
-    const bx = sx[2] - sx[0], by = sy[2] - sy[0];
-    const cross = ax * by - ay * bx;
-    // Opaque letters; flip winding when seen from behind so the glyph isn't mirrored.
-    if (cross < 0) {
-      batch.push({ sx: [sx[0], sx[1], sx[2], sx[3]], sy: [sy[0], sy[1], sy[2], sy[3]], z: zSum * 0.25 });
-    } else {
-      batch.push({ sx: [sx[1], sx[0], sx[3], sx[2]], sy: [sy[1], sy[0], sy[3], sy[2]], z: zSum * 0.25 });
-    }
-  }
-  batch.sort((a, b) => a.z - b.z);
-  return batch;
-}
-
-/** Faint wire cage showing this powerup's letter-orbit shape. */
-function drawPowerupOrbitCage(cx, cy, color, yaw, pitch, roll, powerupName, alpha) {
-  const style = powerupOrbitStyle(powerupName);
-  const mesh = powerupOrbitShellMesh(style.orbit);
-  if (!mesh || !mesh.edges) return;
-  const xy = _pwrSphXY;
-  const depth = _pwrSphDepth;
-  const R = POWERUP_LETTER_R * (style.orbitR != null ? style.orbitR : 1) * _shopVisScale;
-  const aMul = (alpha == null ? 1 : alpha) * 0.35;
-  projectPowerupMesh(mesh.verts, cx, cy, R, yaw, pitch, roll, xy, depth);
-  const edgeCol = [
-    Math.min(1, (color[0] || 1) * 0.5 + 0.45),
-    Math.min(1, (color[1] || 1) * 0.5 + 0.45),
-    Math.min(1, (color[2] || 1) * 0.5 + 0.45)
-  ];
-  const ew = 0.7 * RES_SCALE * POWERUP_VIS_SCALE * _shopVisScale;
-  for (let i = 0; i < mesh.edges.length; i++) {
-    const e = mesh.edges[i];
-    drawThickSegment(
-      xy[e[0] * 2], xy[e[0] * 2 + 1],
-      xy[e[1] * 2], xy[e[1] * 2 + 1],
-      ew, edgeCol, aMul
-    );
-  }
-}
-
-function drawPowerupLetterBatch(batch, baked, from, to, alpha) {
-  if (!baked || !batch) return;
-  const a = alpha == null ? 1 : alpha;
-  const end = to == null ? batch.length : to;
-  for (let i = from | 0; i < end; i++) {
-    const L = batch[i];
-    drawShinyWorldQuad(
-      L.sx[0], L.sy[0], L.sx[1], L.sy[1], L.sx[2], L.sy[2], L.sx[3], L.sy[3],
-      baked, a
-    );
-  }
-}
-
-function drawPowerupPickup(u, x, y, angle, forceLod, alpha) {
-  const name = u.powerup;
-  const baked = getPowerupLabelBake(name);
-  const col = powerupColor(name);
-  const tumble = powerupTumbleAngles(angle, u.id);
-  const lod = forceLod != null ? forceLod : powerupSphereLod(x, y);
-  const a = alpha == null ? 1 : alpha;
-  const letters = collectPowerupSideLetters(x, y, baked, tumble.yaw, tumble.pitch, tumble.roll, name);
-  // Letters behind the core first, then cage + mesh, then front letters.
-  let split = 0;
-  while (split < letters.length && letters[split].z < 0) split++;
-  drawPowerupLetterBatch(letters, baked, 0, split, a);
-  drawPowerupOrbitCage(x, y, col, tumble.yaw, tumble.pitch, tumble.roll, name, a);
-  drawPowerupSphereMesh(x, y, col, tumble.yaw, tumble.pitch, tumble.roll, lod, a, name);
-  drawPowerupLetterBatch(letters, baked, split, letters.length, a);
 }
 
 let particleTime = 0;
@@ -7855,10 +7438,6 @@ function playPickupSfx(kind, weapon, level) {
     playSfx(SFX.pickup, { vol: 0.9, pool: 3 });
     return;
   }
-  if (kind === 'powerup') {
-    playSfx(SFX.pickup, { vol: 1, pool: 3 });
-    return;
-  }
   // All weapon pickups / upgrades share one sting.
   playSfx(SFX.pickShotgun, { vol: 0.9, pool: 3 });
 }
@@ -7866,30 +7445,6 @@ function playPickupSfx(kind, weapon, level) {
 /** Pickup vanishes — health uses heal FX; weapons use shared level-scaled pickup FX. */
 function emitPickupCollectFx(x, y, kind, weapon, level, powerupName) {
   playPickupSfx(kind, weapon, level);
-  if (kind === 'powerup') {
-    const col = powerupColor(powerupName);
-    pushFxRing(x, y, col, { r0: 6, r1: 42, life: 420 });
-    emitParticles({
-      x, y,
-      count: 18,
-      speed: 100 * RES_SCALE,
-      speedSpread: 60 * RES_SCALE,
-      direction: 0,
-      spread: Math.PI * 2,
-      size: 3 * RES_SCALE,
-      sizeSpread: 1.5 * RES_SCALE,
-      lifetime: 0.3,
-      color: col,
-      drag: 3
-    });
-    spawnFxLabel(x, y - 8 * RES_SCALE, String(powerupName || 'POWER').toUpperCase(), col, {
-      life: 1.35,
-      scale: 0.7,
-      arrow: false,
-      pop: 1.2
-    });
-    return;
-  }
   if (kind === 'health') {
     pushFxRing(x, y, COL.health, { r0: 6, r1: 36, life: 380 });
     pushFxRing(x, y, COL_WHITE, { r0: 2, r1: 22, life: 260, delay: 30 });
@@ -8846,7 +8401,6 @@ function drawSceneLines(dt) {
     const ox = (dyingId === myId ? shake.x : 0) + vs.x;
     const oy = (dyingId === myId ? shake.y : 0) + vs.y;
     drawShip3D(me.x + ox, me.y + oy, me.angle, me.av || 0, ownerPlayerColor(myId), myId, dt, thrustUp());
-    drawShipPowerupFx(me.x + ox, me.y + oy, myId, me.angle, dt);
     if (showHit) drawCollisionRing(me.x + ox, me.y + oy, me.angle, COL.debug);
   }
   drawServerPoseGhost();
@@ -8861,7 +8415,6 @@ function drawSceneLines(dt) {
     const oy = (isDying ? shake.y : 0) + vs.y;
     const remoteThrust = v.vx * Math.cos(v.angle) + v.vy * Math.sin(v.angle) > 0.4 * RES_SCALE;
     drawShip3D(v.x + ox, v.y + oy, v.angle, v.av || 0, ownerPlayerColor(r.id), r.id, dt, remoteThrust);
-    drawShipPowerupFx(v.x + ox, v.y + oy, r.id, v.angle, dt);
     if (showHit) drawCollisionRing(v.x + ox, v.y + oy, v.angle, COL.debug);
   }
   drawLaserBeams();
@@ -8885,6 +8438,7 @@ function drawSceneLines(dt) {
       ax, ay, p.angle, sid, a.r || 16, col, size,
       null, specialTint, asteroidOutlineBlinkMul(a)
     );
+    stirAsteroidFluid(a, ax, ay);
     if ((a.special === 'meteor' || a.playerShot) && !deathSpectating) {
       const boost = (a._meteorBurnBoostUntil && performance.now() < a._meteorBurnBoostUntil) ? 3 : 1;
       emitMeteorBurnFx(
@@ -11979,8 +11533,12 @@ function precisionAimLight() {
   return performance.now() < touchAimLightUntil;
 }
 function shootHeld() {
-  if (campaignMode) return !!(keys.Space || spaceLatch || touchCtl.fire);
-  return !!(keys.Space || keys.Enter || spaceLatch || enterLatch || touchCtl.fire);
+  if (campaignMode) return !!(keys.Space || spaceLatch || touchCtl.fire || keys.KeyZ);
+  return !!(keys.Space || keys.Enter || spaceLatch || enterLatch || touchCtl.fire || keys.KeyZ);
+}
+/** Second gun slot (X) — no local click/Space alias, no campaign hyperspace overload. */
+function shoot2Held() {
+  return !!keys.KeyX;
 }
 /** One-shot Enter pulse for campaign hyperspace (set in keydown). */
 let jumpPulse = false;
@@ -12003,12 +11561,14 @@ function armCampaignJumpPulse() {
 const GAME_KEYS = new Set([
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'Enter',
-  'ShiftLeft', 'ShiftRight'
+  'ShiftLeft', 'ShiftRight', 'KeyZ', 'KeyX'
 ]);
 
 const WEAPON_NAMES = ['default', 'rocket', 'laser', 'shotgun', 'railgun', 'plasma', 'voidcannon', 'asteroidgun'];
 const WEAPON_MAX_LEVEL = 3;
 let selectedWeapon = 1; // 1 default … 8 asteroidgun
+/** Second gun slot (X) — weapon name, or null when empty. Level lives in weaponLevels[name]. */
+let equippedWeapon2 = null;
 /** Mirror of server WEAPONS — used only to gate local muzzle/fake shot FX. */
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
@@ -12423,6 +11983,39 @@ addEventListener('keydown', e => {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (e.target && e.target.isContentEditable)) {
     return;
   }
+  if (firstHelpEl && firstHelpEl.classList.contains('show')) {
+    if (e.code === 'Escape' || e.code === 'Enter' || e.code === 'Space') {
+      e.preventDefault();
+      closeFirstHelp();
+    }
+    return;
+  }
+  if (soloShopOpen) {
+    if (e.code === 'Enter') {
+      e.preventDefault();
+      closeSoloShopContinue();
+      return;
+    }
+    if (e.code === 'Space') {
+      e.preventDefault();
+      shopActivateFocus(null);
+      return;
+    }
+    if (e.code === 'KeyZ') {
+      e.preventDefault();
+      shopActivateFocus('z');
+      return;
+    }
+    if (e.code === 'KeyX') {
+      e.preventDefault();
+      shopActivateFocus('x');
+      return;
+    }
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') { e.preventDefault(); shopMoveFocus(-1, 0); return; }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); shopMoveFocus(1, 0); return; }
+    if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); shopMoveFocus(0, -1); return; }
+    if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); shopMoveFocus(0, 1); return; }
+  }
   if (e.code === 'F1') {
     e.preventDefault();
     toggleGridPanel();
@@ -12483,6 +12076,10 @@ addEventListener('keydown', e => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   if (e.code === 'Space' && !spaceLatch) {
     spaceLatch = true;
+    armShootLagProbe();
+    triggerShoot();
+  }
+  if (e.code === 'KeyZ' && !e.repeat) {
     armShootLagProbe();
     triggerShoot();
   }
@@ -12632,46 +12229,15 @@ function bindTouchControls() {
 
 const player = {
   x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, hp: 100, av: 0,
-  turnDecelStep: 0, turnDecelLeft: 0, turnDecelRev: 0, stunned: false, collideCd: 0, godLeft: 0,
-  powerups: { shield: false, drone: false },
-  shieldHp: 0
+  turnDecelStep: 0, turnDecelLeft: 0, turnDecelRev: 0, stunned: false, collideCd: 0, godLeft: 0
 };
 const serverGhost = { x: W / 2, y: H / 2, vx: 0, vy: 0, angle: -Math.PI / 2, av: 0, hp: 100, valid: false };
 /** performance.now() deadline — skip tight drift-snap so tab-resume can soft-blend. */
 let resumeBlendUntil = 0;
 
-const POWERUP_TYPES = ['shield', 'drone'];
-const PICKUP_CODE_POWERUP_BASE = 100;
-/** Match server: weapon/powerup crates bounce this many times, then drift off. */
+/** Match server: weapon crates bounce this many times, then drift off. */
 const PICKUP_BOUNCE_MAX = 3;
 const PICKUP_R = 7 * RES_SCALE;
-const SHIELD_MAX_HP = 100;
-function freshPowerups() {
-  return {
-    shield: false,
-    drone: false
-  };
-}
-function powerupColor(name) {
-  if (name === 'shield') return COL.powerShield;
-  if (name === 'drone') return COL.powerDrone;
-  return COL.pickup;
-}
-function applyPowerupsState(id, powerups) {
-  const raw = powerups || {};
-  const pu = Object.assign(freshPowerups(), raw);
-  const shieldHp = raw.shieldHp != null ? Math.max(0, Math.min(SHIELD_MAX_HP, +raw.shieldHp)) : 0;
-  delete pu.shieldHp;
-  if (id === myId) {
-    player.powerups = pu;
-    player.shieldHp = pu.shield ? shieldHp : 0;
-  }
-  const r = remotes.get(id);
-  if (r) {
-    r.powerups = pu;
-    r.shieldHp = pu.shield ? shieldHp : 0;
-  }
-}
 function ownerHasDamagePowerup(ownerId) {
   return false;
 }
@@ -12679,16 +12245,6 @@ function ownerHasDamagePowerup(ownerId) {
 /** Default / shotgun muzzle flash: white, or red with damage boost. */
 function muzzleBlasterColor(ownerId) {
   return ownerHasDamagePowerup(ownerId) ? [1.0, 0.18, 0.12] : COL_WHITE;
-}
-function ownerHasPowerup(ownerId, name) {
-  if (ownerId === myId) return !!(player.powerups && player.powerups[name]);
-  const r = remotes.get(ownerId);
-  return !!(r && r.powerups && r.powerups[name]);
-}
-function ownerShieldHp(ownerId) {
-  if (ownerId === myId) return player.shieldHp | 0;
-  const r = remotes.get(ownerId);
-  return r ? (r.shieldHp | 0) : 0;
 }
 let _dmgHue = 0;
 let _dmgHueAt = 0;
@@ -12727,38 +12283,6 @@ function bulletDrawColor(type, ownerId) {
   if (type === 'turret') return COL.powerTurret;
   if (type === 'default' || !type) return ownerShootColor(ownerId);
   return COL.bullet;
-}
-/** Shield pickup: charge-noise 3D sphere around ship (no load embers). */
-function drawShieldFx(x, y, shipAngle) {
-  const now = performance.now();
-  const tSec = now * 0.001;
-  // Breathe at ±10% of size per second peak rate: r = base * exp(0.1 * sin(t)).
-  const baseR = 14 * RES_SCALE;
-  const radius = baseR * Math.exp(0.1 * Math.sin(tSec));
-  const spin = now * 0.007;
-  // Alpha stays 0.4; light/emit blinks at 1 cycle per second.
-  drawEnemyChargeSphere(x, y, radius, shipAngle || 0, spin, COL.powerShield, 0.4, {
-    chargeT: 0.55,
-    noCore: true,
-    pulseHz: 1
-  });
-}
-
-/** Shield HP bar above the ship (world space). */
-function drawShieldHpBar(x, y, hp) {
-  const maxHp = SHIELD_MAX_HP;
-  const frac = Math.max(0, Math.min(1, (hp | 0) / maxHp));
-  const barW = 22 * RES_SCALE;
-  const barH = 2.2 * RES_SCALE;
-  const ox = x - barW * 0.5;
-  const oy = y - 20 * RES_SCALE;
-  const fillW = barW * frac;
-  const bg = [0.08, 0.12, 0.18];
-  const fill = frac > 0.35 ? [0.45, 0.85, 1.0] : [1.0, 0.55, 0.35];
-  drawThickSegment(ox, oy, ox + barW, oy, barH + 1.4, bg, 0.85);
-  if (fillW > 0.5) {
-    drawThickSegment(ox, oy, ox + fillW, oy, barH, fill, 0.95);
-  }
 }
 /** Match server turret projectile speed for visual lead aim. */
 const TURRET_VIS_SPEED = 8 * RES_SCALE;
@@ -12936,145 +12460,6 @@ function drawTurret3D(x, y, aimAng, color) {
       edgeW, color
     );
   }
-}
-
-/** Craft 136 repair drones — appear at ≤90% HP, stay until healed to 100%. */
-const FIXDRONE_SPRITE_ID = 'enemy_136';
-const FIXDRONE_COUNT = 1;
-const FIXDRONE_SCALE = 1 / 6;
-const FIXDRONE_HP_FRAC = 0.9;
-/** Spawn: this many px behind ship center. */
-const FIXDRONE_SPAWN_BACK = 35;
-/** Spawn: random lateral spread width (px) behind ship. */
-const FIXDRONE_SPAWN_WIDTH = 45;
-/** Chase ship pose from this many render frames ago. */
-const FIXDRONE_LAG_FRAMES = 5;
-/** Hide repair beam beyond this distance from the ship. */
-const FIXDRONE_BEAM_MAX_DIST = 64;
-/** Snap back to the ship beyond this distance. */
-const FIXDRONE_TELEPORT_DIST = 100;
-/** Beam end: ship position ± this many px each sim tick. */
-const FIXDRONE_BEAM_JITTER = 7;
-/** Repair beam alpha. */
-const FIXDRONE_BEAM_ALPHA = 0.7;
-/** ownerId → { repairing, spawned, x, y, trail, beamTick, aimX, aimY } */
-const fixdroneFx = new Map();
-
-function ownerCurrentHp(ownerId) {
-  if (ownerId === myId) return player.hp | 0;
-  const r = remotes.get(ownerId);
-  return r ? (r.hp | 0) : 0;
-}
-
-function drawFixBeamSeg(x0, y0, x1, y1, alpha) {
-  const a = Math.max(0, Math.min(1, alpha));
-  if (a < 0.02) return;
-  const col = COL.powerDrone;
-  const w = Math.max(1, Math.round(2.2 * RES_SCALE));
-  drawThickSegment(x0, y0, x1, y1, w, col, a, false);
-  drawThickSegment(x0, y0, x1, y1, Math.max(1, w - 1), col, a, true);
-  const mx = x1;
-  const my = y1;
-  drawThickSegment(mx - 1, my, mx + 1, my, 2, col, a, true);
-}
-
-function fixdroneSpawnBehind(st, x, y, cs, sn) {
-  const side = (Math.random() - 0.5) * FIXDRONE_SPAWN_WIDTH;
-  st.x = x - cs * FIXDRONE_SPAWN_BACK - sn * side;
-  st.y = y - sn * FIXDRONE_SPAWN_BACK + cs * side;
-  st.spawned = true;
-}
-
-function drawFixDrones(x, y, ownerId, shipAngle, dt) {
-  if (!ownerHasPowerup(ownerId, 'drone')) {
-    fixdroneFx.delete(ownerId);
-    return;
-  }
-  const hp = ownerCurrentHp(ownerId);
-  if (hp <= 0) {
-    fixdroneFx.delete(ownerId);
-    return;
-  }
-  let st = fixdroneFx.get(ownerId);
-  if (!st) {
-    st = { repairing: false, spawned: false, x: x, y: y, trail: [] };
-    fixdroneFx.set(ownerId, st);
-  }
-  const thresh = Math.floor(MAX_HP * FIXDRONE_HP_FRAC);
-  if (hp >= MAX_HP) st.repairing = false;
-  else if (hp <= thresh) st.repairing = true;
-  // While latched (90%→100%), keep drones out even above 90%.
-  if (!st.repairing) {
-    fixdroneFx.delete(ownerId);
-    return;
-  }
-
-  const ang = Number.isFinite(shipAngle) ? shipAngle : 0;
-  const cs = Math.cos(ang);
-  const sn = Math.sin(ang);
-  // Facing = (cs, sn); behind = (-cs, -sn); lateral = (-sn, cs).
-  if (!st.trail) st.trail = [];
-  st.trail.push({ x: x, y: y, angle: ang });
-  while (st.trail.length > FIXDRONE_LAG_FRAMES + 3) st.trail.shift();
-
-  if (!st.spawned) fixdroneSpawnBehind(st, x, y, cs, sn);
-
-  // Target = where the ship was ~5 frames ago (falls back to oldest / current).
-  const lagIdx = Math.max(0, st.trail.length - 1 - FIXDRONE_LAG_FRAMES);
-  const lag = st.trail[lagIdx] || { x: x, y: y };
-  const step = Math.max(0.001, dt || 0.016);
-  // Soft chase — keeps up without locking to the ship.
-  const k = 1 - Math.exp(-7.5 * step);
-  st.x += (lag.x - st.x) * k;
-  st.y += (lag.y - st.y) * k;
-
-  let dist = Math.hypot(st.x - x, st.y - y);
-  if (dist > FIXDRONE_TELEPORT_DIST) {
-    fixdroneSpawnBehind(st, x, y, cs, sn);
-    dist = Math.hypot(st.x - x, st.y - y);
-  }
-
-  if (st.beamTick !== syncTick) {
-    st.beamTick = syncTick;
-    st.aimX = x + (Math.random() * 2 - 1) * FIXDRONE_BEAM_JITTER;
-    st.aimY = y + (Math.random() * 2 - 1) * FIXDRONE_BEAM_JITTER;
-  }
-  const aimX = st.aimX;
-  const aimY = st.aimY;
-
-  const opt = getShipOptionById(FIXDRONE_SPRITE_ID);
-  const canSprite = !!(opt && opt.kind === 'sprite' && opt.sprite
-    && spriteShipTexById.get(opt.sprite.id)
-    && spriteShipTexById.get(opt.sprite.id).ready);
-
-  for (let i = 0; i < FIXDRONE_COUNT; i++) {
-    const dxPos = st.x;
-    const dyPos = st.y;
-    const face = Math.atan2(aimY - dyPos, aimX - dxPos);
-    const droneId = 910000 + ((ownerId | 0) * 8 + i);
-    if (canSprite) {
-      drawSpriteShipPlane(
-        dxPos, dyPos, face, 0, droneId, dt, opt, true, COL.powerDrone,
-        0.15, FIXDRONE_SCALE, COL.powerDrone,
-        { flat: false }
-      );
-    } else {
-      const r = 5 * RES_SCALE;
-      drawThickSegment(dxPos - r, dyPos, dxPos + r, dyPos, 2, COL.powerDrone, 0.9, true);
-      drawThickSegment(dxPos, dyPos - r, dxPos, dyPos + r, 2, COL.powerDrone, 0.9, true);
-    }
-    if (hp < MAX_HP && dist <= FIXDRONE_BEAM_MAX_DIST) {
-      drawFixBeamSeg(dxPos, dyPos, aimX, aimY, FIXDRONE_BEAM_ALPHA);
-    }
-  }
-}
-
-function drawShipPowerupFx(x, y, ownerId, shipAngle, dt) {
-  if (ownerHasPowerup(ownerId, 'shield')) {
-    drawShieldFx(x, y, shipAngle);
-    drawShieldHpBar(x, y, ownerShieldHp(ownerId));
-  }
-  drawFixDrones(x, y, ownerId, shipAngle, dt);
 }
 
 /** Bullet speed (px/tick) for the weapon currently held. */
@@ -13504,11 +12889,6 @@ function showScoreBoard(opts) {
 function drawPickup(u) {
   // Health never blinks / expires; everything else pulses alpha 1 ↔ 0.7 (never vanishes).
   const blinkA = pickupBlinkAlpha(u);
-  if (u.kind === 'powerup') {
-    const p = pickupAt(u);
-    drawPowerupPickup(u, p.x, p.y, p.angle, null, blinkA);
-    return;
-  }
   const p = pickupAt(u);
   drawPickupBox3D(p.x, p.y, p.angle, pickupFrameIndex(u), u.id, blinkA);
 }
@@ -13687,6 +13067,30 @@ function applyCampaignFuelsMsg(fuels) {
   syncCampaignFuelHud();
 }
 const waitBannerEl = document.getElementById('wait-banner');
+const loadoutHudEl = document.getElementById('loadout-hud');
+const loadoutZNameEl = document.getElementById('loadout-z-name');
+const loadoutXNameEl = document.getElementById('loadout-x-name');
+
+/** [Z]/[X] loadout readout, top-left — lets the player see what's actually equipped. */
+function updateLoadoutHud() {
+  if (!loadoutHudEl) return;
+  const show = inGame && !campaignMapOpen;
+  loadoutHudEl.classList.toggle('hidden', !show);
+  if (!show) return;
+  if (loadoutZNameEl) {
+    const zName = currentWeaponName() || 'default';
+    const zLvl = getLocalWeaponLevel(zName);
+    loadoutZNameEl.textContent = shopItemLabel(zName) + (zLvl > 1 ? ' L' + zLvl : '');
+  }
+  if (loadoutXNameEl) {
+    if (equippedWeapon2) {
+      const xLvl = getLocalWeaponLevel(equippedWeapon2);
+      loadoutXNameEl.textContent = shopItemLabel(equippedWeapon2) + (xLvl > 1 ? ' L' + xLvl : '');
+    } else {
+      loadoutXNameEl.textContent = '—';
+    }
+  }
+}
 const soloOverEl = document.getElementById('solo-over');
 const soloOverWaveEl = document.getElementById('solo-over-wave');
 const soloOverScoreEl = document.getElementById('solo-over-score');
@@ -13695,6 +13099,46 @@ const soloMenuBtn = document.getElementById('solo-menu-btn');
 let practiceMode = false;
 let soloOverOpen = false;
 let soloShopOpen = false;
+
+const FIRST_HELP_SEEN_KEY = 'asteroids_seen_help_v1';
+const firstHelpEl = document.getElementById('first-help');
+const fhDismissBtn = document.getElementById('fh-dismiss-btn');
+
+/** First-ever game entry (solo / coop / matchmaking wait): one-shot control tip. */
+function maybeShowFirstHelp() {
+  if (!firstHelpEl) return;
+  let seen = false;
+  try { seen = !!localStorage.getItem(FIRST_HELP_SEEN_KEY); } catch (_) { /* ignore */ }
+  if (seen) return;
+  if (!matchPaused) {
+    matchPaused = true;
+    pauseFreezeAt = serverNow();
+    rebaseAsteroidsToTime(pauseFreezeAt);
+    rebasePickupsToTime(pauseFreezeAt);
+    player.vx = 0;
+    player.vy = 0;
+    player.av = 0;
+    softErr.x = 0; softErr.y = 0; softErr.angle = 0;
+    localShoot.bursting = false;
+    localShoot.railChargeLeft = 0;
+    syncThrustSfx(false);
+    syncLaserSfx(false);
+    stopAllRailChargeSfx();
+  }
+  firstHelpEl.classList.add('show');
+  firstHelpEl.setAttribute('aria-hidden', 'false');
+}
+
+function closeFirstHelp() {
+  if (!firstHelpEl || !firstHelpEl.classList.contains('show')) return;
+  firstHelpEl.classList.remove('show');
+  firstHelpEl.setAttribute('aria-hidden', 'true');
+  matchPaused = false;
+  pauseFreezeAt = 0;
+  try { localStorage.setItem(FIRST_HELP_SEEN_KEY, '1'); } catch (_) { /* ignore */ }
+}
+
+if (fhDismissBtn) fhDismissBtn.addEventListener('click', (e) => { e.preventDefault(); closeFirstHelp(); });
 
 function clearLocalAllGodmode() {
   player.godLeft = 0;
@@ -13780,28 +13224,32 @@ const ssCoinsEl = document.getElementById('ss-coins');
 const ssScoreEl = document.getElementById('ss-score');
 const ssLivesEl = document.getElementById('ss-lives');
 const ssVitalEl = document.getElementById('ss-vital');
-const ssEquippedEl = document.getElementById('ss-equipped');
-const ssOwnedPowerupsEl = document.getElementById('ss-owned-powerups');
 const ssWeaponsEl = document.getElementById('ss-weapons');
-const ssPowerupsEl = document.getElementById('ss-powerups');
 const ssContinueBtn = document.getElementById('ss-continue-btn');
 
 function shopItemLabel(name) {
   if (!name) return '';
   if (name === 'voidcannon') return 'Void Cannon';
   if (name === 'asteroidgun') return 'Meteor Gun';
-  if (name === 'drone') return 'Fixing Drone';
   return String(name).replace(/_/g, ' ');
 }
 
-/** Price label for shop buttons (UI only — credits). */
+/** Price label for the shop's upper-right price badge (UI only — credits). */
 function shopCreditPrice(n) {
-  return (n | 0) + ' cr';
+  return '$' + (n | 0);
 }
 
-function shopWeaponCostClient(unlocked, levels, name, current) {
-  if (!unlocked || !unlocked[name] || current !== name) return 800;
-  const lvl = Math.max(1, (levels && levels[name]) | 0 || 1);
+/** Mirrors server classifyWeaponAcquire: which gun slot (Z=1 / X=2) picking up `name` affects. */
+function classifyWeaponAcquireClient(st, name) {
+  if (st.weapon === name) return { kind: 'upgrade', slot: 1 };
+  if (st.weapon2 === name) return { kind: 'upgrade', slot: 2 };
+  return { kind: st.weapon2 ? 'replace' : 'mount', slot: st.weapon2 ? 1 : 2 };
+}
+
+function shopWeaponCostClient(st, name) {
+  const info = classifyWeaponAcquireClient(st, name);
+  if (info.kind !== 'upgrade') return 800;
+  const lvl = Math.max(1, (st.levels && st.levels[name]) | 0 || 1);
   if (lvl >= WEAPON_MAX_LEVEL) return -1;
   return 800 + 200 * (lvl + 1);
 }
@@ -13815,16 +13263,6 @@ function attachShopPreview(row, kind, name, seedId, opts) {
   const ctx = c.getContext('2d');
   row.appendChild(c);
   shopPreviewSlots.push({ canvas: c, ctx, kind, name, id: seedId | 0, big });
-  return c;
-}
-
-function attachShopChipPreview(chip, name, seedId) {
-  const c = document.createElement('canvas');
-  c.width = 64;
-  c.height = 64;
-  const ctx = c.getContext('2d');
-  chip.appendChild(c);
-  shopPreviewSlots.push({ canvas: c, ctx, kind: 'powerup', name, id: seedId | 0 });
   return c;
 }
 
@@ -13859,14 +13297,10 @@ function updateShopPreviews() {
       const cy = logic * 0.5;
       const fb = clearShopPreviewRegion(logic);
       _shopVisScale = slot.big ? SHOP_EQUIPPED_PREV_SCALE : SHOP_PREV_SCALE;
-      if (slot.kind === 'powerup') {
-        drawPowerupPickup({ powerup: slot.name, id: slot.id }, cx, cy, 0, 1);
-      } else {
-        const frame = slot.kind === 'health'
-          ? PICKUP_FRAME.health
-          : (PICKUP_FRAME[slot.name] != null ? PICKUP_FRAME[slot.name] : PICKUP_FRAME.default);
-        drawPickupBox3D(cx, cy, 0, frame, slot.id);
-      }
+      const frame = slot.kind === 'health'
+        ? PICKUP_FRAME.health
+        : (PICKUP_FRAME[slot.name] != null ? PICKUP_FRAME[slot.name] : PICKUP_FRAME.default);
+      drawPickupBox3D(cx, cy, 0, frame, slot.id);
       blitShopPreview(slot, fb);
     }
   } finally {
@@ -13883,197 +13317,205 @@ function applyShopState(st) {
   };
   const unlocked = Object.assign({}, blankUnlock, st.unlocked || {});
   const cur = (st.weapon || currentWeaponName() || 'default');
-  for (const k of Object.keys(unlocked)) unlocked[k] = k === cur;
-  unlocked[cur] = true;
+  const cur2 = st.weapon2 !== undefined ? (st.weapon2 || null) : equippedWeapon2;
   soloShopState = {
     wave: st.wave != null ? (st.wave | 0) : keepWave,
     coins: st.coins | 0,
     score: st.score != null ? (st.score | 0) : localScore,
     lives: st.lives | 0,
     weapon: cur,
+    weapon2: cur2,
     levels: Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, st.levels || {}),
-    unlocked,
-    powerups: Object.assign(freshPowerups(), st.powerups || {})
+    unlocked
   };
   setLocalCoins(soloShopState.coins);
   if (st.score != null) setLocalScore(st.score);
   setSoloLives(soloShopState.lives);
   weaponLevels = Object.assign({}, soloShopState.levels);
   unlockedWeapons = Object.assign({}, blankUnlock, unlocked);
-  player.powerups = Object.assign(freshPowerups(), soloShopState.powerups);
+  equippedWeapon2 = cur2;
   renderSoloShop();
 }
+
+/** Keyboard/gamepad-style nav over the shop: rows of {el, activate()} items. */
+let shopFocusGrid = [];
+let shopFocusRow = 0;
+let shopFocusCol = 0;
 
 function renderSoloShop() {
   const st = soloShopState;
   if (!st) return;
   shopPreviewSlots = [];
+  shopFocusGrid = [];
   if (ssWaveEl) ssWaveEl.textContent = String(st.wave);
   if (ssCoinsEl) ssCoinsEl.textContent = String(st.coins);
   if (ssScoreEl) ssScoreEl.textContent = String(st.score != null ? st.score : localScore);
   if (ssLivesEl) ssLivesEl.textContent = String(st.lives);
 
   const cur = st.weapon || currentWeaponName() || 'default';
-  const curLvl = Math.max(1, (st.levels[cur] | 0) || 1);
-  const upgradeCost = shopWeaponCostClient(st.unlocked, st.levels, cur, cur);
-
-  if (ssEquippedEl) {
-    ssEquippedEl.innerHTML = '';
-    attachShopPreview(ssEquippedEl, 'weapon', cur, 1001, { big: true });
-    const info = document.createElement('div');
-    info.className = 'ss-equipped-info';
-    info.innerHTML = '<div class="ss-equipped-label">LOADOUT</div>'
-      + '<div class="ss-equipped-name">' + shopItemLabel(cur) + '</div>'
-      + '<div class="ss-equipped-lvl">LV ' + curLvl
-      + (curLvl >= WEAPON_MAX_LEVEL ? ' · MAX' : '') + '</div>';
-    ssEquippedEl.appendChild(info);
-    const upBtn = document.createElement('button');
-    upBtn.type = 'button';
-    if (upgradeCost < 0) {
-      upBtn.textContent = 'MAX';
-      upBtn.disabled = true;
-    } else {
-      upBtn.innerHTML = 'UPGRADE<br>' + shopCreditPrice(upgradeCost);
-      upBtn.disabled = st.coins < upgradeCost;
-      upBtn.addEventListener('click', () => sendShopBuy('weapon', cur));
-    }
-    ssEquippedEl.appendChild(upBtn);
-  }
-
-  if (ssOwnedPowerupsEl) {
-    ssOwnedPowerupsEl.innerHTML = '';
-    const label = document.createElement('span');
-    label.className = 'ss-owned-pu-label';
-    label.textContent = 'PACK';
-    ssOwnedPowerupsEl.appendChild(label);
-    let any = false;
-    for (let i = 0; i < POWERUP_TYPES.length; i++) {
-      const name = POWERUP_TYPES[i];
-      if (!(st.powerups && st.powerups[name])) continue;
-      any = true;
-      const chip = document.createElement('span');
-      chip.className = 'ss-owned-chip';
-      chip.title = shopItemLabel(name);
-      attachShopChipPreview(chip, name, 2100 + i);
-      ssOwnedPowerupsEl.appendChild(chip);
-    }
-    if (!any) {
-      const empty = document.createElement('span');
-      empty.className = 'ss-owned-empty';
-      empty.textContent = 'EMPTY';
-      ssOwnedPowerupsEl.appendChild(empty);
-    }
-  }
-
-  if (ssWeaponsEl) {
-    ssWeaponsEl.innerHTML = '';
-    for (let i = 0; i < WEAPON_NAMES.length; i++) {
-      const name = WEAPON_NAMES[i];
-      // Equipped gun is upgraded from the loadout row — keep catalog anonymous.
-      if (name === cur) continue;
-      const cost = 800;
-      const row = document.createElement('div');
-      row.className = 'ss-row';
-      attachShopPreview(row, 'weapon', name, 1100 + i);
-      const left = document.createElement('div');
-      left.innerHTML = '<div class="ss-name">' + shopItemLabel(name) + '</div>';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.textContent = shopCreditPrice(cost);
-      btn.disabled = st.coins < cost;
-      btn.addEventListener('click', () => sendShopBuy('weapon', name));
-      row.appendChild(left);
-      row.appendChild(btn);
-      ssWeaponsEl.appendChild(row);
-    }
-  }
-
-  if (ssPowerupsEl) {
-    ssPowerupsEl.innerHTML = '';
-    // Damage / turret / reload removed — vitals hold shield + drone.
-  }
+  const cur2 = st.weapon2 || null;
 
   if (ssVitalEl) {
     ssVitalEl.innerHTML = '';
+    const vitalsRow = [];
 
+    const fullHp = (player.hp | 0) >= MAX_HP;
     const hpRow = document.createElement('div');
     hpRow.className = 'ss-row';
     attachShopPreview(hpRow, 'health', 'health', 3301);
-    const hpLeft = document.createElement('div');
-    const fullHp = (player.hp | 0) >= MAX_HP;
-    hpLeft.innerHTML = '<div class="ss-name">FULL HP</div>';
-    const hpBtn = document.createElement('button');
-    hpBtn.type = 'button';
+    const hpName = document.createElement('div');
+    hpName.className = 'ss-name';
+    hpName.textContent = 'FULL HP';
+    hpRow.appendChild(hpName);
+    const hpPrice = document.createElement('div');
+    hpPrice.className = 'ss-price';
     if (fullHp) {
-      hpBtn.textContent = 'MAX HP';
-      hpBtn.disabled = true;
+      hpPrice.textContent = 'MAX';
       hpRow.classList.add('ss-owned');
     } else {
-      hpBtn.textContent = shopCreditPrice(400);
-      hpBtn.disabled = st.coins < 400;
-      hpBtn.addEventListener('click', () => sendShopBuy('health', ''));
+      hpPrice.textContent = shopCreditPrice(400);
+      if (st.coins < 400) hpRow.classList.add('ss-owned');
+      else {
+        const buy = () => sendShopBuy('health', '');
+        hpRow.addEventListener('click', buy);
+        vitalsRow.push({ el: hpRow, activate: () => buy() });
+      }
     }
-    hpRow.appendChild(hpLeft);
-    hpRow.appendChild(hpBtn);
+    hpRow.appendChild(hpPrice);
     ssVitalEl.appendChild(hpRow);
 
     const lifeRow = document.createElement('div');
     lifeRow.className = 'ss-row';
     attachShopPreview(lifeRow, 'health', 'health', 3302);
-    const lifeLeft = document.createElement('div');
-    lifeLeft.innerHTML = '<div class="ss-name">+1 LIFE</div>';
-    const lifeBtn = document.createElement('button');
-    lifeBtn.type = 'button';
-    lifeBtn.textContent = shopCreditPrice(2400);
-    lifeBtn.disabled = st.coins < 2400;
-    lifeBtn.addEventListener('click', () => sendShopBuy('life', ''));
-    lifeRow.appendChild(lifeLeft);
-    lifeRow.appendChild(lifeBtn);
+    const lifeName = document.createElement('div');
+    lifeName.className = 'ss-name';
+    lifeName.textContent = '+1 LIFE';
+    lifeRow.appendChild(lifeName);
+    const lifePrice = document.createElement('div');
+    lifePrice.className = 'ss-price';
+    lifePrice.textContent = shopCreditPrice(2400);
+    if (st.coins < 2400) lifeRow.classList.add('ss-owned');
+    else {
+      const buy = () => sendShopBuy('life', '');
+      lifeRow.addEventListener('click', buy);
+      vitalsRow.push({ el: lifeRow, activate: () => buy() });
+    }
+    lifeRow.appendChild(lifePrice);
     ssVitalEl.appendChild(lifeRow);
 
-    const vitalPowerups = ['shield', 'drone'];
-    for (let i = 0; i < vitalPowerups.length; i++) {
-      const name = vitalPowerups[i];
-      const owned = !!(st.powerups && st.powerups[name]);
-      const row = document.createElement('div');
-      row.className = 'ss-row' + (owned ? ' ss-owned' : '');
-      attachShopPreview(row, 'powerup', name, 3303 + i);
-      const left = document.createElement('div');
-      left.innerHTML = '<div class="ss-name">' + shopItemLabel(name) + '</div>';
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      if (owned) {
-        btn.textContent = 'GOT IT';
-        btn.disabled = true;
-      } else {
-        btn.textContent = shopCreditPrice(1000);
-        btn.disabled = st.coins < 1000;
-        btn.addEventListener('click', () => sendShopBuy('powerup', name));
-      }
-      row.appendChild(left);
-      row.appendChild(btn);
-      ssVitalEl.appendChild(row);
-    }
+    if (vitalsRow.length) shopFocusGrid.push(vitalsRow);
   }
+
+  if (ssWeaponsEl) {
+    ssWeaponsEl.innerHTML = '';
+    let weaponRow = [];
+    for (let i = 0; i < WEAPON_NAMES.length; i++) {
+      const name = WEAPON_NAMES[i];
+      const slotHere = name === cur ? 1 : (name === cur2 ? 2 : 0);
+      const isCur = slotHere !== 0;
+      const cost = shopWeaponCostClient(st, name);
+      const row = document.createElement('div');
+      row.className = 'ss-row' + (isCur ? ' ss-current' : '');
+      attachShopPreview(row, 'weapon', name, 1100 + i);
+      const nameEl = document.createElement('div');
+      nameEl.className = 'ss-name';
+      nameEl.textContent = shopItemLabel(name);
+      row.appendChild(nameEl);
+      if (isCur) {
+        const lvl = Math.max(1, (st.levels[name] | 0) || 1);
+        const lvlEl = document.createElement('div');
+        lvlEl.className = 'ss-lvl';
+        lvlEl.textContent = (slotHere === 1 ? 'Z' : 'X') + ' · LVL ' + lvl;
+        row.appendChild(lvlEl);
+      }
+      const price = document.createElement('div');
+      price.className = 'ss-price';
+      if (cost < 0) {
+        price.textContent = 'MAX';
+        row.classList.add('ss-owned');
+      } else {
+        price.textContent = shopCreditPrice(cost);
+        if (st.coins < cost) row.classList.add('ss-owned');
+        else {
+          // Mouse click defaults to Z (slot 1); keyboard Z/X pick the slot explicitly.
+          row.addEventListener('click', () => sendShopBuy('weapon', name, 1));
+          weaponRow.push({
+            el: row,
+            activate: (key) => sendShopBuy('weapon', name, key === 'x' ? 2 : 1)
+          });
+        }
+      }
+      row.appendChild(price);
+      ssWeaponsEl.appendChild(row);
+      // 5 columns per visual row (desktop grid) — start a new focus row every 5 items.
+      if ((i + 1) % 5 === 0) {
+        if (weaponRow.length) shopFocusGrid.push(weaponRow);
+        weaponRow = [];
+      }
+    }
+    if (weaponRow.length) shopFocusGrid.push(weaponRow);
+  }
+
+  if (ssContinueBtn && !ssContinueBtn.disabled) {
+    shopFocusGrid.push([{ el: ssContinueBtn, activate: closeSoloShopContinue }]);
+  }
+  shopApplyFocusHighlight();
 }
 
-function sendShopBuy(item, name) {
+function shopFocusClamp() {
+  if (!shopFocusGrid.length) { shopFocusRow = 0; shopFocusCol = 0; return; }
+  shopFocusRow = Math.max(0, Math.min(shopFocusGrid.length - 1, shopFocusRow));
+  const row = shopFocusGrid[shopFocusRow];
+  shopFocusCol = Math.max(0, Math.min(row.length - 1, shopFocusCol));
+}
+
+function shopApplyFocusHighlight() {
+  document.querySelectorAll('#solo-shop .ss-focus').forEach((el) => el.classList.remove('ss-focus'));
+  shopFocusClamp();
+  const row = shopFocusGrid[shopFocusRow];
+  const item = row && row[shopFocusCol];
+  if (item) item.el.classList.add('ss-focus');
+}
+
+function shopMoveFocus(dr, dc) {
+  if (!shopFocusGrid.length) return;
+  if (dc !== 0) {
+    const row = shopFocusGrid[shopFocusRow];
+    shopFocusCol = Math.max(0, Math.min(row.length - 1, shopFocusCol + dc));
+  }
+  if (dr !== 0) {
+    shopFocusRow = Math.max(0, Math.min(shopFocusGrid.length - 1, shopFocusRow + dr));
+    const row = shopFocusGrid[shopFocusRow];
+    shopFocusCol = Math.max(0, Math.min(row.length - 1, shopFocusCol));
+  }
+  shopApplyFocusHighlight();
+}
+
+function shopActivateFocus(key) {
+  const row = shopFocusGrid[shopFocusRow];
+  const item = row && row[shopFocusCol];
+  if (item) item.activate(key);
+}
+
+function sendShopBuy(item, name, slot) {
   if (!ws || ws.readyState !== 1 || !soloShopOpen) return;
-  ws.send(JSON.stringify({ t: 'shopBuy', item, name }));
+  ws.send(JSON.stringify({ t: 'shopBuy', item, name, slot: slot === 2 ? 2 : 1 }));
 }
 
 function showSoloShop(st) {
   soloShopOpen = true;
+  shopFocusRow = 0;
+  shopFocusCol = 0;
   pvpShopMode = !!(st && st.pvp);
   player.vx = 0;
   player.vy = 0;
   player.av = 0;
   if (st && st.shopTimeLeft != null) pvpShopTimeLeft = st.shopTimeLeft | 0;
-  applyShopState(st);
   if (ssContinueBtn) {
-    ssContinueBtn.textContent = pvpShopMode ? 'CLOSE SHOP' : 'START WAVE';
+    ssContinueBtn.textContent = pvpShopMode ? 'CLOSE SHOP [ENTER]' : 'START WAVE [ENTER]';
     ssContinueBtn.disabled = false;
   }
+  applyShopState(st);
   if (soloShopEl) {
     soloShopEl.classList.add('show');
     soloShopEl.setAttribute('aria-hidden', 'false');
@@ -14087,7 +13529,7 @@ function hideSoloShop() {
   soloShopState = null;
   shopPreviewSlots = [];
   if (ssContinueBtn) {
-    ssContinueBtn.textContent = 'START WAVE';
+    ssContinueBtn.textContent = 'START WAVE [ENTER]';
     ssContinueBtn.disabled = false;
   }
   if (soloShopEl) {
@@ -16062,8 +15504,7 @@ function pushRemoteSample(id, row, st) {
     angle: row[5],
     hp: row[6],
     av,
-    godLeft: row[10] != null ? (row[10] | 0) : 0,
-    powerups: (remotes.get(id) && remotes.get(id).powerups) || freshPowerups()
+    godLeft: row[10] != null ? (row[10] | 0) : 0
   });
 }
 
@@ -16365,7 +15806,7 @@ function applyWorldSyncMsg(msg) {
   if (msg.enemies) {
     enemies.clear();
     clearAllEnemyCharges();
-    for (const row of msg.enemies) addEnemy(unpackEnemy(row));
+    for (const row of msg.enemies) addEnemy(unpackEnemy(row), true);
   }
   predReady = true;
   updateHud();
@@ -16413,6 +15854,7 @@ function fmtGameTime(sec) {
 }
 
 function updateHud() {
+  updateLoadoutHud();
   if (!inGame || !myId) {
     statusEl.textContent = '';
     statusEl.classList.add('hidden');
@@ -16731,7 +16173,7 @@ function applyResumedMsg(msg) {
   if (msg.enemies) {
     enemies.clear();
     clearAllEnemyCharges();
-    for (const row of msg.enemies) addEnemy(unpackEnemy(row));
+    for (const row of msg.enemies) addEnemy(unpackEnemy(row), true);
   }
   clearMatchPause();
   updateHud();
@@ -16845,12 +16287,12 @@ function resetMatchState() {
   wormLaserDbg.length = 0;
   localLaserClip = null;
   selectedWeapon = 1;
+  equippedWeapon2 = null;
   weaponLevels = { default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 };
   unlockedWeapons = {
     default: true, rocket: false, laser: false, shotgun: false,
     railgun: false, plasma: false, voidcannon: false, asteroidgun: false
   };
-  player.powerups = freshPowerups();
   hideSoloShop();
   resetLocalShoot('default');
   clearParticles();
@@ -17368,9 +16810,16 @@ function addLaser(row, hitKind, weaponName, rays) {
     }
     if (wormLaserDbg.length > 36) wormLaserDbg.splice(0, wormLaserDbg.length - 36);
   }
-  // Own laser beam is 100% local (ship pose + clip timer). Remotes use server segment.
-  if (owner && owner !== (myId | 0)) {
-    const linger = wpn === 'wormLaser'
+  // Own slot-1 (Z) laser beam is 100% local (ship pose + clip timer, see localLaserClip).
+  // Slot-2 (X) has no local prediction, so its own shots draw from the server segment too,
+  // same as remotes — otherwise the beam never renders on your own screen.
+  const isOwnSlot1Laser = (owner | 0) === (myId | 0) && wpn === currentWeaponName();
+  const isOwnShot = (owner | 0) === (myId | 0);
+  if (owner && !isOwnSlot1Laser) {
+    // Own shots (slot 2 / X) get every 'lf' reliably — no need for the generous
+    // network-jitter linger remotes get; a short bridge just covers inter-tick gaps
+    // so the beam actually disappears right after the burst ends instead of hanging.
+    const linger = wpn === 'wormLaser' || isOwnShot
       ? Math.round(1000 / TPS) * 2
       : LASER_CLIP_MS + LASER_LINGER_MS;
     remoteLasers.set(owner, {
@@ -18308,9 +17757,38 @@ function unpackEnemy(row) {
   };
 }
 
-function addEnemy(e) {
+function addEnemy(e, silent) {
+  const isNew = !enemies.has(e.id);
   rebaseEnemyPredictOrigin(e);
   enemies.set(e.id, e);
+  if (isNew && !silent) splatEnemySpawnFluid(e);
+}
+
+/** Enemy spawn → colored burst on the fluid background (no-op unless fluid mode is on). */
+function splatEnemySpawnFluid(e) {
+  if (bgMode !== 'fluid' || !window.WebGLFluidBG) return;
+  const ux = e.x / canvas.width;
+  const uy = 1 - e.y / canvas.height;
+  const col = enemyThrustColor(e.kind);
+  WebGLFluidBG.burstSplat(ux, uy, { r: col[0] * 2.2, g: col[1] * 2.2, b: col[2] * 2.2 });
+}
+
+const FLUID_ASTEROID_STIR_INTERVAL_MS = 90;
+
+/** Asteroid motion pushes the fluid around it (velocity only, no dye/color) — a moving
+ *  rock visibly stirs the background without leaving a colored trail behind it. */
+function stirAsteroidFluid(a, x, y) {
+  if (bgMode !== 'fluid' || !window.WebGLFluidBG) return;
+  const now = performance.now();
+  if (a._fluidStirAt && now < a._fluidStirAt) return;
+  a._fluidStirAt = now + FLUID_ASTEROID_STIR_INTERVAL_MS;
+  const spd = Math.hypot(a.vx || 0, a.vy || 0);
+  if (spd < 0.01) return;
+  const ux = x / canvas.width;
+  const uy = 1 - y / canvas.height;
+  const force = Math.min(600, spd * TPS * 0.6);
+  const radiusScale = 2 + (a.r || 16) / 16;
+  WebGLFluidBG.stirVelocity(ux, uy, (a.vx / spd) * force, -(a.vy / spd) * force, radiusScale);
 }
 
 /**
@@ -20111,6 +19589,18 @@ function pushCoinGlowQuad(w, cx, cy, rad, r, g, b, a) {
   return pushCoinTri(w, x0, y0, x2, y2, x3, y3, r, g, b, a);
 }
 
+/** Local tumble rotation (roll → pitch → yaw), orthographic — same convention as projectAsteroidMesh3D. */
+function tumbleRotateLocal(x, y, z, cyaw, syaw, cp, sp, cr, sr) {
+  const x1 = x * cr + z * sr;
+  const z1 = -x * sr + z * cr;
+  const y2 = y * cp - z1 * sp;
+  const z2 = y * sp + z1 * cp;
+  const wx = x1 * cyaw - y2 * syaw;
+  const wy = x1 * syaw + y2 * cyaw;
+  const wz = z2;
+  return { wx, wy, wz };
+}
+
 function projectCoinOre(verts, cx, cy, scale, yaw, pitch, roll, outXY, outDepth) {
   const cyaw = Math.cos(yaw), syaw = Math.sin(yaw);
   const cp = Math.cos(pitch), sp = Math.sin(pitch);
@@ -20507,15 +19997,9 @@ function unpackPickup(row) {
   const code = row[7] | 0;
   let kind = 'weapon';
   let weapon = 'default';
-  let powerup = null;
   // 99 = health. Do not treat 7 as health — that is voidcannon (WEAPON_NAMES[6] + 1).
   if (code === 99) kind = 'health';
-  else if (code >= PICKUP_CODE_POWERUP_BASE) {
-    kind = 'powerup';
-    powerup = POWERUP_TYPES[code - PICKUP_CODE_POWERUP_BASE] || 'damage';
-  } else {
-    weapon = WEAPON_NAMES[code - 1] || 'default';
-  }
+  else weapon = WEAPON_NAMES[code - 1] || 'default';
   return {
     id: row[0],
     spawnX: row[1],
@@ -20526,7 +20010,6 @@ function unpackPickup(row) {
     spin: row[6],
     kind,
     weapon,
-    powerup,
     r: PICKUP_R,
     spawnSt: row[8],
     bounces: row[9] | 0
@@ -21210,6 +20693,7 @@ function getInput() {
     r: turnRight() ? 1 : 0,
     u: thrustUp() ? 1 : 0,
     sp: shootPulse ? 1 : 0,
+    sp2: shoot2Held() ? 1 : 0,
     sh: precisionTurn() ? 1 : 0,
     j
   };
@@ -21236,7 +20720,7 @@ function sendPendingInputs() {
   ws.send(JSON.stringify({
     t: 'in',
     frames: frames.map(f => ({
-      seq: f.seq, l: f.l, r: f.r, u: f.u, sp: f.sp, sh: f.sh, j: f.j | 0
+      seq: f.seq, l: f.l, r: f.r, u: f.u, sp: f.sp, sp2: f.sp2, sh: f.sh, j: f.j | 0
     }))
   }));
   const sentHi = frames[frames.length - 1].seq;
@@ -21280,7 +20764,7 @@ function predictTick(forceShoot) {
       player.av = 0;
     }
     // Keep seq advancing so we don't desync, but don't move/shoot locally.
-    const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sh: 0 };
+    const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sp2: 0, sh: 0 };
     pendingInputs.push(frame);
     shedPendingInputHistory();
     rememberFrame(frame);
@@ -21297,7 +20781,7 @@ function predictTick(forceShoot) {
 
   // PvP intro / 3-2-1 / shop / campaign map: do not locally predict movement.
   if (!matchLive || (preRoundCd | 0) > 0 || (soloShopOpen && pvpShopMode) || campaignMapOpen) {
-    const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sh: 0, j: 0 };
+    const frame = { seq: ++inputSeq, l: 0, r: 0, u: 0, sp: 0, sp2: 0, sh: 0, j: 0 };
     pendingInputs.push(frame);
     shedPendingInputHistory();
     rememberFrame(frame);
@@ -21322,7 +20806,7 @@ function predictTick(forceShoot) {
     }
     const inp = getInput();
     if (forceShoot) inp.sp = 1;
-    const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh, j: inp.j | 0 };
+    const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sp2: inp.sp2, sh: inp.sh, j: inp.j | 0 };
     pendingInputs.push(frame);
     shedPendingInputHistory();
     rememberFrame(frame);
@@ -21348,7 +20832,7 @@ function predictTick(forceShoot) {
   }
   const inp = getInput();
   if (forceShoot) inp.sp = 1;
-  const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sh: inp.sh, j: inp.j | 0 };
+  const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sp2: inp.sp2, sh: inp.sh, j: inp.j | 0 };
   pendingInputs.push(frame);
   shedPendingInputHistory();
   rememberFrame(frame);
@@ -22123,7 +21607,10 @@ function renderBullets() {
 
 function render() {
   gl.viewport(0, 0, canvas.width, canvas.height);
-  if (nightModeActive()) gl.clearColor(0, 0, 0, 1);
+  if (bgMode === 'fluid') {
+    // Transparent clear — the fluid-sim canvas sits behind #c and shows through the gap.
+    gl.clearColor(0, 0, 0, 0);
+  } else if (nightModeActive()) gl.clearColor(0, 0, 0, 1);
   else gl.clearColor(BG_CLEAR[0], BG_CLEAR[1], BG_CLEAR[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
   try { gl.lineWidth(Math.max(1, getRenderScale())); } catch (_) { gl.lineWidth(1); }
@@ -22136,7 +21623,7 @@ function render() {
     drawCampaignMapGL(nowBg);
     return;
   }
-  drawSynthGrid(nowBg);
+  if (bgMode !== 'fluid') drawSynthGrid(nowBg);
   if (!inGame) {
     syncThrustSfx(false);
     syncLaserSfx(false);
@@ -22172,6 +21659,7 @@ function render() {
     if (thrusting) emitThrustFx(me.x, me.y, me.angle, me.vx, me.vy, myId, ownerThrustColor(myId), meleeOn);
     else emitThrustIdleFx(me.x, me.y, me.angle, me.vx, me.vy, myId, ownerThrustColor(myId));
     tickThrustGrid(thrusting, me.x, me.y, me.angle);
+    tickThrustFluid(thrusting, me.x, me.y, me.angle, ownerPlayerColor(myId) || COL.self, myId || 'local');
     thrustAlignPrevX = me.x;
     thrustAlignPrevY = me.y;
     emitShipDamageSmoke(myId || 0, me.x, me.y, me.angle, me.vx, me.vy, me.hp);
@@ -22190,10 +21678,12 @@ function render() {
     if (!deathSpectating && !matchPaused) {
       if (thrusting) emitThrustFx(v.x, v.y, v.angle, v.vx, v.vy, r.id, ownerThrustColor(r.id), meleeOn);
       else emitThrustIdleFx(v.x, v.y, v.angle, v.vx, v.vy, r.id, ownerThrustColor(r.id));
+      tickThrustFluid(thrusting, v.x, v.y, v.angle, ownerPlayerColor(r.id), r.id);
     }
     if (!deathSpectating && !matchPaused) emitShipDamageSmoke(v.id, v.x, v.y, v.angle, v.vx, v.vy, v.hp);
   }
   emitEnemyThrustFx();
+  emitEnemyThrustFluid();
   emitEnemyDamageSmoke();
   updateParticles(dt);
   updateDeathRings(now);
@@ -22535,6 +22025,7 @@ function enterGameFromWelcome(msg) {
   wormLaserDbg.length = 0;
   localLaserClip = null;
   selectedWeapon = 1;
+  equippedWeapon2 = null;
   weaponLevels = { default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 };
   unlockedWeapons = {
     default: true, rocket: false, laser: false, shotgun: false,
@@ -22546,7 +22037,6 @@ function enterGameFromWelcome(msg) {
       railgun: true, plasma: true, voidcannon: true, asteroidgun: true
     };
   }
-  player.powerups = freshPowerups();
   hideSoloShop();
   resetLocalShoot('default');
   clearParticles();
@@ -22645,7 +22135,7 @@ function enterGameFromWelcome(msg) {
   if (msg.enemies) {
     enemies.clear();
     clearAllEnemyCharges();
-    for (const row of msg.enemies) addEnemy(unpackEnemy(row));
+    for (const row of msg.enemies) addEnemy(unpackEnemy(row), true);
   }
   if (msg.pickups) {
     for (const row of msg.pickups) addPickup(unpackPickup(row));
@@ -22665,14 +22155,6 @@ function enterGameFromWelcome(msg) {
   if (isOfflineLocalPlay()) syncStPerf = performance.now();
   if (msg.you) reconcileFromServer(msg.you);
   applyRemotePlayers(msg.players, syncSt);
-  if (msg.powerupsByPlayer) {
-    for (const id of Object.keys(msg.powerupsByPlayer)) {
-      applyPowerupsState(id | 0, msg.powerupsByPlayer[id]);
-    }
-  }
-  player.powerups = (msg.powerupsByPlayer && msg.powerupsByPlayer[myId])
-    ? Object.assign(freshPowerups(), msg.powerupsByPlayer[myId])
-    : freshPowerups();
   if ((player.godLeft | 0) > 0) emitGodmodeStartFx(player.x, player.y);
   hideMenu();
   hideSoloOverScreen();
@@ -22711,6 +22193,7 @@ function enterGameFromWelcome(msg) {
     playMatchMusic();
     hideMatchIntro(true);
   }
+  maybeShowFirstHelp();
 }
 
 function returnToLobby() {
@@ -23198,7 +22681,7 @@ function handleWsMessage(e) {
     if (msg.t === 'wave' && inGame) {
       hideSoloShop();
       if (ssContinueBtn) {
-        ssContinueBtn.textContent = 'START WAVE';
+        ssContinueBtn.textContent = 'START WAVE [ENTER]';
         ssContinueBtn.disabled = false;
       }
       // Drop leftover projectiles/FX. Keep all pickups across waves (PvP still wipes).
@@ -23255,6 +22738,11 @@ function handleWsMessage(e) {
     }
     if (msg.t === 'shopBuy' && inGame && (practiceMode || consoleAdmin || pvpShopMode || msg.pvp)) {
       if (msg.ok) {
+        // Which gun slot this purchase touched — mirror the server's rule against the PRE-buy state.
+        const prevSt = soloShopState;
+        const boughtSlot = (msg.item === 'weapon' && msg.name && prevSt)
+          ? classifyWeaponAcquireClient(prevSt, msg.name).slot
+          : 1;
         applyShopState(msg);
         if (msg.shopTimeLeft != null) pvpShopTimeLeft = msg.shopTimeLeft | 0;
         if (msg.weapon) {
@@ -23262,7 +22750,8 @@ function handleWsMessage(e) {
           if (slot > 0) selectedWeapon = slot;
         }
         if (msg.hp != null) player.hp = msg.hp | 0;
-        resetLocalShoot(currentWeaponName());
+        // Only reset slot-1 (Z) local prediction if slot 1 is what actually changed.
+        if (msg.item !== 'weapon' || boughtSlot === 1) resetLocalShoot(currentWeaponName());
         updateHud();
         renderPreRoundHud();
       }
@@ -23478,7 +22967,9 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'wpn' && inGame) {
+      const slot1Changed = msg.changed !== 2;
       if (msg.w) selectedWeapon = msg.w | 0;
+      if (msg.weapon2 !== undefined) equippedWeapon2 = msg.weapon2 || null;
       if (msg.levels) {
         weaponLevels = Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, msg.levels);
       } else if (msg.lvl != null && msg.weapon) {
@@ -23497,12 +22988,14 @@ function handleWsMessage(e) {
         };
         unlockedWeapons[msg.weapon] = true;
       }
-      resetLocalShoot(currentWeaponName());
+      // Slot 1 (Z) drives local client-side prediction — only reset it when it actually changed.
+      if (slot1Changed) resetLocalShoot(currentWeaponName());
       // Pickup FX plays from pd (all clients); only flash on manual switch.
       if (!msg.pickup) {
         const me = localView();
-        const wpn = msg.weapon || currentWeaponName();
-        emitWeaponEquipFx(me.x, me.y, wpn, msg.lvl != null ? msg.lvl : getLocalWeaponLevel(wpn));
+        const wpn = msg.changedWeapon || msg.weapon || currentWeaponName();
+        const lvl = msg.changedLvl != null ? msg.changedLvl : (msg.lvl != null ? msg.lvl : getLocalWeaponLevel(wpn));
+        emitWeaponEquipFx(me.x, me.y, wpn, lvl);
       }
       updateHud();
       return;
@@ -23549,12 +23042,10 @@ function handleWsMessage(e) {
       if (id === myId) {
         // Keep drawing through shake; mark dead for gameplay after boom.
         player.hp = 0;
-        player.powerups = freshPowerups();
       } else {
         const r = remotes.get(id);
         if (r) {
           r.hp = 0;
-          r.powerups = freshPowerups();
           r.vx = 0;
           r.vy = 0;
           angle = r.angle;
@@ -23646,6 +23137,7 @@ function handleWsMessage(e) {
       // Authoritative asteroid snapshot after death freeze.
       if (msg.asteroids) replaceAsteroidsFromRows(msg.asteroids);
       selectedWeapon = msg.w != null ? (msg.w | 0) : 1;
+      if (msg.weapon2 !== undefined) equippedWeapon2 = msg.weapon2 || null;
       if (msg.levels) {
         weaponLevels = Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, msg.levels);
       }
@@ -23678,16 +23170,6 @@ function handleWsMessage(e) {
       if (msg.players) {
         clearRemoteHist();
         applyRemotePlayers(msg.players, serverNow());
-      }
-      if (msg.powerups) {
-        player.powerups = Object.assign(freshPowerups(), msg.powerups);
-      } else {
-        player.powerups = freshPowerups();
-      }
-      if (msg.powerupsByPlayer) {
-        for (const id of Object.keys(msg.powerupsByPlayer)) {
-          applyPowerupsState(id | 0, msg.powerupsByPlayer[id]);
-        }
       }
       updateHud();
       return;
@@ -23784,18 +23266,6 @@ function handleWsMessage(e) {
         color: col,
         drag: 2.8
       });
-      return;
-    }
-    if (msg.t === 'pwr' && inGame) {
-      const id = msg.id | 0;
-      const hadShield = id === myId && !!(player.powerups && player.powerups.shield);
-      const pu = msg.powerups || {};
-      if (msg.shieldHp != null && pu.shieldHp == null) pu.shieldHp = msg.shieldHp;
-      applyPowerupsState(id, pu);
-      if (id === myId && hadShield && !(player.powerups && player.powerups.shield)) {
-        playSfx(SFX.shieldOff, { vol: 0.85, pool: 2 });
-      }
-      updateHud();
       return;
     }
     if (msg.t === 'pd' && inGame) {
@@ -24989,6 +24459,56 @@ if (gridPanelEl) {
       setGridProbeShape(btn.getAttribute('data-shape'));
     });
   }
+  const bgModeButtons = gridPanelEl.querySelector('#bg-mode-buttons');
+  if (bgModeButtons) {
+    bgModeButtons.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-bgmode]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      applyBgMode(btn.getAttribute('data-bgmode'));
+    });
+  }
+  const fluidFpsButtons = gridPanelEl.querySelector('#fluid-fps-buttons');
+  if (fluidFpsButtons) {
+    fluidFpsButtons.querySelectorAll('button[data-fluid-fps]').forEach((b) => {
+      b.classList.toggle('active', Number(b.getAttribute('data-fluid-fps')) === fluidFps);
+    });
+    fluidFpsButtons.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-fluid-fps]');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const fps = Number(btn.getAttribute('data-fluid-fps'));
+      if (window.WebGLFluidBG) WebGLFluidBG.setConfig({ FPS: fps });
+      try { localStorage.setItem(FLUID_FPS_KEY, String(fps)); } catch (_) {}
+      fluidFpsButtons.querySelectorAll('button[data-fluid-fps]').forEach((b) => {
+        b.classList.toggle('active', Number(b.getAttribute('data-fluid-fps')) === fps);
+      });
+    });
+  }
+  gridPanelEl.querySelectorAll('input[data-fluid]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const key = input.getAttribute('data-fluid');
+      const v = Number(input.value);
+      if (window.WebGLFluidBG) WebGLFluidBG.setConfig({ [key]: v });
+      const valEl = gridPanelEl.querySelector(`[data-fluid-val="${key}"]`);
+      if (valEl) valEl.textContent = String(v);
+    });
+  });
+  gridPanelEl.querySelectorAll('input[data-fluid-check]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const key = input.getAttribute('data-fluid-check');
+      if (window.WebGLFluidBG) WebGLFluidBG.setConfig({ [key]: !!input.checked });
+    });
+  });
+  const fluidRandomBtn = document.getElementById('fluid-random-splat');
+  if (fluidRandomBtn) {
+    fluidRandomBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (window.WebGLFluidBG) WebGLFluidBG.randomSplats(5 + ((Math.random() * 10) | 0));
+    });
+  }
   gridPanelEl.querySelectorAll('[data-gp-tab]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -25464,7 +24984,7 @@ function demoApplyShips(ships) {
       if (!r) {
         r = {
           id, x: row[1], y: row[2], vx: 0, vy: 0, angle: row[5],
-          hp: row[6] | 0, av: 0, godLeft: 0, powerups: freshPowerups()
+          hp: row[6] | 0, av: 0, godLeft: 0
         };
         remotes.set(id, r);
       }
@@ -25520,7 +25040,7 @@ function demoApplySnap(ev) {
   enemies.clear();
   clearAllEnemyCharges();
   if (ev.enemies) {
-    for (const row of ev.enemies) addEnemy(unpackEnemy(row));
+    for (const row of ev.enemies) addEnemy(unpackEnemy(row), true);
   }
   demoApplyShips(ev.ships);
 }
@@ -26238,7 +25758,6 @@ function runConsole(line) {
       conPrint('usage: give <item>  (or admin keys 1–8 in-game)', 'err');
       conPrint('weapons: default rocket laser shotgun rail plasma void meteor', 'info');
       conPrint('keys: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
-      conPrint('vitals: shield drone', 'info');
       conPrint('live — set lives to 99 (solo/coop)', 'info');
       return;
     }
@@ -26275,7 +25794,7 @@ function runConsole(line) {
     conPrint('record <name> | stop | play <name> | demos | demolish <name>', 'info');
     conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
-    conPrint('give <weapon|shield|drone|live>  — grant loadout / vitals / 99 lives (admin, in-game)', 'info');
+    conPrint('give <weapon|live>  — grant loadout / 99 lives (admin, in-game)', 'info');
     conPrint('spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner|gunship  — off-screen spawn (admin, in-game)', 'info');
     conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
