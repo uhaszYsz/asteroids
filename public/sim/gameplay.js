@@ -3526,8 +3526,9 @@ function splitAsteroid(room, parent) {
 }
 
 function spawnPickup(room, parent) {
-  // Campaign stages never drop crates (weapons / health).
+  // Campaign: never drop crates. Solo + matchmaking wait-waves: shop-only (no field pickups).
   if (!room || room.campaign) return;
+  if (room.practice && !room.coop) return;
   const ang = Math.random() * Math.PI * 2;
   const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
   const roll = Math.random();
