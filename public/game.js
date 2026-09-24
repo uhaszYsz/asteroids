@@ -308,9 +308,7 @@ function startBcastFx(mode, color) {
   if (!bcastFx.raf) bcastFx.raf = requestAnimationFrame(tickBcastFx);
 }
 
-// alpha:true so the fluid background (a separate canvas behind #c) can show through
-// when bgMode === 'fluid' — grid mode still clears fully opaque (alpha 1), no visual change.
-const gl = canvas.getContext('webgl', { antialias: false, alpha: true, depth: true });
+const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: true });
 
 /** Internal framebuffer scale vs fixed world size (W×H). Physics unchanged. */
 const RENDER_SCALE_KEY = 'asteroids_render_scale';
@@ -370,10 +368,6 @@ function applyRenderResolution(scale) {
   } catch (_) {}
   invalidateGridBake();
   syncSettingsResolutionUi();
-  // syncFluidCanvasBox is hoisted but closes over `const fluidBgCanvasEl` declared later
-  // in this file — at boot (loadRenderResolution → applyRenderResolution, called before
-  // that declaration runs) it's still in its temporal dead zone, so typeof isn't enough.
-  try { syncFluidCanvasBox(); } catch (_) { /* not ready yet at boot */ }
 }
 
 function loadRenderResolution() {
@@ -415,7 +409,6 @@ fitCanvasIntegerScale();
 
 addEventListener('resize', () => {
   fitCanvasIntegerScale();
-  if (typeof syncFluidCanvasBox === 'function') syncFluidCanvasBox();
   if (bcastFx.mode || bcastFx.parts.length) resizeBcastFx();
 });
 
@@ -2884,44 +2877,6 @@ function tickThrustGrid(thrusting, x, y, angle) {
   pushGridShock(x, y, Object.assign(gridBlastThrustOpts(angle), { ironWake: false }));
 }
 
-const fluidThrustNextAtById = new Map();
-const FLUID_THRUST_INTERVAL_MS = 45;
-
-/** While thrusting: narrow warm exhaust splat on the fluid background, throttled to a
- *  fixed interval (unlike the grid's every-frame implosion) so it reads as a thin jet
- *  trailing behind the ship instead of one big puff. No-op unless fluid mode is active.
- *  `throttleId` keeps local / remote / enemy jets on independent timers. */
-function tickThrustFluid(thrusting, x, y, angle, color, throttleId) {
-  if (!thrusting || bgMode !== 'fluid' || !window.WebGLFluidBG) return;
-  const now = performance.now();
-  const key = throttleId != null ? throttleId : 'local';
-  if (now < (fluidThrustNextAtById.get(key) || 0)) return;
-  fluidThrustNextAtById.set(key, now + FLUID_THRUST_INTERVAL_MS);
-  // Same exhaust-nozzle offset as emitThrustFx/emitThrustIdleFx, so the splat originates
-  // at the ship's engine instead of its center.
-  const ox = x - Math.cos(angle) * 6 * RES_SCALE;
-  const oy = y - Math.sin(angle) * 6 * RES_SCALE;
-  const ux = ox / canvas.width;
-  const uy = 1 - oy / canvas.height;
-  const pc = color || ownerPlayerColor(myId) || COL.self;
-  WebGLFluidBG.thrustSplat(ux, uy, angle, {
-    color: { r: pc[0] * 2.2, g: pc[1] * 2.2, b: pc[2] * 2.2 }
-  });
-}
-
-/** Enemy NPCs: when moving forward along their nose, splat fluid exhaust in their color. */
-function emitEnemyThrustFluid() {
-  if (bgMode !== 'fluid' || !window.WebGLFluidBG) return;
-  if (deathSpectating || matchPaused || soloShopOpen) return;
-  for (const e of enemies.values()) {
-    if ((e.hp | 0) <= 0) continue;
-    const p = enemyAt(e);
-    const forwardThrust = (p.vx || 0) * Math.cos(p.angle) + (p.vy || 0) * Math.sin(p.angle) > 0.4 * RES_SCALE;
-    if (!forwardThrust) continue;
-    tickThrustFluid(true, p.x, p.y, p.angle, enemyThrustColor(e.kind || p.kind), 'e' + e.id);
-  }
-}
-
 function clearGridShocks() {
   resetSynthGrid();
 }
@@ -3642,7 +3597,6 @@ function rerollNebulaBackground(frameIndex) {
   pickNebulaScrollDir();
   gridNebulaScrollX = 0;
   gridNebulaScrollY = 0;
-  syncFluidNebulaBackground();
   return true;
 }
 
@@ -3664,7 +3618,6 @@ function tickNebulaScroll(dt) {
     gridNebulaImg = sliceNebulaFrame(img, frame);
     gridNebulaReady = true;
     uploadNebulaGLTexture();
-    syncFluidNebulaBackground();
     invalidateGridBake();
   };
   img.onerror = () => {
@@ -3875,73 +3828,6 @@ function bindSceneLightUniforms(u) {
   if (u.ships) gl.uniform4fv(u.ships, _gridShipLight);
   if (u.wrap) gl.uniform2f(u.wrap, W, H);
 }
-const BG_MODE_KEY = 'asteroids_bg_mode';
-const FLUID_FPS_KEY = 'asteroids_fluid_fps';
-let bgMode = 'grid';
-let fluidFps = 60;
-const fluidBgCanvasEl = document.getElementById('fluid-bg');
-
-/** Keep the fluid canvas's box (position + size) pinned to the game canvas's own
- *  contain-fit box, so the fluid sim always exactly covers the visible game world —
- *  letterbox bars included/excluded the same way — without touching canvas #c itself. */
-function syncFluidCanvasBox() {
-  if (!fluidBgCanvasEl) return;
-  const r = canvas.getBoundingClientRect();
-  fluidBgCanvasEl.style.left = r.left + 'px';
-  fluidBgCanvasEl.style.top = r.top + 'px';
-  fluidBgCanvasEl.style.width = r.width + 'px';
-  fluidBgCanvasEl.style.height = r.height + 'px';
-  // Pin the fluid canvas's own backing-buffer resolution to the game world's internal
-  // render resolution (not the display/devicePixelRatio size) so it upscales blocky —
-  // pixel art, like the rest of the game — instead of rendering at native screen res.
-  if (window.WebGLFluidBG) WebGLFluidBG.setTargetResolution(canvas.width, canvas.height);
-}
-syncFluidCanvasBox();
-
-/** Push the current spaces_strip4 frame into the fluid sim's static backdrop. */
-function syncFluidNebulaBackground() {
-  if (!window.WebGLFluidBG || !gridNebulaReady || !gridNebulaImg) return;
-  WebGLFluidBG.setSpaceBackground(gridNebulaImg);
-}
-
-/** Switch the menu/game background between the synth grid and the WebGL fluid sim. */
-function applyBgMode(mode) {
-  bgMode = mode === 'fluid' ? 'fluid' : 'grid';
-  try { localStorage.setItem(BG_MODE_KEY, bgMode); } catch (_) { /* ignore */ }
-  if (bgMode === 'fluid') {
-    if (fluidBgCanvasEl && window.WebGLFluidBG) {
-      // Must be laid out (display:block) before init() so its first resize/framebuffer
-      // pass sees real dimensions instead of a display:none 0×0 / default 300×150 canvas.
-      syncFluidCanvasBox();
-      fluidBgCanvasEl.classList.add('show');
-      WebGLFluidBG.init(fluidBgCanvasEl, { width: canvas.width, height: canvas.height });
-      WebGLFluidBG.setConfig({ FPS: fluidFps });
-      syncFluidNebulaBackground();
-      WebGLFluidBG.start();
-    }
-  } else {
-    if (fluidBgCanvasEl) fluidBgCanvasEl.classList.remove('show');
-    if (window.WebGLFluidBG) WebGLFluidBG.stop();
-  }
-  const modeButtons = document.getElementById('bg-mode-buttons');
-  if (modeButtons) {
-    modeButtons.querySelectorAll('button[data-bgmode]').forEach((btn) => {
-      btn.classList.toggle('active', btn.getAttribute('data-bgmode') === bgMode);
-    });
-  }
-  const fluidSection = document.getElementById('gp-section-fluid');
-  if (fluidSection) fluidSection.style.display = bgMode === 'fluid' ? '' : 'none';
-}
-try {
-  const _bgm = localStorage.getItem(BG_MODE_KEY);
-  if (_bgm === 'fluid' || _bgm === 'grid') bgMode = _bgm;
-  const _fps = Number(localStorage.getItem(FLUID_FPS_KEY));
-  if (_fps === 30 || _fps === 60) fluidFps = _fps;
-} catch (_) { /* ignore */ }
-// Deferred: window.WebGLFluidBG must exist before this can actually start the sim,
-// so this only takes effect once the DOM/script boot sequence below reaches it.
-if (bgMode === 'fluid') requestAnimationFrame(() => applyBgMode('fluid'));
-
 const DYN_LIGHT_KEY = 'asteroids_dyn_light';
 const NIGHT_MODE_KEY = 'asteroids_night_mode';
 const AIM_CONE_COLOR_KEY = 'asteroids_aim_cone_color';
@@ -8447,7 +8333,6 @@ function drawSceneLines(dt) {
       ax, ay, p.angle, sid, a.r || 16, col, size,
       null, specialTint, asteroidOutlineBlinkMul(a)
     );
-    stirAsteroidFluid(a, ax, ay);
     if ((a.special === 'meteor' || a.playerShot) && !deathSpectating) {
       const boost = (a._meteorBurnBoostUntil && performance.now() < a._meteorBurnBoostUntil) ? 3 : 1;
       emitMeteorBurnFx(
@@ -15815,7 +15700,7 @@ function applyWorldSyncMsg(msg) {
   if (msg.enemies) {
     enemies.clear();
     clearAllEnemyCharges();
-    for (const row of msg.enemies) addEnemy(unpackEnemy(row), true);
+    for (const row of msg.enemies) addEnemy(unpackEnemy(row));
   }
   predReady = true;
   updateHud();
@@ -16182,7 +16067,7 @@ function applyResumedMsg(msg) {
   if (msg.enemies) {
     enemies.clear();
     clearAllEnemyCharges();
-    for (const row of msg.enemies) addEnemy(unpackEnemy(row), true);
+    for (const row of msg.enemies) addEnemy(unpackEnemy(row));
   }
   clearMatchPause();
   updateHud();
@@ -17766,38 +17651,9 @@ function unpackEnemy(row) {
   };
 }
 
-function addEnemy(e, silent) {
-  const isNew = !enemies.has(e.id);
+function addEnemy(e) {
   rebaseEnemyPredictOrigin(e);
   enemies.set(e.id, e);
-  if (isNew && !silent) splatEnemySpawnFluid(e);
-}
-
-/** Enemy spawn → colored burst on the fluid background (no-op unless fluid mode is on). */
-function splatEnemySpawnFluid(e) {
-  if (bgMode !== 'fluid' || !window.WebGLFluidBG) return;
-  const ux = e.x / canvas.width;
-  const uy = 1 - e.y / canvas.height;
-  const col = enemyThrustColor(e.kind);
-  WebGLFluidBG.burstSplat(ux, uy, { r: col[0] * 2.2, g: col[1] * 2.2, b: col[2] * 2.2 });
-}
-
-const FLUID_ASTEROID_STIR_INTERVAL_MS = 90;
-
-/** Asteroid motion pushes the fluid around it (velocity only, no dye/color) — a moving
- *  rock visibly stirs the background without leaving a colored trail behind it. */
-function stirAsteroidFluid(a, x, y) {
-  if (bgMode !== 'fluid' || !window.WebGLFluidBG) return;
-  const now = performance.now();
-  if (a._fluidStirAt && now < a._fluidStirAt) return;
-  a._fluidStirAt = now + FLUID_ASTEROID_STIR_INTERVAL_MS;
-  const spd = Math.hypot(a.vx || 0, a.vy || 0);
-  if (spd < 0.01) return;
-  const ux = x / canvas.width;
-  const uy = 1 - y / canvas.height;
-  const force = Math.min(600, spd * TPS * 0.6);
-  const radiusScale = 2 + (a.r || 16) / 16;
-  WebGLFluidBG.stirVelocity(ux, uy, (a.vx / spd) * force, -(a.vy / spd) * force, radiusScale);
 }
 
 /**
@@ -21616,10 +21472,7 @@ function renderBullets() {
 
 function render() {
   gl.viewport(0, 0, canvas.width, canvas.height);
-  if (bgMode === 'fluid') {
-    // Transparent clear — the fluid-sim canvas sits behind #c and shows through the gap.
-    gl.clearColor(0, 0, 0, 0);
-  } else if (nightModeActive()) gl.clearColor(0, 0, 0, 1);
+  if (nightModeActive()) gl.clearColor(0, 0, 0, 1);
   else gl.clearColor(BG_CLEAR[0], BG_CLEAR[1], BG_CLEAR[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
   try { gl.lineWidth(Math.max(1, getRenderScale())); } catch (_) { gl.lineWidth(1); }
@@ -21632,7 +21485,7 @@ function render() {
     drawCampaignMapGL(nowBg);
     return;
   }
-  if (bgMode !== 'fluid') drawSynthGrid(nowBg);
+  drawSynthGrid(nowBg);
   if (!inGame) {
     syncThrustSfx(false);
     syncLaserSfx(false);
@@ -21668,7 +21521,6 @@ function render() {
     if (thrusting) emitThrustFx(me.x, me.y, me.angle, me.vx, me.vy, myId, ownerThrustColor(myId), meleeOn);
     else emitThrustIdleFx(me.x, me.y, me.angle, me.vx, me.vy, myId, ownerThrustColor(myId));
     tickThrustGrid(thrusting, me.x, me.y, me.angle);
-    tickThrustFluid(thrusting, me.x, me.y, me.angle, ownerPlayerColor(myId) || COL.self, myId || 'local');
     thrustAlignPrevX = me.x;
     thrustAlignPrevY = me.y;
     emitShipDamageSmoke(myId || 0, me.x, me.y, me.angle, me.vx, me.vy, me.hp);
@@ -21687,12 +21539,10 @@ function render() {
     if (!deathSpectating && !matchPaused) {
       if (thrusting) emitThrustFx(v.x, v.y, v.angle, v.vx, v.vy, r.id, ownerThrustColor(r.id), meleeOn);
       else emitThrustIdleFx(v.x, v.y, v.angle, v.vx, v.vy, r.id, ownerThrustColor(r.id));
-      tickThrustFluid(thrusting, v.x, v.y, v.angle, ownerPlayerColor(r.id), r.id);
     }
     if (!deathSpectating && !matchPaused) emitShipDamageSmoke(v.id, v.x, v.y, v.angle, v.vx, v.vy, v.hp);
   }
   emitEnemyThrustFx();
-  emitEnemyThrustFluid();
   emitEnemyDamageSmoke();
   updateParticles(dt);
   updateDeathRings(now);
@@ -22144,7 +21994,7 @@ function enterGameFromWelcome(msg) {
   if (msg.enemies) {
     enemies.clear();
     clearAllEnemyCharges();
-    for (const row of msg.enemies) addEnemy(unpackEnemy(row), true);
+    for (const row of msg.enemies) addEnemy(unpackEnemy(row));
   }
   if (msg.pickups) {
     for (const row of msg.pickups) addPickup(unpackPickup(row));
@@ -24468,56 +24318,6 @@ if (gridPanelEl) {
       setGridProbeShape(btn.getAttribute('data-shape'));
     });
   }
-  const bgModeButtons = gridPanelEl.querySelector('#bg-mode-buttons');
-  if (bgModeButtons) {
-    bgModeButtons.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-bgmode]');
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-      applyBgMode(btn.getAttribute('data-bgmode'));
-    });
-  }
-  const fluidFpsButtons = gridPanelEl.querySelector('#fluid-fps-buttons');
-  if (fluidFpsButtons) {
-    fluidFpsButtons.querySelectorAll('button[data-fluid-fps]').forEach((b) => {
-      b.classList.toggle('active', Number(b.getAttribute('data-fluid-fps')) === fluidFps);
-    });
-    fluidFpsButtons.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-fluid-fps]');
-      if (!btn) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const fps = Number(btn.getAttribute('data-fluid-fps'));
-      if (window.WebGLFluidBG) WebGLFluidBG.setConfig({ FPS: fps });
-      try { localStorage.setItem(FLUID_FPS_KEY, String(fps)); } catch (_) {}
-      fluidFpsButtons.querySelectorAll('button[data-fluid-fps]').forEach((b) => {
-        b.classList.toggle('active', Number(b.getAttribute('data-fluid-fps')) === fps);
-      });
-    });
-  }
-  gridPanelEl.querySelectorAll('input[data-fluid]').forEach((input) => {
-    input.addEventListener('input', () => {
-      const key = input.getAttribute('data-fluid');
-      const v = Number(input.value);
-      if (window.WebGLFluidBG) WebGLFluidBG.setConfig({ [key]: v });
-      const valEl = gridPanelEl.querySelector(`[data-fluid-val="${key}"]`);
-      if (valEl) valEl.textContent = String(v);
-    });
-  });
-  gridPanelEl.querySelectorAll('input[data-fluid-check]').forEach((input) => {
-    input.addEventListener('change', () => {
-      const key = input.getAttribute('data-fluid-check');
-      if (window.WebGLFluidBG) WebGLFluidBG.setConfig({ [key]: !!input.checked });
-    });
-  });
-  const fluidRandomBtn = document.getElementById('fluid-random-splat');
-  if (fluidRandomBtn) {
-    fluidRandomBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      if (window.WebGLFluidBG) WebGLFluidBG.randomSplats(5 + ((Math.random() * 10) | 0));
-    });
-  }
   gridPanelEl.querySelectorAll('[data-gp-tab]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -25049,7 +24849,7 @@ function demoApplySnap(ev) {
   enemies.clear();
   clearAllEnemyCharges();
   if (ev.enemies) {
-    for (const row of ev.enemies) addEnemy(unpackEnemy(row), true);
+    for (const row of ev.enemies) addEnemy(unpackEnemy(row));
   }
   demoApplyShips(ev.ships);
 }

@@ -23,15 +23,6 @@
       /* width/height set in JS — contain-fit to the window */
       touch-action: none;
     }
-    #fluid-bg {
-      /* left/top/width/height set in JS to match the game canvas's contain-fit box exactly. */
-      position: absolute;
-      z-index: 0;
-      display: none;
-      pointer-events: none;
-    }
-    #fluid-bg.show { display: block; }
-    canvas#c { position: relative; z-index: 1; }
     #touch-controls {
       display: none;
       position: fixed;
@@ -1911,78 +1902,6 @@
   </div>
 
   <div class="gp-pane show" id="gp-pane-grid" data-gp-pane="grid">
-    <div class="gp-section" data-section="bgmode">
-      <div class="gp-sec-head">
-        <div class="gp-sec-title">Background</div>
-      </div>
-      <div class="gp-shapes" id="bg-mode-buttons">
-        <button type="button" data-bgmode="grid" class="active">grid</button>
-        <button type="button" data-bgmode="fluid">fluid</button>
-      </div>
-    </div>
-
-    <div class="gp-section" id="gp-section-fluid" data-section="fluid" style="display:none">
-      <div class="gp-sec-head">
-        <div class="gp-sec-title">Fluid settings</div>
-      </div>
-      <div class="gp-row">
-        <div class="gp-label">refresh rate</div>
-      </div>
-      <div class="gp-shapes" id="fluid-fps-buttons">
-        <button type="button" data-fluid-fps="30">30 fps</button>
-        <button type="button" data-fluid-fps="60" class="active">60 fps</button>
-      </div>
-      <div class="gp-row">
-        <div class="gp-label">density diffusion</div>
-        <input type="range" data-fluid="DENSITY_DISSIPATION" min="0" max="4" step="0.05" value="1" />
-        <span class="gp-val" data-fluid-val="DENSITY_DISSIPATION">1</span>
-      </div>
-      <div class="gp-row">
-        <div class="gp-label">velocity diffusion</div>
-        <input type="range" data-fluid="VELOCITY_DISSIPATION" min="0" max="4" step="0.05" value="0" />
-        <span class="gp-val" data-fluid-val="VELOCITY_DISSIPATION">0</span>
-      </div>
-      <div class="gp-row">
-        <div class="gp-label">pressure</div>
-        <input type="range" data-fluid="PRESSURE" min="0" max="1" step="0.01" value="0" />
-        <span class="gp-val" data-fluid-val="PRESSURE">0</span>
-      </div>
-      <div class="gp-row">
-        <div class="gp-label">vorticity (curl)</div>
-        <input type="range" data-fluid="CURL" min="0" max="50" step="1" value="30" />
-        <span class="gp-val" data-fluid-val="CURL">30</span>
-      </div>
-      <div class="gp-row">
-        <div class="gp-label">splat radius</div>
-        <input type="range" data-fluid="SPLAT_RADIUS" min="0.01" max="1" step="0.01" value="0.04" />
-        <span class="gp-val" data-fluid-val="SPLAT_RADIUS">0.04</span>
-      </div>
-      <div class="gp-row">
-        <div class="gp-label">color speed</div>
-        <input type="range" data-fluid="COLOR_UPDATE_SPEED" min="0" max="30" step="1" value="10" />
-        <span class="gp-val" data-fluid-val="COLOR_UPDATE_SPEED">10</span>
-      </div>
-      <label class="gp-check">
-        <input type="checkbox" data-fluid-check="SHADING" checked />
-        <span>shading<span class="gp-check-sub">3D-ish lighting on the fluid surface</span></span>
-      </label>
-      <label class="gp-check">
-        <input type="checkbox" data-fluid-check="COLORFUL" checked />
-        <span>colorful<span class="gp-check-sub">Cycle splat colors automatically</span></span>
-      </label>
-      <label class="gp-check">
-        <input type="checkbox" data-fluid-check="BLOOM" />
-        <span>bloom<span class="gp-check-sub">Glow on bright dye — costs more GPU</span></span>
-      </label>
-      <label class="gp-check">
-        <input type="checkbox" data-fluid-check="SUNRAYS" />
-        <span>sunrays<span class="gp-check-sub">God-ray streaks — costs more GPU</span></span>
-      </label>
-      <div class="gp-row">
-        <button type="button" id="fluid-random-splat">Random splats</button>
-      </div>
-    </div>
-
     <p class="gp-hint">LMB = suck · RMB = blow · MMB = enemy explosion particles. Radial/square/star/hex/rays/full = click · directional = drag · line = two taps. Full distorts the whole grid.</p>
     <div class="gp-section" data-section="globals">
       <div class="gp-sec-head">
@@ -2509,7 +2428,6 @@
 <div id="top-btns">
   <button id="cancel-btn" type="button">Cancel</button>
 </div>
-<canvas id="fluid-bg"></canvas>
 <canvas id="c"></canvas>
 <div id="touch-controls" aria-hidden="true">
   <button type="button" id="touch-slow-left" class="touch-btn touch-slow" aria-label="Slow turn left">‹</button>
@@ -2568,11 +2486,10 @@
 
     try {
       await loadScript('lib/bassoonplayer.js');
-      await loadScript('lib/webgl-fluid-bg.js?v=19');
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=92');
-      await loadScript('game.js?v=1060');
+      await loadScript('game.js?v=1061');
     } catch (err) {
       console.error(err);
     }
