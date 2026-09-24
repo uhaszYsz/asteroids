@@ -11941,12 +11941,20 @@ addEventListener('keydown', e => {
     }
   }
   if (settingsPanelEl && settingsPanelEl.classList.contains('open')) {
-    if (e.code === 'Escape') {
-      e.preventDefault();
-      closeSettingsPanel();
-    }
+    if (handleMenuUiKey(e)) return;
     return;
   }
+  if (modePanelEl && modePanelEl.classList.contains('open')) {
+    if (handleMenuUiKey(e)) return;
+    return;
+  }
+  if (soloOverOpen) {
+    if (handleMenuUiKey(e)) return;
+    // Escape quit is handled in the later keydown listener.
+    return;
+  }
+  // Main menu (Play / Settings / …) — only when no other overlay owns focus.
+  if (handleMenuUiKey(e)) return;
   if (gridPanelOpen) {
     if (e.code === 'Escape') {
       e.preventDefault();
@@ -13456,6 +13464,156 @@ if (ssContinueBtn) {
   });
 }
 
+/* ========== Menu / overlay keyboard focus (arrows·WASD + Enter·Space) ========== */
+let uiFocusIdx = 0;
+let uiFocusScope = null;
+
+function uiElUsable(el) {
+  if (!el) return false;
+  if (el.disabled) return false;
+  if (el.hidden) return false;
+  if (el.classList && el.classList.contains('hidden')) return false;
+  const st = getComputedStyle(el);
+  if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) return false;
+  return true;
+}
+
+function uiClearFocusHighlight() {
+  document.querySelectorAll('.ui-focus').forEach((el) => el.classList.remove('ui-focus'));
+}
+
+function uiCollectFocusItems(scope) {
+  if (scope === 'settings') {
+    return [settingsResEl, settingsCloseBtn].filter(uiElUsable);
+  }
+  if (scope === 'mode') {
+    return [
+      modePvpBtn, modeCoopBtn, modeSoloBtn,
+      modeCampaignSoloBtn, modeCampaignCoopBtn, modeContinueBtn,
+      modeCloseBtn
+    ].filter(uiElUsable);
+  }
+  if (scope === 'soloOver') {
+    return [soloRestartBtn, soloMenuBtn].filter(uiElUsable);
+  }
+  if (scope === 'menu') {
+    return [rejoinBtn, playBtn, settingsBtn, accountBtn, leaderboardBtn, exitBtn].filter(uiElUsable);
+  }
+  return [];
+}
+
+function uiDetectScope() {
+  if (soloShopOpen || consoleOpen || gridPanelOpen) return null;
+  if (firstHelpEl && firstHelpEl.classList.contains('show')) return null;
+  if (accountPanelEl && accountPanelEl.classList.contains('open')) return null;
+  if (leaderboardPanelEl && leaderboardPanelEl.classList.contains('open')) return null;
+  if (pinModalEl && pinModalEl.classList.contains('open')) return null;
+  if (shipPickerPanelEl && shipPickerPanelEl.classList.contains('open')) return null;
+  if (settingsPanelEl && settingsPanelEl.classList.contains('open')) return 'settings';
+  if (modePanelEl && modePanelEl.classList.contains('open')) return 'mode';
+  if (soloOverOpen) return 'soloOver';
+  if (!inGame && menuEl && !menuEl.classList.contains('hidden')) return 'menu';
+  return null;
+}
+
+function uiApplyFocusHighlight(items) {
+  uiClearFocusHighlight();
+  if (!items.length) return;
+  uiFocusIdx = Math.max(0, Math.min(items.length - 1, uiFocusIdx));
+  const el = items[uiFocusIdx];
+  if (el) el.classList.add('ui-focus');
+}
+
+function uiResetFocus(scope) {
+  uiFocusScope = scope || null;
+  uiFocusIdx = 0;
+  uiApplyFocusHighlight(uiCollectFocusItems(uiFocusScope));
+}
+
+function uiCycleSelect(el, dir) {
+  if (!el || el.tagName !== 'SELECT' || !el.options || !el.options.length) return;
+  const n = el.options.length;
+  let i = el.selectedIndex | 0;
+  if (dir < 0) i = (i - 1 + n) % n;
+  else i = (i + 1) % n;
+  if (i === el.selectedIndex) return;
+  el.selectedIndex = i;
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function uiActivateFocus(items) {
+  const el = items[uiFocusIdx];
+  if (!el) return;
+  if (el.tagName === 'SELECT') {
+    uiCycleSelect(el, 1);
+    return;
+  }
+  el.click();
+}
+
+/** @returns {boolean} true if the key was consumed by menu/overlay UI */
+function handleMenuUiKey(e) {
+  const scope = uiDetectScope();
+  if (!scope) {
+    if (uiFocusScope) {
+      uiFocusScope = null;
+      uiClearFocusHighlight();
+    }
+    return false;
+  }
+  if (scope !== uiFocusScope) {
+    uiFocusScope = scope;
+    uiFocusIdx = 0;
+  }
+  const items = uiCollectFocusItems(scope);
+  if (!items.length) return false;
+  uiApplyFocusHighlight(items);
+
+  if (e.code === 'Escape') {
+    if (scope === 'settings') {
+      e.preventDefault();
+      closeSettingsPanel();
+      return true;
+    }
+    if (scope === 'mode') {
+      e.preventDefault();
+      closeModePanel();
+      return true;
+    }
+    return false;
+  }
+
+  const up = e.code === 'ArrowUp' || e.code === 'KeyW';
+  const down = e.code === 'ArrowDown' || e.code === 'KeyS';
+  const left = e.code === 'ArrowLeft' || e.code === 'KeyA';
+  const right = e.code === 'ArrowRight' || e.code === 'KeyD';
+  const confirm = e.code === 'Enter' || e.code === 'Space';
+  if (!up && !down && !left && !right && !confirm) return false;
+
+  e.preventDefault();
+  const el = items[uiFocusIdx];
+  if (el && el.tagName === 'SELECT' && (left || right || up || down)) {
+    uiCycleSelect(el, (left || up) ? -1 : 1);
+    uiApplyFocusHighlight(items);
+    return true;
+  }
+  if (up || left) {
+    uiFocusIdx = (uiFocusIdx - 1 + items.length) % items.length;
+    uiApplyFocusHighlight(items);
+    return true;
+  }
+  if (down || right) {
+    uiFocusIdx = (uiFocusIdx + 1) % items.length;
+    uiApplyFocusHighlight(items);
+    return true;
+  }
+  if (confirm) {
+    uiActivateFocus(items);
+    return true;
+  }
+  return false;
+}
+
 function showSoloOverScreen(wave, score) {
   soloOverOpen = true;
   if (soloOverWaveEl) soloOverWaveEl.textContent = 'Reached wave ' + Math.max(1, wave | 0);
@@ -13483,10 +13641,12 @@ function showSoloOverScreen(wave, score) {
         : 'Still matchmaking…')
       : 'Game over';
   }
+  uiResetFocus('soloOver');
 }
 
 function hideSoloOverScreen() {
   soloOverOpen = false;
+  uiClearFocusHighlight();
   if (soloOverEl) {
     soloOverEl.classList.remove('show');
     soloOverEl.setAttribute('aria-hidden', 'true');
@@ -13504,12 +13664,14 @@ function openSettingsPanel() {
   syncSettingsResolutionUi();
   syncLightingUi();
   syncSettingsBakeQualityUi();
+  uiResetFocus('settings');
 }
 
 function closeSettingsPanel() {
   if (!settingsPanelEl) return;
   settingsPanelEl.classList.remove('open');
   settingsPanelEl.setAttribute('aria-hidden', 'true');
+  uiClearFocusHighlight();
 }
 
 if (settingsBtn) {
@@ -14068,12 +14230,14 @@ function openModePanel() {
   requestPresence();
   modePanelEl.classList.add('open');
   modePanelEl.setAttribute('aria-hidden', 'false');
+  uiResetFocus('mode');
 }
 
 function closeModePanel() {
   if (!modePanelEl) return;
   modePanelEl.classList.remove('open');
   modePanelEl.setAttribute('aria-hidden', 'true');
+  uiClearFocusHighlight();
 }
 
 function startPlayMode(mode) {
@@ -24415,14 +24579,14 @@ canvas.addEventListener('pointerdown', (e) => {
     requestDebugEnemyExplosion(e.clientX, e.clientY);
     return;
   }
-  // Left = implosion, right = explosion.
-  if (e.button !== 0 && e.button !== 2) return;
+  // Left click only — RMB does nothing (context menu blocked globally).
+  if (e.button !== 0) return;
   e.preventDefault();
   const p = canvasToWorld(e.clientX, e.clientY);
   gridProbe = {
     pointerId: e.pointerId,
     button: e.button,
-    inward: e.button === 0,
+    inward: true,
     ox: p.x,
     oy: p.y,
     lx: p.x,
@@ -24519,13 +24683,17 @@ canvas.addEventListener('lostpointercapture', (e) => {
   if (gridProbe && e.pointerId === gridProbe.pointerId) endGridProbe();
 });
 canvas.addEventListener('contextmenu', (e) => {
-  if (!gridPanelOpen) return;
   e.preventDefault();
 });
 canvas.addEventListener('auxclick', (e) => {
   if (!gridPanelOpen || e.button !== 1) return;
   e.preventDefault();
 });
+
+/** Never show the browser context menu — RMB is unused. */
+addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+}, true);
 
 /* ========== Developer console (~) ========== */
 const conEl = document.getElementById('con');
