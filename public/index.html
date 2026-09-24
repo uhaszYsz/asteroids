@@ -2019,10 +2019,10 @@
         </span>
       </label>
       <label class="gp-check">
-        <input type="checkbox" data-cvar-check="cl_bg_layer" />
+        <input type="checkbox" data-cvar-check="cl_bg_layer" checked />
         <span>
           Layered background
-          <span class="gp-check-sub">Undistorted nebula under the grid · alpha 0.5 · off by default</span>
+          <span class="gp-check-sub">Undistorted nebula under the grid · alpha 1 · on by default</span>
         </span>
       </label>
       <label class="gp-check">
@@ -2489,7 +2489,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=92');
-      await loadScript('game.js?v=1061');
+      await loadScript('game.js?v=1062');
     } catch (err) {
       console.error(err);
     }
