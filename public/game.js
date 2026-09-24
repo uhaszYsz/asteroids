@@ -3253,6 +3253,8 @@ const gridBakeFS = `
   uniform float uNebulaOn;
   uniform vec2 uNebulaScroll;
   uniform float uNebulaScale;
+  /** >1 brightens stroke nebula so it stays readable over an opaque underlay. */
+  uniform float uNebulaLift;
   uniform float uAlpha;
   uniform highp vec2 uRes;
   uniform vec2 uWorldOrigin;
@@ -3351,6 +3353,10 @@ const gridBakeFS = `
       // Scrolling nebula fill on grid strokes only (discard already killed background).
       vec2 nuv = (world + uNebulaScroll) * uNebulaScale;
       rgb = texture2D(uNebula, nuv).rgb;
+      // Lift when layered underlay shares the same nebula (otherwise strokes vanish into it).
+      if (uNebulaLift > 1.001) {
+        rgb = min(vec3(1.0), rgb * uNebulaLift + vec3(0.08 * (uNebulaLift - 1.0)));
+      }
     }
     float boomBoost = 0.0;
     for (int i = 0; i < 12; i++) {
@@ -3477,6 +3483,7 @@ const gbUNebula = gl.getUniformLocation(gridBakeProg, 'uNebula');
 const gbUNebulaOn = gl.getUniformLocation(gridBakeProg, 'uNebulaOn');
 const gbUNebulaScroll = gl.getUniformLocation(gridBakeProg, 'uNebulaScroll');
 const gbUNebulaScale = gl.getUniformLocation(gridBakeProg, 'uNebulaScale');
+const gbUNebulaLift = gl.getUniformLocation(gridBakeProg, 'uNebulaLift');
 const gbUAlpha = gl.getUniformLocation(gridBakeProg, 'uAlpha');
 const gbUWorldOrigin = gl.getUniformLocation(gridBakeProg, 'uWorldOrigin');
 const gbUWorldSize = gl.getUniformLocation(gridBakeProg, 'uWorldSize');
@@ -4455,19 +4462,19 @@ function drawGridBaked() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, bakeFilt);
   gl.uniform1i(gbUTex, 0);
   const useNebula = ensureNebulaGLTexture();
-  // When the fullscreen underlay is up, stroke nebula would camouflage into it —
-  // only ship-light boosts would remain visible. Keep lattice as grid color instead.
+  // Opaque layered underlay uses the same nebula — lift stroke fill so the baked
+  // lattice stays visible without falling back to plain white grid color.
   const underlayOn = !nightModeActive() && ((cv('cl_bg_layer') | 0) !== 0 || !inGame);
-  const strokeNebula = useNebula && !underlayOn;
   if (gbUNebula) {
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, strokeNebula ? gridNebulaGL : gridBakeTex);
+    gl.bindTexture(gl.TEXTURE_2D, useNebula ? gridNebulaGL : gridBakeTex);
     gl.uniform1i(gbUNebula, 1);
     gl.activeTexture(gl.TEXTURE0);
   }
-  if (gbUNebulaOn) gl.uniform1f(gbUNebulaOn, strokeNebula ? 1 : 0);
+  if (gbUNebulaOn) gl.uniform1f(gbUNebulaOn, useNebula ? 1 : 0);
   if (gbUNebulaScroll) gl.uniform2f(gbUNebulaScroll, gridNebulaScrollX, gridNebulaScrollY);
   if (gbUNebulaScale) gl.uniform1f(gbUNebulaScale, 1 / GRID_NEBULA_TILE);
+  if (gbUNebulaLift) gl.uniform1f(gbUNebulaLift, (useNebula && underlayOn) ? 1.75 : 1);
   gl.uniform1f(gbUAlpha, Math.max(0, Math.min(1, Number(cv('cl_grid_alpha')))));
   gl.uniform2f(gbURes, W, H);
   gl.uniform2f(gbUWorldOrigin, gridBakeOriginX, gridBakeOriginY);
