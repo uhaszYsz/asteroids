@@ -222,7 +222,9 @@
   let dye, velocity, divergence, curl, pressure, bloom, bloomFramebuffers = [], sunrays, sunraysTemp;
   // Static nebula backdrop — a separate persistent layer, NOT touched by step()/dissipation,
   // so it never fades no matter what DENSITY_DISSIPATION is set to. Drawn under the dye.
+  // Filled from the game's spaces_strip4 frame via setSpaceBackground() (no hard-coded palette).
   let spaceLayer;
+  let pendingSpaceImage = null;
   let ditheringTexture;
 
   const blit = (() => {
@@ -385,7 +387,8 @@
 
     initBloomFramebuffers();
     initSunraysFramebuffers();
-    if (spaceLayerWasNull) seedSpaceBackground();
+    // Fresh spaceLayer has no pixels — re-apply the pending nebula strip frame if we have one.
+    if (spaceLayerWasNull && pendingSpaceImage) applySpaceBackground(pendingSpaceImage);
   }
 
   function setupShaders() {
@@ -818,49 +821,34 @@
     splat(x, y, dx, dy, color, opts.radiusScale != null ? opts.radiusScale : 0.3);
   }
 
-  /** Deep-space nebula palette — cool, muted base hues. Amplified at stamp time so they
-   *  actually read on the transparent canvas; ship/thrust colors still sit brighter on top. */
-  const SPACE_BG_PALETTE = [
-    { r: 0.05, g: 0.02, b: 0.16 },
-    { r: 0.02, g: 0.05, b: 0.12 },
-    { r: 0.09, g: 0.02, b: 0.13 },
-    { r: 0.01, g: 0.07, b: 0.10 },
-    { r: 0.04, g: 0.01, b: 0.09 }
-  ];
-  /** Multiply palette RGB when writing init pixels (raw palette ≈ display-linear dark). */
-  const SPACE_BG_INTENSITY = 8;
+  /** Stretch-copy an Image/Canvas (game nebula strip frame) into the persistent spaceLayer.
+   *  Replaces any previous backdrop. No-op until WebGL + FBOs exist; source is kept so a
+   *  later initFramebuffers() can re-apply it. */
+  function applySpaceBackground(source) {
+    if (!source || !gl || !spaceLayer || !copyProgram) return;
+    const tex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    // Match CSS canvas orientation (fluid display UVs are y-up).
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
 
-  /** Stamps into the static spaceLayer (not dye) — never touched by step()/dissipation,
-   *  so this paint stays put regardless of DENSITY_DISSIPATION. */
-  function stampSpaceLayer(x, y, color, radiusFrac) {
-    splatProgram.bind();
-    gl.uniform1i(splatProgram.uniforms.uTarget, spaceLayer.read.attach(0));
-    gl.uniform1f(splatProgram.uniforms.aspectRatio, canvas.width / canvas.height);
-    gl.uniform2f(splatProgram.uniforms.point, x, y);
-    gl.uniform3f(splatProgram.uniforms.color, color.r, color.g, color.b);
-    gl.uniform1f(splatProgram.uniforms.radius, correctRadius(radiusFrac));
+    gl.disable(gl.BLEND);
+    copyProgram.bind();
+    gl.uniform1i(copyProgram.uniforms.uTexture, 0);
     blit(spaceLayer.write);
     spaceLayer.swap();
+    gl.deleteTexture(tex);
   }
 
-  /** Lay down large soft nebula clouds at init:
-   *  1) spaceLayer — persistent underlay (no dissipation)
-   *  2) dye — actual fluid-sim pixel colors so velocity stirs them from frame one
-   *  Velocity is left at 0 so they sit still until something pushes them. */
-  function seedSpaceBackground() {
-    for (let i = 0; i < SPACE_BG_PALETTE.length; i++) {
-      const x = 0.12 + Math.random() * 0.76;
-      const y = 0.12 + Math.random() * 0.76;
-      const radiusFrac = 0.12 + Math.random() * 0.10;
-      const base = SPACE_BG_PALETTE[i];
-      const color = {
-        r: base.r * SPACE_BG_INTENSITY,
-        g: base.g * SPACE_BG_INTENSITY,
-        b: base.b * SPACE_BG_INTENSITY
-      };
-      stampSpaceLayer(x, y, color, radiusFrac);
-      splatRaw(x, y, 0, 0, color, radiusFrac);
-    }
+  /** Public: set / refresh the static fluid backdrop from the game's nebula strip frame. */
+  function setSpaceBackground(source) {
+    if (source) pendingSpaceImage = source;
+    if (gl && spaceLayer && pendingSpaceImage) applySpaceBackground(pendingSpaceImage);
   }
 
   /** Radial colored burst — for one-off events (enemy spawn) rather than a directed jet. */
@@ -1127,7 +1115,7 @@
     // against the default 300x150 canvas, and the degenerate initial splat state goes NaN
     // once resizeDoubleFBO() copies it forward into the properly-sized buffers later.
     resizeCanvas();
-    initFramebuffers(); // also seeds spaceLayer on first creation
+    initFramebuffers(); // re-applies pending nebula strip into spaceLayer if set
     lastUpdateTime = Date.now();
   }
 
@@ -1161,6 +1149,7 @@
   global.WebGLFluidBG = {
     init, start, stop, setConfig, setTargetResolution,
     config,
+    setSpaceBackground: (source) => setSpaceBackground(source),
     randomSplats: (n) => { if (gl) multipleSplats(n || 5); },
     thrustSplat: (x, y, angle, opts) => { if (gl) thrustSplat(x, y, angle, opts); },
     burstSplat: (x, y, color, opts) => { if (gl) burstSplat(x, y, color, opts); },

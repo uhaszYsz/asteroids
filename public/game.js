@@ -3642,6 +3642,7 @@ function rerollNebulaBackground(frameIndex) {
   pickNebulaScrollDir();
   gridNebulaScrollX = 0;
   gridNebulaScrollY = 0;
+  syncFluidNebulaBackground();
   return true;
 }
 
@@ -3663,6 +3664,7 @@ function tickNebulaScroll(dt) {
     gridNebulaImg = sliceNebulaFrame(img, frame);
     gridNebulaReady = true;
     uploadNebulaGLTexture();
+    syncFluidNebulaBackground();
     invalidateGridBake();
   };
   img.onerror = () => {
@@ -3896,6 +3898,12 @@ function syncFluidCanvasBox() {
 }
 syncFluidCanvasBox();
 
+/** Push the current spaces_strip4 frame into the fluid sim's static backdrop. */
+function syncFluidNebulaBackground() {
+  if (!window.WebGLFluidBG || !gridNebulaReady || !gridNebulaImg) return;
+  WebGLFluidBG.setSpaceBackground(gridNebulaImg);
+}
+
 /** Switch the menu/game background between the synth grid and the WebGL fluid sim. */
 function applyBgMode(mode) {
   bgMode = mode === 'fluid' ? 'fluid' : 'grid';
@@ -3908,6 +3916,7 @@ function applyBgMode(mode) {
       fluidBgCanvasEl.classList.add('show');
       WebGLFluidBG.init(fluidBgCanvasEl, { width: canvas.width, height: canvas.height });
       WebGLFluidBG.setConfig({ FPS: fluidFps });
+      syncFluidNebulaBackground();
       WebGLFluidBG.start();
     }
   } else {
