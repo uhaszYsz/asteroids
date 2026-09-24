@@ -4455,13 +4455,17 @@ function drawGridBaked() {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, bakeFilt);
   gl.uniform1i(gbUTex, 0);
   const useNebula = ensureNebulaGLTexture();
+  // When the fullscreen underlay is up, stroke nebula would camouflage into it —
+  // only ship-light boosts would remain visible. Keep lattice as grid color instead.
+  const underlayOn = !nightModeActive() && ((cv('cl_bg_layer') | 0) !== 0 || !inGame);
+  const strokeNebula = useNebula && !underlayOn;
   if (gbUNebula) {
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, useNebula ? gridNebulaGL : gridBakeTex);
+    gl.bindTexture(gl.TEXTURE_2D, strokeNebula ? gridNebulaGL : gridBakeTex);
     gl.uniform1i(gbUNebula, 1);
     gl.activeTexture(gl.TEXTURE0);
   }
-  if (gbUNebulaOn) gl.uniform1f(gbUNebulaOn, useNebula ? 1 : 0);
+  if (gbUNebulaOn) gl.uniform1f(gbUNebulaOn, strokeNebula ? 1 : 0);
   if (gbUNebulaScroll) gl.uniform2f(gbUNebulaScroll, gridNebulaScrollX, gridNebulaScrollY);
   if (gbUNebulaScale) gl.uniform1f(gbUNebulaScale, 1 / GRID_NEBULA_TILE);
   gl.uniform1f(gbUAlpha, Math.max(0, Math.min(1, Number(cv('cl_grid_alpha')))));
