@@ -1251,7 +1251,7 @@ const CVARS = {
   cl_grid_alpha: {
     value: 1,
     def: 1,
-    help: 'Grid / bake stroke opacity (0–1). Forced to 1 in draw.'
+    help: 'Grid / bake stroke opacity (0–1). Default 1.'
   },
   cl_grid_aliasing: {
     value: 0,
@@ -3087,7 +3087,7 @@ function drawSynthGrid(now) {
   gl.enable(gl.BLEND);
   // Standard alpha — never additive (SRC_ALPHA, ONE).
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  const alpha = 1;
+  const alpha = Math.max(0, Math.min(1, Number(cv('cl_grid_alpha'))));
   const topoLive = gridTopoMode();
   if (topoLive === 4 || topoLive === 5) {
     drawLatticeMarksLive(col, alpha, topoLive);
@@ -4483,8 +4483,7 @@ function drawGridBaked() {
   if (gbUNebulaScroll) gl.uniform2f(gbUNebulaScroll, gridNebulaScrollX, gridNebulaScrollY);
   if (gbUNebulaScale) gl.uniform1f(gbUNebulaScale, 1 / GRID_NEBULA_TILE);
   if (gbUNebulaLift) gl.uniform1f(gbUNebulaLift, (useNebula && underlayOn) ? 1.75 : 1);
-  // Always opaque strokes — ignore cl_grid_alpha for draw.
-  gl.uniform1f(gbUAlpha, 1);
+  gl.uniform1f(gbUAlpha, Math.max(0, Math.min(1, Number(cv('cl_grid_alpha')))));
   gl.uniform2f(gbURes, W, H);
   gl.uniform2f(gbUWorldOrigin, gridBakeOriginX, gridBakeOriginY);
   gl.uniform2f(gbUWorldSize, gridBakeWorldW, gridBakeWorldH);
