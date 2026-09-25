@@ -1231,7 +1231,7 @@ const CVARS = {
   cl_bg_layer: {
     value: 1,
     def: 1,
-    help: '1 = draw scrolling nebula under the grid (undistorted, alpha 1). On by default.'
+    help: '1 = draw scrolling nebula under the grid (undistorted, 50% brightness). On by default.'
   },
   cl_bg_dir_invert: {
     value: 0,
@@ -3692,7 +3692,8 @@ function drawNebulaUnderlay() {
   const inv = (cv('cl_bg_dir_invert') | 0) !== 0 ? -1 : 1;
   gl.uniform2f(nlUScroll, gridNebulaScrollX * inv, gridNebulaScrollY * inv);
   gl.uniform1f(nlUScale, 1 / GRID_NEBULA_TILE);
-  gl.uniform1f(nlUAlpha, 1);
+  // Half brightness over the cleared black field (same look as rgb×0.5).
+  gl.uniform1f(nlUAlpha, 0.5);
   gl.bindBuffer(gl.ARRAY_BUFFER, nebulaLayerBuf);
   gl.bufferData(gl.ARRAY_BUFFER, nebulaLayerQuad, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(nlAPos);
