@@ -2019,8 +2019,8 @@
       <p class="gp-hint" style="margin:0 0 8px">Bake on/off + quality live under Grid tab.</p>
       <div class="gp-row">
         <div class="gp-label">cl_grid_alpha</div>
-        <input type="range" data-cvar="cl_grid_alpha" min="0" max="1" step="0.01" value="0.5" />
-        <span class="gp-val" data-val="cl_grid_alpha">0.5</span>
+        <input type="range" data-cvar="cl_grid_alpha" min="0" max="1" step="0.01" value="1" />
+        <span class="gp-val" data-val="cl_grid_alpha">1</span>
       </div>
       <label class="gp-check">
         <input type="checkbox" data-cvar-check="cl_grid_aliasing" />
@@ -2500,7 +2500,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=95');
-      await loadScript('game.js?v=1069');
+      await loadScript('game.js?v=1070');
     } catch (err) {
       console.error(err);
     }

@@ -1249,9 +1249,9 @@ const CVARS = {
     help: '1 = pick a new random space nebula each wave. Off by default.'
   },
   cl_grid_alpha: {
-    value: 0.5,
-    def: 0.5,
-    help: 'Grid / bake stroke opacity (0–1).'
+    value: 1,
+    def: 1,
+    help: 'Grid / bake stroke opacity (0–1). Forced to 1 in draw.'
   },
   cl_grid_aliasing: {
     value: 0,
@@ -3085,8 +3085,9 @@ function drawSynthGrid(now) {
   const col = [1, 1, 1];
 
   gl.enable(gl.BLEND);
+  // Standard alpha — never additive (SRC_ALPHA, ONE).
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  const alpha = Math.max(0, Math.min(1, Number(cv('cl_grid_alpha'))));
+  const alpha = 1;
   const topoLive = gridTopoMode();
   if (topoLive === 4 || topoLive === 5) {
     drawLatticeMarksLive(col, alpha, topoLive);
@@ -3469,7 +3470,12 @@ const gridBakeFS = `
       nightA = max(flashLit, max(boost, boomBoost));
     }
 
-    float a = c.a * uAlpha * (1.0 + boost + boomBoost) * nightA;
+    // Ripple energy as brightness (alpha stays flat — no additive alpha stack).
+    if (boost > 0.001) {
+      rgb = min(vec3(1.0), rgb * (1.0 + boost * 0.85));
+    }
+
+    float a = c.a * uAlpha * nightA;
     gl_FragColor = vec4(rgb, min(1.0, a));
   }
 `;
@@ -4454,6 +4460,7 @@ function drawGridBaked() {
   gridBakeVertCount = (p / 4) | 0;
 
   gl.enable(gl.BLEND);
+  // Standard alpha — never additive (SRC_ALPHA, ONE).
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.useProgram(gridBakeProg);
   gl.activeTexture(gl.TEXTURE0);
@@ -4476,7 +4483,8 @@ function drawGridBaked() {
   if (gbUNebulaScroll) gl.uniform2f(gbUNebulaScroll, gridNebulaScrollX, gridNebulaScrollY);
   if (gbUNebulaScale) gl.uniform1f(gbUNebulaScale, 1 / GRID_NEBULA_TILE);
   if (gbUNebulaLift) gl.uniform1f(gbUNebulaLift, (useNebula && underlayOn) ? 1.75 : 1);
-  gl.uniform1f(gbUAlpha, Math.max(0, Math.min(1, Number(cv('cl_grid_alpha')))));
+  // Always opaque strokes — ignore cl_grid_alpha for draw.
+  gl.uniform1f(gbUAlpha, 1);
   gl.uniform2f(gbURes, W, H);
   gl.uniform2f(gbUWorldOrigin, gridBakeOriginX, gridBakeOriginY);
   gl.uniform2f(gbUWorldSize, gridBakeWorldW, gridBakeWorldH);
