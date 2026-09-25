@@ -11532,7 +11532,7 @@ function effectiveLocalWeapon(name) {
     // L2 = 7.5 dmg (server). L3 = 60 ammo.
     if (lvl >= 3) w.ammo = 60;
   } else if (n === 'asteroidgun') {
-    // L2 = 10% faster reload. L3 = 2× hit/bounce dmg (server).
+    // L2 = 10% faster reload. L3 = 2× player hit dmg (server). Bounce vs rocks is flat.
     if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
   } else if (n === 'voidcannon') {
     // L2 = 10% faster reload. L3 = 30% bigger + reddish (server size / client tint).

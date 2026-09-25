@@ -6450,13 +6450,12 @@ function fireAsteroidGun(room, p) {
   a.maxHp = PLAYER_SHOT_ASTEROID_HP;
   a.portalArmed = false;
   a.noCollide = false;
-  // L3: higher player/rock damage; bounce still runs before damageAsteroid.
+  // L3: higher player hit dmg; bounce vs world rocks is flat (all levels).
+  a.shotBounceDmg = PLAYER_SHOT_BOUNCE_DMG;
   if (getWeaponLevel(p, 'asteroidgun') >= 3) {
     a.shotHitDmg = PLAYER_SHOT_HIT_DMG_L3;
-    a.shotBounceDmg = PLAYER_SHOT_BOUNCE_DMG_L3;
   } else {
     a.shotHitDmg = PLAYER_SHOT_HIT_DMG;
-    a.shotBounceDmg = PLAYER_SHOT_BOUNCE_DMG;
   }
   pushAsteroid(room, a);
   emitAsteroidFire(room, a);
