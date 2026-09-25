@@ -19121,11 +19121,11 @@ function drawEnemyCommonCharges() {
       let aim = p.angle || 0;
       if (lead) aim = lead.ang;
       if (lead) {
-        // Red targeting laser: UFO → predicted rocket intercept (updates with player vel).
-        const beamW = (2.2 + 1.4 * t) * RES_SCALE;
-        const beamA = 0.35 + 0.55 * t;
-        drawThickSegment(p.x, p.y, lead.x, lead.y, beamW * 1.6, COL_CHARGE_RED, beamA * 0.45, false);
-        drawLaserBeamSeg(p.x, p.y, lead.x, lead.y, beamW, COL_CHARGE_RED);
+        // Fixed-length 1px aim ray toward the predicted intercept (not clipped to it).
+        const len = 2000;
+        const x1 = p.x + Math.cos(lead.ang) * len;
+        const y1 = p.y + Math.sin(lead.ang) * len;
+        drawThickSegment(p.x, p.y, x1, y1, 1, COL_CHARGE_RED, 1, false);
       }
       const ufoOpt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
       const bank = enemyDrawBank.get(id | 0) || 0;
