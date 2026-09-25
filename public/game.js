@@ -12415,6 +12415,70 @@ function leadInterceptPoint(ox, oy, tx, ty, tvx, tvy, speed) {
   return { x: ox + dx + tvx * t, y: oy + dy + tvy * t };
 }
 
+/** UFO micro-rocket kick / accel — mirror server ENEMY_UFO_ROCKET_*. */
+const ENEMY_UFO_ROCKET_KICK = 4;
+const ENEMY_UFO_ROCKET_ACCEL = 0.15;
+
+/**
+ * Lead aim for kick→accel rockets (matches server leadInterceptAccelRocket).
+ * Returns { x, y, ang } of the predicted intercept point / fire heading.
+ */
+function leadInterceptAccelRocketPoint(ox, oy, tx, ty, tvx, tvy, accel, maxSpd, boostSpd, boostMult, kickSpd) {
+  const dx0 = tx - ox;
+  const dy0 = ty - oy;
+  const a0 = accel > 0 ? +accel : 0;
+  const max = maxSpd > 0 ? +maxSpd : 1e9;
+  const boost = boostSpd != null ? +boostSpd : 0;
+  const mult = boostMult != null && boostMult > 0 ? +boostMult : 1;
+  const kick = kickSpd != null && kickSpd > 0 ? +kickSpd : 0;
+  if (!(a0 > 0)) {
+    const pt = leadInterceptPoint(ox, oy, tx, ty, tvx, tvy, max < 1e9 ? max : 15);
+    return { x: pt.x, y: pt.y, ang: Math.atan2(pt.y - oy, pt.x - ox) };
+  }
+
+  let spd = kick;
+  let dist = 0;
+  let bestT = null;
+  let bestErr = Infinity;
+  const maxT = 600;
+  for (let t = 1; t <= maxT; t++) {
+    let step = a0;
+    if (boost > 0 && Math.abs(spd) >= boost) step = a0 * mult;
+    spd += step;
+    if (spd > max) spd = max;
+    dist += spd;
+    const need = Math.hypot(dx0 + tvx * t, dy0 + tvy * t);
+    const err = Math.abs(dist - need);
+    if (dist + 1e-6 >= need && err < bestErr) {
+      bestErr = err;
+      bestT = t;
+      if (dist - need > max * 3) break;
+    }
+  }
+  if (bestT == null) {
+    return { x: ox + dx0, y: oy + dy0, ang: Math.atan2(dy0, dx0) };
+  }
+  const lx = dx0 + tvx * bestT;
+  const ly = dy0 + tvy * bestT;
+  return { x: ox + lx, y: oy + ly, ang: Math.atan2(ly, lx) };
+}
+
+/** UFO rocket lead pose — same formula the server uses when firing. */
+function ufoRocketLeadPoint(ox, oy, target) {
+  if (!target) return null;
+  const cruise = (WEAPONS.rocket && WEAPONS.rocket.speed > 0) ? WEAPONS.rocket.speed : 15;
+  // Boost speed/mult match ROCKET_ACCEL_BOOST_* on server / client rocket flight.
+  return leadInterceptAccelRocketPoint(
+    ox, oy,
+    target.x, target.y,
+    target.vx || 0, target.vy || 0,
+    ENEMY_UFO_ROCKET_ACCEL,
+    cruise,
+    3, 3,
+    ENEMY_UFO_ROCKET_KICK
+  );
+}
+
 let myId = null;
 let connected = false; // websocket to dedicated server (lobby)
 let inGame = false;    // matched into a room
@@ -19049,15 +19113,18 @@ function drawEnemyCommonCharges() {
     const spin = now * 0.007 + id * 1.7;
 
     if (kind === 'ufo') {
-      // Rocket still fires from hull center; charge telegraph sits on the right cannon.
+      // Rocket fires from hull center; charge sphere sits on the right cannon.
+      // Aim laser + sphere heading track the accel-rocket intercept every frame.
       const target = ufoAimTargetPose();
-      const rocketSpd = (WEAPONS.default.speed || (8 * RES_SCALE)) * 0.7 * 0.85;
+      const lead = ufoRocketLeadPoint(p.x, p.y, target);
       let aim = p.angle || 0;
-      if (target) {
-        const lead = leadInterceptPoint(
-          p.x, p.y, target.x, target.y, target.vx || 0, target.vy || 0, rocketSpd
-        );
-        aim = Math.atan2(lead.y - p.y, lead.x - p.x);
+      if (lead) aim = lead.ang;
+      if (lead) {
+        // Red targeting laser: UFO → predicted rocket intercept (updates with player vel).
+        const beamW = (2.2 + 1.4 * t) * RES_SCALE;
+        const beamA = 0.35 + 0.55 * t;
+        drawThickSegment(p.x, p.y, lead.x, lead.y, beamW * 1.6, COL_CHARGE_RED, beamA * 0.45, false);
+        drawLaserBeamSeg(p.x, p.y, lead.x, lead.y, beamW, COL_CHARGE_RED);
       }
       const ufoOpt = getShipOptionById(ENEMY_UFO_SPRITE_ID);
       const bank = enemyDrawBank.get(id | 0) || 0;

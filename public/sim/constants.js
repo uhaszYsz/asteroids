@@ -307,8 +307,8 @@ const ENEMY_COMMON1_FLANK_RELOAD_FRAC = 0.85;
 /** Pre-shot telegraph length for commons (client charge spheres). */
 const ENEMY_COMMON_CHARGE = TPS;
 const ENEMY_UFO_RELOAD = Math.round(3.5 * TPS);
-/** UFO turret pre-shot telegraph (red charge sphere). */
-const ENEMY_UFO_CHARGE = Math.round(0.5 * TPS);
+/** UFO pre-shot telegraph (red charge sphere + aim laser). */
+const ENEMY_UFO_CHARGE = TPS;
 /** After spawn, wait this long before the first shot (all enemy kinds). */
 const ENEMY_FIRST_SHOT_MIN_S = 4;
 const ENEMY_FIRST_SHOT_MAX_S = 6;

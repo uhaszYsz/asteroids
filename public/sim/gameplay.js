@@ -2709,7 +2709,7 @@ function updateEnemies(room) {
       continue;
     }
     if ((e.fireCd | 0) > 0) e.fireCd--;
-    // Pre-shot charge telegraph (commons 1s, UFO turrets 0.5s).
+    // Pre-shot charge telegraph (commons 1s, UFO 1s + aim laser).
     if ((isCommonKind(e.kind)) && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
       emitEnemyCharge(room, e);
     }
