@@ -3536,6 +3536,27 @@ const GRID_NEBULA_SPEED = 14;
 /** `spaces_strip4.png` — 4 square frames in one row. */
 const GRID_NEBULA_STRIP = 'sprites/spaces_strip4.png';
 const GRID_NEBULA_FRAMES = 4;
+/** Solo worlds lock to fixed strip frames (0-based): W1 = last, W2 = 3rd. */
+const NEBULA_FRAME_WORLD1 = 3;
+const NEBULA_FRAME_WORLD2 = 2;
+
+function nebulaFrameForWorld(world) {
+  return ((world | 0) >= 2) ? NEBULA_FRAME_WORLD2 : NEBULA_FRAME_WORLD1;
+}
+
+/** Apply the locked nebula for the current solo world (no-op if already on that frame). */
+function syncNebulaBackgroundForWorld(world) {
+  const w = Math.max(1, world | 0);
+  const fi = nebulaFrameForWorld(w);
+  if (!gridNebulaStripImg) {
+    pendingNebulaWorld = w;
+    return false;
+  }
+  pendingNebulaWorld = null;
+  if (gridNebulaReady && gridNebulaFrame === fi) return true;
+  return rerollNebulaBackground(fi);
+}
+let pendingNebulaWorld = null;
 
 function pickNebulaScrollDir() {
   const a = Math.random() * Math.PI * 2;
@@ -3622,7 +3643,8 @@ function tickNebulaScroll(dt) {
   const img = new Image();
   img.onload = () => {
     gridNebulaStripImg = img;
-    const frame = (Math.random() * GRID_NEBULA_FRAMES) | 0;
+    // Default to world-1 lock (last strip frame) until a wave sets soloWorld.
+    const frame = nebulaFrameForWorld(1);
     gridNebulaFrame = frame;
     // One native frame — world tile (GRID_NEBULA_TILE) + NEAREST stretch/loop.
     gridNebulaImg = sliceNebulaFrame(img, frame);
@@ -5959,7 +5981,8 @@ function startWaveBanner(n, world) {
   const w = Math.max(1, world != null ? (world | 0) : (soloWorld | 0) || 1);
   soloWave = wave;
   soloWorld = w;
-  if ((cv('cl_bg_auto') | 0) !== 0) rerollNebulaBackground(-1);
+  // Solo worlds always lock strip frame (W1 = last, W2 = 3rd).
+  syncNebulaBackgroundForWorld(w);
   const titleCol = [1.0, 0.92, 0.45];
   const subCol = [0.55, 0.95, 1.0];
   const title = w > 1 ? ('WORLD ' + w + ' · WAVE ' + wave) : ('WAVE ' + wave);
