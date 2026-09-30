@@ -2806,6 +2806,7 @@ function damageEnemy(room, e, dmg, ownerId) {
   } else if (kind === 'worm' || kind === 'gunship') {
     coinGrant = ENEMY_WORM_COIN_GRANT;
     coinVisual = ENEMY_WORM_COIN_VISUAL;
+    destroyAllAsteroidsOnBossDeath(room);
   }
   if (coinGrant > 0 && killerId > 0) {
     const killer = room.players.get(killerId);
@@ -3321,6 +3322,19 @@ function clearAsteroidsForShop(room) {
   if (!room.asteroids || !room.asteroids.length) return;
   for (const a of room.asteroids) {
     emitAsteroidDead(room, a.aid, true);
+  }
+  clearAsteroidsList(room);
+}
+
+/** Boss kill: blow up every rock (FX, no shards / no coin grants). */
+function destroyAllAsteroidsOnBossDeath(room) {
+  room.pendingBigSpawns = [];
+  if (!room.asteroids || !room.asteroids.length) return;
+  const list = room.asteroids.slice();
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    if (!a) continue;
+    emitAsteroidDead(room, a.aid, false, a.x, a.y, 0);
   }
   clearAsteroidsList(room);
 }
