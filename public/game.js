@@ -7132,7 +7132,6 @@ function ghostBulletCollides(g) {
         const dx = g.x - c.x;
         const dy = g.y - c.y;
         if (dx * dx + dy * dy <= (g.r + c.r) * (g.r + c.r)) {
-          startSnakeHitPulse(e, c.chainIdx);
           return true;
         }
       }
@@ -7487,7 +7486,6 @@ function emitHealthPickupFx(x, y) {
  *  Laser weapon hits use spark-style debris (half count, laser color). */
 function emitLaserImpactFx(x, y, hitKind, withSfx, beamDir) {
   if (hitKind === 1 || hitKind === 3) armShipHitTintAt(x, y, hitKind);
-  if (hitKind === 3) trySnakeHitPulseAt(x, y);
   // Laser can hit every server tick — overlap pool, never mid-clip restart.
   if (withSfx && (hitKind === 1 || hitKind === 2 || hitKind === 3)) {
     playSfxOverlap(SFX.laserImpact, {
@@ -7799,7 +7797,6 @@ function emitBulletImpactFx(x, y, type, hitKind, bvx, bvy, blastR) {
     return;
   }
   if (hitKind === 1 || hitKind === 3) {
-    if (hitKind === 3) trySnakeHitPulseAt(x, y);
     // Players + NPC enemies: same flesh/armor hit (hitPlayer2); rockets keep hitPlayer.
     const hitSrc = (hitKind === 1 && isRocket) ? SFX.hitPlayer : SFX.hitPlayerBullet;
     playSfxOverlap(hitSrc, { vol: isRocket && hitKind === 1 ? 0.9 : 0.75, pool: isRocket && hitKind === 1 ? 6 : 8 });
@@ -17478,12 +17475,6 @@ function drawLaserBeams() {
     for (const s of segs) {
       const col = ownerHasDamagePowerup(myId) ? damageRainbowColor() : COL.laser;
       drawLaserBeamSeg(s[0], s[1], s[2], s[3], beamW, col);
-      // Local tip vs snake — pulse from hit segment (debounced inside).
-      const tipDx = s[2] - s[0];
-      const tipDy = s[3] - s[1];
-      if (tipDx * tipDx + tipDy * tipDy < (localLaserClip.range * 0.995) ** 2) {
-        trySnakeHitPulseAt(s[2], s[3]);
-      }
     }
     syncLaserSfx(!!localLaserClip.hum);
   } else {
@@ -18218,6 +18209,7 @@ function applyEnemyUpdate(row) {
   }
   if (prev && prev.snakePulseWaves) {
     e.snakePulseWaves = prev.snakePulseWaves;
+    e.snakePulseNext = prev.snakePulseNext;
   }
   rebaseEnemyPredictOrigin(e);
   enemies.set(id, e);
@@ -18486,11 +18478,11 @@ const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
-/** Hit pulse: hops both ways every 0.035s, advancing 4 segs per hop (all 4 pulse); head never scales. Each does 0.25s grow 0.6→1. */
+/** Interval pulse: every 1.2s from a random body seg, both ways, 4 segs/0.035s hop; head never scales. */
+const SNAKE_PULSE_INTERVAL_MS = 1200;
 const SNAKE_PULSE_HOP_MS = 35;
 const SNAKE_PULSE_HOP_SEGS = 4;
 const SNAKE_PULSE_CYCLE_MS = 250;
-const SNAKE_PULSE_HIT_DEBOUNCE_MS = 100;
 const SNAKE_SEG_SCALE_BASE = 0.6;
 const SNAKE_SEG_SCALE_PEAK = 1;
 
@@ -18502,7 +18494,7 @@ function snakeChainLen(e) {
   return 1 + (e && e.snakeSegs ? e.snakeSegs.length : 0);
 }
 
-/** Drop finished hit waves (visual only). */
+/** Drop finished waves (visual only). */
 function pruneSnakePulseWaves(e, now) {
   if (!e || !e.snakePulseWaves || !e.snakePulseWaves.length) return;
   const hopSteps = Math.ceil(snakeChainLen(e) / SNAKE_PULSE_HOP_SEGS);
@@ -18512,71 +18504,23 @@ function pruneSnakePulseWaves(e, now) {
   }
 }
 
-/**
- * Start a bidirectional pulse from chain index (0 = head, 1.. = body segs).
- * Local visual only; debounced per origin so continuous laser doesn't flood.
- */
-function startSnakeHitPulse(e, originIdx, now) {
+/** Queue interval impulses from a random body segment (local visual only). */
+function tickSnakePulseWaves(e, now) {
   if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0) return;
   if (!e.snakePulseWaves) e.snakePulseWaves = [];
-  const t = now != null ? now : performance.now();
-  const oi = originIdx | 0;
-  for (let i = e.snakePulseWaves.length - 1; i >= 0; i--) {
-    const w = e.snakePulseWaves[i];
-    if ((w.originIdx | 0) === oi && t - w.start < SNAKE_PULSE_HIT_DEBOUNCE_MS) return;
+  if (e.snakePulseNext == null) e.snakePulseNext = now;
+  const bodyN = e.snakeSegs ? e.snakeSegs.length : 0;
+  let guard = 0;
+  while (now >= e.snakePulseNext && guard++ < 8) {
+    // Chain index 1..bodyN (skip head at 0). Fallback to 1 if segs not ready.
+    const originIdx = bodyN > 0 ? (1 + ((Math.random() * bodyN) | 0)) : 1;
+    e.snakePulseWaves.push({ start: e.snakePulseNext, originIdx });
+    e.snakePulseNext += SNAKE_PULSE_INTERVAL_MS;
   }
-  e.snakePulseWaves.push({ start: t, originIdx: oi });
-  pruneSnakePulseWaves(e, t);
+  pruneSnakePulseWaves(e, now);
 }
 
-/** Nearest chain index to world point (0 = head). */
-function nearestSnakeChainIndex(e, x, y) {
-  let bestIdx = 0;
-  let bestD = Infinity;
-  const pose = enemyAt(e);
-  let dx = shortestWrapDelta(pose.x, x, W);
-  let dy = shortestWrapDelta(pose.y, y, H);
-  bestD = dx * dx + dy * dy;
-  if (e.snakeSegs) {
-    for (let i = 0; i < e.snakeSegs.length; i++) {
-      const s = e.snakeSegs[i];
-      dx = shortestWrapDelta(s.x, x, W);
-      dy = shortestWrapDelta(s.y, y, H);
-      const d = dx * dx + dy * dy;
-      if (d < bestD) {
-        bestD = d;
-        bestIdx = i + 1;
-      }
-    }
-  }
-  return bestIdx;
-}
-
-/** If (x,y) is near a live snake, start a hit pulse from that segment. */
-function trySnakeHitPulseAt(x, y, hitR) {
-  if (x == null || y == null || !Number.isFinite(+x) || !Number.isFinite(+y)) return;
-  const er = (hitR != null && hitR > 0) ? +hitR : ((ENEMY_R.snake || ENEMY_R.common || 10) * 2.5);
-  const r2 = er * er;
-  for (const e of enemies.values()) {
-    if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0) continue;
-    const idx = nearestSnakeChainIndex(e, x, y);
-    let cx; let cy;
-    if (idx === 0) {
-      const pose = enemyAt(e);
-      cx = pose.x; cy = pose.y;
-    } else {
-      const s = e.snakeSegs[idx - 1];
-      if (!s) continue;
-      cx = s.x; cy = s.y;
-    }
-    const dx = shortestWrapDelta(cx, x, W);
-    const dy = shortestWrapDelta(cy, y, H);
-    if (dx * dx + dy * dy > r2) continue;
-    startSnakeHitPulse(e, idx);
-  }
-}
-
-/** Base 0.6 → peak → 0.6; hops outward both ways, HOP_SEGS per step (pair/group shares delay). Head (0) never pulses. */
+/** Base 0.6 → peak → 0.6; hops outward both ways, HOP_SEGS per step. Head (0) never pulses. */
 function snakeSegmentPulseScale(e, chainIdx, now) {
   if ((chainIdx | 0) === 0) return SNAKE_SEG_SCALE_BASE;
   const base = SNAKE_SEG_SCALE_BASE;
@@ -20065,7 +20009,7 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
   const wrapTwins = !!e.enteredPlay;
   if (e.snakeSegs && e.snakeSegs.length) {
     const now = performance.now();
-    pruneSnakePulseWaves(e, now);
+    tickSnakePulseWaves(e, now);
     for (let i = 0; i < e.snakeSegs.length; i++) {
       e.snakeSegs[i].scale = snakeSegmentPulseScale(e, i + 1, now);
     }
@@ -21361,7 +21305,6 @@ function predictLocalAsteroidHitFx(p) {
         const rr = cir.r + ec.r;
         if (dx * dx + dy * dy >= rr * rr) continue;
         p.collideCd = COLLIDE_IFRAME_TICKS;
-        startSnakeHitPulse(e, i);
         emitPlayerAsteroidHit(cir.x, cir.y);
         return;
       }
