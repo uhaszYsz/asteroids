@@ -19399,6 +19399,14 @@ function drawGunshipMagnetDust() {
   drawPoints(gunshipMagnetDust, COL_MAGNET_DUST, 0.65);
 }
 
+/** Gunship crystal bob: 0.5s at rest, 0.5s at +2px along nose, loop. */
+function gunshipFrame2BobPx(delaySec) {
+  const t = performance.now() * 0.001 - (delaySec || 0);
+  if (!(t >= 0)) return 0;
+  // [0, 0.5) → 0px; [0.5, 1.0) → +2px
+  return ((t % 1) < 0.5) ? 0 : 2;
+}
+
 /** Gunship: Craft 378 strip — hull on top, crystals under, mirrored crystals below. */
 function drawEnemyGunship(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
@@ -19409,18 +19417,24 @@ function drawEnemyGunship(x, y, angle, color, id, dt) {
     drawEnemyCommon(x, y, angle, color, id, dt);
     return bank;
   }
+  // Frame 2 bob along nose (+X / "right" in strip space). Mirrored layer delayed 0.25s.
+  const bob = gunshipFrame2BobPx(0);
+  const bobFlip = gunshipFrame2BobPx(0.25);
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
   // Bottom → top: mirrored bits, then bits, then hull (frame 0).
   const layers = [
-    { frameIndex: 1, flipLocalY: true, noOutline: true },
-    { frameIndex: 2, flipLocalY: true, noOutline: true },
-    { frameIndex: 1, flipLocalY: false, noOutline: true },
-    { frameIndex: 2, flipLocalY: false, noOutline: true },
-    { frameIndex: 0, flipLocalY: false, noOutline: false }
+    { frameIndex: 1, flipLocalY: true, noOutline: true, bob: bobFlip },
+    { frameIndex: 2, flipLocalY: true, noOutline: true, bob: 0 },
+    { frameIndex: 1, flipLocalY: false, noOutline: true, bob },
+    { frameIndex: 2, flipLocalY: false, noOutline: true, bob: 0 },
+    { frameIndex: 0, flipLocalY: false, noOutline: false, bob: 0 }
   ];
   for (let i = 0; i < layers.length; i++) {
     const layer = layers[i];
+    const o = +layer.bob || 0;
     drawSpriteShipPlane(
-      x, y, angle, 0, id, dt, opt, true, color,
+      x + c * o, y + s * o, angle, 0, id, dt, opt, true, color,
       bank, sizeScale, COL.enemyOutline,
       {
         frameIndex: layer.frameIndex,
