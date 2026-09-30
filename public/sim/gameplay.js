@@ -1538,6 +1538,7 @@ function spawnSoloWaveEnemies(room, wave) {
       boss.queued = false;
       room.enemies.push(boss);
       emitEnemyFire(room, boss);
+      if (kind === 'snake') startSnakeFieldEvent(room);
     }
     return;
   }
@@ -2858,6 +2859,7 @@ function updateEnemies(room) {
   // Worm aim / common1 / snake chase: pose snap every tick so client predict can't drift.
   // Full field snap (enemies+asteroids+pickups) is tickWorldPoseSnap (~2 Hz).
   if (wormHolding || chaseSnap) emitEnemySnap(room, { field: false });
+  tickSnakeFieldEvent(room);
 }
 
 function damageEnemy(room, e, dmg, ownerId) {
@@ -3447,6 +3449,7 @@ function clearAsteroidsForShop(room) {
 /** Boss kill: blow up every rock (FX, no shards / no coin grants). */
 function destroyAllAsteroidsOnBossDeath(room) {
   room.pendingBigSpawns = [];
+  room.snakeFieldLeft = 0;
   if (!room.asteroids || !room.asteroids.length) return;
   const list = room.asteroids.slice();
   for (let i = 0; i < list.length; i++) {
@@ -3455,6 +3458,77 @@ function destroyAllAsteroidsOnBossDeath(room) {
     emitAsteroidDead(room, a.aid, false, a.x, a.y, 0);
   }
   clearAsteroidsList(room);
+}
+
+/** Real field rocks (skip inbound portal twins). */
+function countSnakeFieldAsteroids(room) {
+  if (!room || !room.asteroids) return 0;
+  let n = 0;
+  for (let i = 0; i < room.asteroids.length; i++) {
+    const a = room.asteroids[i];
+    if (!a || a.portalOfAid != null) continue;
+    n++;
+  }
+  return n;
+}
+
+function roomHasLiveSnake(room) {
+  if (!room || !room.enemies) return false;
+  for (let i = 0; i < room.enemies.length; i++) {
+    const e = room.enemies[i];
+    if (e && e.kind === 'snake' && (e.hp | 0) > 0 && enemyIsSpawned(e)) return true;
+  }
+  return false;
+}
+
+/**
+ * Snake init: wipe the field, leave 1 big + 1 medium + 3 small,
+ * then drip one small every 3s while the snake lives (cap 7 total).
+ */
+function startSnakeFieldEvent(room) {
+  if (!room) return;
+  room.pendingBigSpawns = [];
+  if (room.asteroids && room.asteroids.length) {
+    const list = room.asteroids.slice();
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (!a) continue;
+      removePortalTwin(room, a);
+      emitAsteroidDead(room, a.aid, true);
+      removeAsteroid(room, a);
+    }
+    clearAsteroidsList(room);
+  }
+  function spawnSized(size) {
+    const a = makeAsteroid({ size, allowSpecial: false, special: null });
+    pushAsteroid(room, a);
+    emitAsteroidFire(room, a);
+  }
+  spawnSized('big');
+  spawnSized('medium');
+  for (let i = 0; i < 3; i++) spawnSized('small');
+  room.snakeFieldLeft = SNAKE_FIELD_SMALL_INTERVAL;
+}
+
+function tickSnakeFieldEvent(room) {
+  if (!room || !room.practice || room.shopOpen) return;
+  if (!roomHasLiveSnake(room)) {
+    room.snakeFieldLeft = 0;
+    return;
+  }
+  if (!(room.snakeFieldLeft > 0)) return;
+  room.snakeFieldLeft--;
+  if (room.snakeFieldLeft > 0) return;
+  room.snakeFieldLeft = SNAKE_FIELD_SMALL_INTERVAL;
+  if (countSnakeFieldAsteroids(room) >= SNAKE_FIELD_ASTEROID_CAP) return;
+  const a = makeAsteroid({
+    size: 'small',
+    offscreen: true,
+    allowSpecial: false,
+    special: null
+  });
+  pushAsteroid(room, a);
+  emitAsteroidFire(room, a);
 }
 
 function openSoloShop(room, nextWave) {
@@ -4163,6 +4237,7 @@ function handleAdminSpawn(ws, kindRaw) {
     e.queued = false;
     room.enemies.push(e);
     emitEnemyFire(room, e);
+    if (kind === 'snake') startSnakeFieldEvent(room);
     return { ok: 1, kind, what: 'enemy', id: e.id | 0 };
   }
   return {
