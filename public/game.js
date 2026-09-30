@@ -10983,11 +10983,14 @@ const snakeSegBatchMesh = new Float32Array(SNAKE_SEG_BATCH_MAX * 2 * 12 * 7);
 /** Scratch for toroidal draw copies when a sprite straddles a screen edge. */
 const _snakeWrapOff = [];
 
-/** Push (ox,oy) pairs so a sprite at (x,y) also draws across wrapped edges. */
+/** Push (ox,oy) pairs so a sprite at (x,y) also draws across wrapped edges.
+ *  Skip twins while fully off-screen — otherwise an entry spawn at x=-m mirrors
+ *  onto the opposite edge and looks like an on-screen spawn. */
 function snakeEdgeWrapOffsets(x, y, margin, out) {
   out.length = 0;
   out.push(0, 0);
   const m = margin > 0 ? margin : 0;
+  if (x < -m || x > W + m || y < -m || y > H + m) return out;
   const left = x < m;
   const right = x > W - m;
   const top = y < m;
@@ -19739,8 +19742,9 @@ function drawEnemyCarrier(x, y, angle, weapon) {
  * Draw all snake body segments in one mesh upload.
  * Fill = 1 drawArrays; outline = 8 offset passes on the same VBO (same look as
  * drawSpriteShipPlane, without per-segment program/texture binds).
+ * opts.wrapTwins: false during off-screen entry so spawn isn't mirrored on-screen.
  */
-function drawSnakeSegmentsBatched(segs, color, outlineColor) {
+function drawSnakeSegmentsBatched(segs, color, outlineColor, opts) {
   if (!segs || !segs.length) return;
   const opt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
   const spec = opt && opt.sprite;
@@ -19759,6 +19763,7 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor) {
   const drop = halfW * Math.sin(pitch);
   const invHalfL = 1 / Math.max(1e-3, halfL);
   const invHalfW = 1 / Math.max(1e-3, halfW);
+  const allowTwins = !opts || opts.wrapTwins !== false;
 
   const state = tinyShipDesiredState(spec, true, false);
   const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
@@ -19796,7 +19801,11 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor) {
     const s = segs[si];
     const ang = s.angle || 0;
     const bank = 0;
-    snakeEdgeWrapOffsets(s.x, s.y, edgeM, _snakeWrapOff);
+    if (allowTwins) snakeEdgeWrapOffsets(s.x, s.y, edgeM, _snakeWrapOff);
+    else {
+      _snakeWrapOff.length = 0;
+      _snakeWrapOff.push(0, 0);
+    }
     for (let wi = 0; wi < _snakeWrapOff.length; wi += 2) {
       if (drawn >= SNAKE_SEG_BATCH_MAX) break;
       const sx = s.x + _snakeWrapOff[wi];
@@ -19880,14 +19889,16 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor) {
 }
 
 /** Snake boss: Craft 274 head (server) + Craft 88 tail (local path trail, batched).
- *  Head/segs draw wrap twins near edges so the nose doesn't vanish mid-cross. */
+ *  Head/segs draw wrap twins near edges so the nose doesn't vanish mid-cross.
+ *  Twins stay off until enteredPlay so off-screen entry isn't mirrored on-screen. */
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
   updateSnakeSegsToward(e, x, y, angle);
+  const wrapTwins = !!e.enteredPlay;
   if (e.snakeSegs && e.snakeSegs.length) {
     for (let i = 0; i < e.snakeSegs.length; i++) {
       e.snakeSegs[i].scale = snakeSegmentScaleClient(i);
     }
-    drawSnakeSegmentsBatched(e.snakeSegs, color || COL.enemy, COL.enemyOutline);
+    drawSnakeSegmentsBatched(e.snakeSegs, color || COL.enemy, COL.enemyOutline, { wrapTwins });
   }
   const headOpt = getShipOptionById(ENEMY_SNAKE_HEAD_SPRITE_ID);
   const bank = enemyBankSmoothed(id, angle, dt);
@@ -19895,7 +19906,11 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
     const headSpec = headOpt.sprite;
     const headM = Math.max(1, headSpec.fh, headSpec.fw) * 0.5 * SPRITE_SHIP_PX_SCALE
       * (ENEMY_SNAKE_HEAD_SPRITE_SCALE > 0 ? ENEMY_SNAKE_HEAD_SPRITE_SCALE : 1) + 4;
-    snakeEdgeWrapOffsets(x, y, headM, _snakeWrapOff);
+    if (wrapTwins) snakeEdgeWrapOffsets(x, y, headM, _snakeWrapOff);
+    else {
+      _snakeWrapOff.length = 0;
+      _snakeWrapOff.push(0, 0);
+    }
     for (let wi = 0; wi < _snakeWrapOff.length; wi += 2) {
       drawSpriteShipPlane(
         x + _snakeWrapOff[wi], y + _snakeWrapOff[wi + 1], angle, 0, id, dt, headOpt, true, color,

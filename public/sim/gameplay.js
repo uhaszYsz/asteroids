@@ -1209,7 +1209,10 @@ function randomOffscreenSpawnPoint(margin) {
 
 /** Place enemy off-screen aimed at an on-field wander point. */
 function placeEnemyOffscreenEntry(e) {
-  const spawn = randomOffscreenSpawnPoint((e.r || 12) + 24 * RES_SCALE);
+  // Snake head sprite is ~55px — keep the whole nose clearly off-screen.
+  let margin = (e.r || 12) + 24 * RES_SCALE;
+  if (e.kind === 'snake') margin = Math.max(margin, 48 * RES_SCALE);
+  const spawn = randomOffscreenSpawnPoint(margin);
   const target = randomWanderPoint();
   e.x = spawn.x;
   e.y = spawn.y;
