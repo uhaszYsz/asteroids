@@ -477,6 +477,7 @@ const ENEMY_R = {
   common1: 6 * RES_SCALE,
   commonRail: 6 * RES_SCALE * 0.7,
   commonVoid: 6 * RES_SCALE * 0.7,
+  volkano: 4 * RES_SCALE,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
@@ -522,6 +523,7 @@ const ENEMY_HP = {
   common1: 95,
   commonRail: 95,
   commonVoid: 95,
+  volkano: 95,
   ufo: 300,
   carrier: 90,
   worm: 1000,
@@ -577,6 +579,13 @@ const ENEMY_COMMON_RAIL_SPEED_MUL = 0.85;
 const ENEMY_COMMON_RAIL_RELOAD = Math.round(4 * TPS);
 const ENEMY_COMMON_RAIL_DMG = 60;
 const ENEMY_COMMON_RAIL_CHARGE = Math.round(0.5 * TPS);
+/** Volkano: sits on an asteroid edge; short red laser (50% of player laser dmg). */
+const ENEMY_VOLKANO_LASER = {
+  range: 45,
+  dmg: BULLET_TYPES.laser.dmg * 0.5,
+  cooldown: WEAPONS.laser.cooldown,
+  col: [1.0, 0.12, 0.08]
+};
 /** World-2 special: bouncing fuchsia rail every 8s (6 edge bounces). */
 const ENEMY_RAIL_BOUNCE_RELOAD = Math.round(8 * TPS);
 const ENEMY_RAIL_BOUNCE_COUNT = 6;
