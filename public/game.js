@@ -17811,8 +17811,9 @@ function enemyWanderSpeedOf(e) {
 }
 
 function enemyTurnMaxOf(e) {
-  // Match server: common1 / snake use worm-rocket homing +30% (°/tick).
-  if (e && (e.kind === 'common1' || e.kind === 'snake')) return (2 * 1.3 * Math.PI) / 180;
+  // Match server: common1 worm-rocket homing +30%; snake half of that.
+  if (e && e.kind === 'common1') return (2 * 1.3 * Math.PI) / 180;
+  if (e && e.kind === 'snake') return (2 * 1.3 * 0.5 * Math.PI) / 180;
   let t = ENEMY_TURN_MAX;
   if (e && e.kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) {
     t *= 2;

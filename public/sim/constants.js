@@ -467,6 +467,9 @@ const ENEMY_COMMON1_SPEED = ENEMY_WORM_ROCKET.maxSpeed * 0.8 * 0.9 * 0.85;
 const ENEMY_COMMON1_SPEED_JITTER = 0.1;
 /** common1 turn: worm-rocket homing +30% (°/tick). */
 const ENEMY_COMMON1_HOMING = ENEMY_WORM_ROCKET.homing * 1.3;
+/** Snake: 25% slower than common1, 50% slower turn. */
+const ENEMY_SNAKE_SPEED = ENEMY_COMMON1_SPEED * 0.75;
+const ENEMY_SNAKE_HOMING = ENEMY_COMMON1_HOMING * 0.5;
 /**
  * Worm 3rd attack — 360° line-shotgun. Per pellet: random L/W and speed.
  * Speeds are literal px/tick (same units as worm rockets).

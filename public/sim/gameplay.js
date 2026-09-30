@@ -1000,9 +1000,12 @@ function enemySpeed(e) {
 }
 
 function enemyTurnMax(e) {
-  // common1 / snake: worm-rocket homing +30% (°/tick → rad/tick).
-  if (e && (e.kind === 'common1' || e.kind === 'snake')) {
+  // common1: worm-rocket homing +30% (°/tick → rad/tick). Snake: half of that.
+  if (e && e.kind === 'common1') {
     return (ENEMY_COMMON1_HOMING * Math.PI) / 180;
+  }
+  if (e && e.kind === 'snake') {
+    return (ENEMY_SNAKE_HOMING * Math.PI) / 180;
   }
   let t = ENEMY_TURN_MAX;
   if (wormIsShotgunRush(e)) t *= 2;
@@ -1252,6 +1255,7 @@ function makeEnemy(kind, wave, weapon) {
     (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
   );
   const chaseSpeed = k === 'common1' || k === 'snake';
+  const chaseBase = k === 'snake' ? ENEMY_SNAKE_SPEED : ENEMY_COMMON1_SPEED;
   const e = {
     id: 0,
     kind: k,
@@ -1280,9 +1284,9 @@ function makeEnemy(kind, wave, weapon) {
     railChargeLeft: 0,
     lastLaserAng: null,
     enteredPlay: false,
-    // common1/snake: worm-rocket maxSpeed −20%/−10%/−15%, ±10% per ship; others roll wander band.
+    // common1/snake: worm-rocket band ±10% per ship; snake base is 25% below common1.
     speed: chaseSpeed
-      ? ENEMY_COMMON1_SPEED * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
+      ? chaseBase * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
       : randomEnemyWanderSpeed(),
     // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
     // Gunship reuses wormPhase: 0 idle; 1 spray; 2 spray reload; 3 void hold; 4 magnet; 5 void cruise.
