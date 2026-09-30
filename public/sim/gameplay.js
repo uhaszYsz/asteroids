@@ -5217,7 +5217,8 @@ function finishDeathRound(room) {
         return;
       }
       if (victim && (victim.lives | 0) > 0) {
-        respawnPlayer(room, victim, false, SOLO_MAX_HP);
+        // Solo/coop waves: keep guns + levels across deaths; PvP still strips the loser.
+        respawnPlayer(room, victim, true, SOLO_MAX_HP);
         resyncAllAsteroids(room);
         emitRoundReset(room);
       }
@@ -5228,8 +5229,8 @@ function finishDeathRound(room) {
       endSoloPractice(room);
       return;
     }
-    // Keep wave field / enemies; only respawn the pilot (1 HP).
-    respawnPlayer(room, victim, false, SOLO_MAX_HP);
+    // Keep wave field / enemies; only respawn the pilot (keep loadout).
+    respawnPlayer(room, victim, true, SOLO_MAX_HP);
     resyncAllAsteroids(room);
     emitRoundReset(room);
     return;
