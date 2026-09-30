@@ -567,6 +567,8 @@ const ASTEROID_INBOUND_STUCK_MS = 20000;
 const ASTEROID_LIFE_MS = 20000;
 /** Rail damage vs players/enemies when an asteroid is closer on the beam. */
 const RAIL_THROUGH_ASTEROID_MULT = 0.2;
+/** Laser / railgun only — enlarge NPC enemy hitboxes for player raycasts. */
+const PLAYER_RAY_ENEMY_HIT_SCALE = 1.25;
 /** Network special codes: 0 normal, 1 meteor, 2 golden (3 legacy — ignored). */
 function specialAsteroidCode(a) {
   if (a.special === 'meteor') return 1;

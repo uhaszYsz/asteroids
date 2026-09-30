@@ -936,9 +936,16 @@
       cursor: pointer;
     }
     .ss-slot-menu-btn:last-child { margin-bottom: 0; }
-    .ss-slot-menu-btn:hover:not(:disabled) {
+    .ss-slot-menu-btn:hover:not(:disabled),
+    .ss-slot-menu-btn.ss-focus:not(:disabled),
+    .ss-slot-menu-btn:focus:not(:disabled) {
       border-color: #7ee8ff;
       background: #1a3448;
+      outline: none;
+    }
+    .ss-slot-menu-btn.ss-focus:not(:disabled),
+    .ss-slot-menu-btn:focus-visible:not(:disabled) {
+      box-shadow: 0 0 0 2px rgba(126, 232, 255, 0.55);
     }
     .ss-slot-menu-btn:disabled {
       opacity: 0.45;
@@ -2567,7 +2574,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=95');
-      await loadScript('game.js?v=1125');
+      await loadScript('game.js?v=1126');
     } catch (err) {
       console.error(err);
     }

@@ -968,6 +968,8 @@ const STUN_MAX_SPEED = 9;
 const ASTEROID_COLLIDE_DMG_MIN = 10;
 /** Collision shape is this fraction of visual radius / polygon (visual unchanged). */
 const ASTEROID_HIT_SCALE = 0.9;
+/** Laser tip prediction — match server PLAYER_RAY_ENEMY_HIT_SCALE. */
+const PLAYER_RAY_ENEMY_HIT_SCALE = 1.25;
 /** World asteroid lifetime from create (matches server) — after this, no teleports/portals. */
 const ASTEROID_LIFE_MS = 20000;
 const PLAYER_R = 10 * RES_SCALE;
@@ -11624,6 +11626,8 @@ let equippedWeapon2 = null;
 let activeWeaponSlot = 1;
 /** Shop: preferred buy slot (1/2) shown in the corner badge. */
 let shopBuySlot = 1;
+let shopSlotMenuButtons = [];
+let shopSlotMenuFocus = 0;
 /** Mirror of server WEAPONS — used only to gate local muzzle/fake shot FX. */
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
@@ -12071,6 +12075,37 @@ addEventListener('keydown', e => {
     return;
   }
   if (soloShopOpen) {
+    if (shopSlotMenuIsOpen()) {
+      if (e.code === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeShopWeaponSlotMenu();
+        return;
+      }
+      if (e.code === 'Enter' || e.code === 'Space') {
+        e.preventDefault();
+        shopSlotMenuActivate();
+        return;
+      }
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+        e.preventDefault();
+        shopSlotMenuMove(-1);
+        return;
+      }
+      if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+        e.preventDefault();
+        shopSlotMenuMove(1);
+        return;
+      }
+      if (
+        e.code === 'ArrowLeft' || e.code === 'KeyA' ||
+        e.code === 'ArrowRight' || e.code === 'KeyD' ||
+        e.code === 'KeyZ' || e.code === 'KeyX' || e.code === 'AltLeft'
+      ) {
+        e.preventDefault();
+        return;
+      }
+    }
     if (e.code === 'Enter') {
       e.preventDefault();
       closeSoloShopContinue();
@@ -13439,6 +13474,45 @@ function updateShopSlotBadge() {
 function closeShopWeaponSlotMenu() {
   const m = document.getElementById('ss-slot-menu');
   if (m) m.remove();
+  shopSlotMenuButtons = [];
+  shopSlotMenuFocus = 0;
+}
+
+function shopSlotMenuIsOpen() {
+  return !!document.getElementById('ss-slot-menu');
+}
+
+function shopSlotMenuApplyFocus() {
+  const btns = shopSlotMenuButtons;
+  if (!btns.length) return;
+  shopSlotMenuFocus = Math.max(0, Math.min(btns.length - 1, shopSlotMenuFocus | 0));
+  for (let i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle('ss-focus', i === shopSlotMenuFocus);
+  }
+  const b = btns[shopSlotMenuFocus];
+  if (b && typeof b.focus === 'function') {
+    try { b.focus({ preventScroll: true }); } catch (_) { try { b.focus(); } catch (__) {} }
+  }
+}
+
+function shopSlotMenuMove(dir) {
+  const btns = shopSlotMenuButtons;
+  if (!btns.length) return;
+  let i = shopSlotMenuFocus | 0;
+  for (let n = 0; n < btns.length; n++) {
+    i = (i + dir + btns.length) % btns.length;
+    if (!btns[i].disabled) {
+      shopSlotMenuFocus = i;
+      shopSlotMenuApplyFocus();
+      return;
+    }
+  }
+}
+
+function shopSlotMenuActivate() {
+  const b = shopSlotMenuButtons[shopSlotMenuFocus];
+  if (!b || b.disabled) return;
+  b.click();
 }
 
 /** Little context menu: pick slot 1 or 2 when buying a weapon (opened via Space). */
@@ -13449,15 +13523,19 @@ function openShopWeaponSlotMenu(name, clientX, clientY) {
   const menu = document.createElement('div');
   menu.id = 'ss-slot-menu';
   menu.className = 'ss-slot-menu';
+  menu.setAttribute('role', 'menu');
+  menu.tabIndex = -1;
   const title = document.createElement('div');
   title.className = 'ss-slot-menu-title';
   title.textContent = shopItemLabel(name).toUpperCase();
   menu.appendChild(title);
+  shopSlotMenuButtons = [];
   for (let s = 1; s <= 2; s++) {
     const cost = shopWeaponCostForSlotClient(st, name, s);
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'ss-slot-menu-btn';
+    btn.setAttribute('role', 'menuitem');
     const cur = s === 2 ? st.weapon2 : st.weapon;
     let label = 'SLOT ' + s;
     if (cur === name) {
@@ -13487,7 +13565,20 @@ function openShopWeaponSlotMenu(name, clientX, clientY) {
       }
     }
     menu.appendChild(btn);
+    shopSlotMenuButtons.push(btn);
   }
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'ss-slot-menu-btn ss-slot-menu-cancel';
+  cancelBtn.setAttribute('role', 'menuitem');
+  cancelBtn.textContent = 'CANCEL';
+  cancelBtn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    closeShopWeaponSlotMenu();
+  });
+  menu.appendChild(cancelBtn);
+  shopSlotMenuButtons.push(cancelBtn);
   document.body.appendChild(menu);
   const pad = 8;
   let x = clientX | 0;
@@ -13500,6 +13591,14 @@ function openShopWeaponSlotMenu(name, clientX, clientY) {
   if (y < pad) y = pad;
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
+  shopSlotMenuFocus = 0;
+  for (let i = 0; i < shopSlotMenuButtons.length; i++) {
+    if (!shopSlotMenuButtons[i].disabled) {
+      shopSlotMenuFocus = i;
+      break;
+    }
+  }
+  shopSlotMenuApplyFocus();
 }
 
 /** Open slot menu for a shop weapon row (centered on the element). */
@@ -13687,7 +13786,9 @@ function renderSoloShop() {
       const name = WEAPON_NAMES[i];
       const slotHere = name === cur ? 1 : (name === cur2 ? 2 : 0);
       const isCur = slotHere !== 0;
-      const cost = shopWeaponCostClient(st, name);
+      const cost = isCur
+        ? shopWeaponCostForSlotClient(st, name, slotHere)
+        : shopWeaponCostClient(st, name);
       const row = document.createElement('div');
       row.className = 'ss-row' + (isCur ? ' ss-current' : '');
       attachShopPreview(row, 'weapon', name, 1100 + i);
@@ -17435,7 +17536,7 @@ function localLaserSegments(ox, oy, dirX, dirY, maxDist) {
     const p = enemyAt(e);
     let t;
     if (enemyUsesRectHit(e)) {
-      t = raycastEnemyRectToroidal(ox, oy, dirX, dirY, p, p.angle, best);
+      t = raycastEnemyRectToroidal(ox, oy, dirX, dirY, p, p.angle, best, PLAYER_RAY_ENEMY_HIT_SCALE);
       if (t != null && t < best) {
         best = t;
         hitX = ox + dirX * t;
@@ -17443,7 +17544,7 @@ function localLaserSegments(ox, oy, dirX, dirY, maxDist) {
       }
     } else {
       for (const cir of enemyHitCirclesAt(p.x, p.y, p.angle, e)) {
-        t = raycastCircleToroidal(ox, oy, dirX, dirY, cir.x, cir.y, cir.r, best);
+        t = raycastCircleToroidal(ox, oy, dirX, dirY, cir.x, cir.y, cir.r * PLAYER_RAY_ENEMY_HIT_SCALE, best);
         if (t != null && t < best) {
           best = t;
           hitX = ox + dirX * t;
@@ -18151,10 +18252,11 @@ function raycastOrientedRect(ox, oy, dx, dy, cx, cy, angle, hl, hw, maxDist) {
   return tHit;
 }
 
-function raycastEnemyRectToroidal(ox, oy, dx, dy, e, angle, maxDist) {
+function raycastEnemyRectToroidal(ox, oy, dx, dy, e, angle, maxDist, hitScale) {
+  const scale = hitScale > 0 ? hitScale : 1;
   const d = enemyRectDims(e);
-  const hl = d.len * 0.5;
-  const hw = d.wid * 0.5;
+  const hl = d.len * 0.5 * scale;
+  const hw = d.wid * 0.5 * scale;
   let best = null;
   for (let oxw = -W; oxw <= W; oxw += W) {
     for (let oyw = -H; oyw <= H; oyw += H) {

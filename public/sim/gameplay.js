@@ -3148,10 +3148,11 @@ function raycastOrientedRect(ox, oy, dx, dy, cx, cy, angle, hl, hw, maxDist) {
   return tHit;
 }
 
-function raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist) {
+function raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist, hitScale) {
+  const scale = hitScale > 0 ? hitScale : 1;
   const d = enemyRectDims(e);
-  const hl = d.len * 0.5;
-  const hw = d.wid * 0.5;
+  const hl = d.len * 0.5 * scale;
+  const hw = d.wid * 0.5 * scale;
   let best = null;
   for (let oxw = -W; oxw <= W; oxw += W) {
     for (let oyw = -H; oyw <= H; oyw += H) {
@@ -6046,11 +6047,12 @@ function raycastCircleToroidal(ox, oy, dx, dy, cx, cy, cr, maxDist) {
   return best;
 }
 
-function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist) {
+function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist, opts) {
   let best = null;
   // Player weapons: toroidal (wrap fights). Enemy beams (ownerId<=0): Euclidean only —
   // worm/carrier lasers draw a straight segment; wrap hits felt like damage far from the beam.
   const wrapPlayers = (ownerId | 0) > 0;
+  const enemyHitScale = (opts && opts.enemyHitScale > 0) ? opts.enemyHitScale : 1;
   for (const p of room.players.values()) {
     if (p.id === ownerId || p.hp <= 0 || p.godLeft > 0) continue;
     if (blocksFriendlyFire(room, ownerId)) continue;
@@ -6081,11 +6083,11 @@ function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
     let hit = null;
     if (enemyUsesRectHit(e)) {
-      hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist);
+      hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist, enemyHitScale);
     } else {
       let bestHit = null;
       for (const cir of enemyHitCircles(e)) {
-        const h = raycastCircleToroidal(ox, oy, dx, dy, cir.x, cir.y, cir.r, maxDist);
+        const h = raycastCircleToroidal(ox, oy, dx, dy, cir.x, cir.y, cir.r * enemyHitScale, maxDist);
         if (h && (!bestHit || h.t < bestHit.t)) bestHit = h;
       }
       hit = bestHit;
@@ -6413,7 +6415,8 @@ function fireLaser(room, p, weaponName) {
     // Slight per-shot flicker width — must be RES_SCALE'd like the wide beam (ENEMY_WORM_LASER.width),
     // or a raw 2-6px value renders as a hairline (own Z-laser hides this by ignoring the server width).
     const width = (2 + (Math.random() * 4 | 0)) * RES_SCALE;
-    const hit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining);
+    const rayOpts = { enemyHitScale: PLAYER_RAY_ENEMY_HIT_SCALE };
+    const hit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining, rayOpts);
     if (!hit) {
       roomBroadcast(room, {
         t: 'lf',
@@ -6448,11 +6451,12 @@ function fireLaser(room, p, weaponName) {
   ];
   const rays = [];
   const damaged = new Set();
+  const rayOpts = { enemyHitScale: PLAYER_RAY_ENEMY_HIT_SCALE };
   // Centerline only for visual beam end (not a damage sample).
-  const midHit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining);
+  const midHit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining, rayOpts);
   for (let i = 0; i < origins.length; i++) {
     const o = origins[i];
-    const hit = raycastFirst(room, p.id, o.x, o.y, dx, dy, remaining);
+    const hit = raycastFirst(room, p.id, o.x, o.y, dx, dy, remaining, rayOpts);
     const x1 = hit ? hit.x : o.x + dx * remaining;
     const y1 = hit ? hit.y : o.y + dy * remaining;
     const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
@@ -6603,18 +6607,19 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
     }
     if (best) softHits.push({ t: best.t, x: best.x, y: best.y, kind: 'player', target: other });
   }
+  const enemyHitScale = PLAYER_RAY_ENEMY_HIT_SCALE;
   for (const e of room.enemies || []) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
     let hit = null;
     if (enemyUsesRectHit(e)) {
       if (toroidal) {
-        hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist);
+        hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist, enemyHitScale);
       } else {
         const d = enemyRectDims(e);
         const t = raycastOrientedRect(
           ox, oy, dx, dy,
           e.x, e.y, e.angle || 0,
-          d.len * 0.5, d.wid * 0.5,
+          d.len * 0.5 * enemyHitScale, d.wid * 0.5 * enemyHitScale,
           maxDist
         );
         if (t != null) hit = { t, x: ox + dx * t, y: oy + dy * t };
@@ -6622,11 +6627,12 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
     } else {
       let bestHit = null;
       for (const cir of enemyHitCircles(e)) {
+        const er = cir.r * enemyHitScale;
         if (toroidal) {
-          const h = raycastCircleToroidal(ox, oy, dx, dy, cir.x, cir.y, cir.r, maxDist);
+          const h = raycastCircleToroidal(ox, oy, dx, dy, cir.x, cir.y, er, maxDist);
           if (h && (!bestHit || h.t < bestHit.t)) bestHit = h;
         } else {
-          const t = raycastCircle(ox, oy, dx, dy, cir.x, cir.y, cir.r);
+          const t = raycastCircle(ox, oy, dx, dy, cir.x, cir.y, er);
           if (t != null && t <= maxDist && (!bestHit || t < bestHit.t)) {
             bestHit = { t, x: ox + dx * t, y: oy + dy * t };
           }
