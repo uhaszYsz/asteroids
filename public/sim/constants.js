@@ -388,6 +388,12 @@ const ENEMY_SNAKE_TURRET_HP = 150;
 const ENEMY_SNAKE_TURRET_FIRE_TICKS = 4 * TPS;
 const ENEMY_SNAKE_TURRET_BULLET_SPEED = 4.5;
 const ENEMY_SNAKE_TURRET_HIT_R = 10;
+/** Every this much boss HP lost (head/tail, not turrets) → electro rage dash. */
+const ENEMY_SNAKE_RAGE_EVERY = 800;
+/** Rage duration: 2× move speed + big electro charge FX in front of the head. */
+const ENEMY_SNAKE_RAGE_TICKS = Math.round(2.5 * TPS);
+/** Hits on the head circle deal this many times normal damage. */
+const ENEMY_SNAKE_HEAD_DMG_MULT = 2;
 /** Snake field event: drip smalls / mediums while the boss lives. */
 const SNAKE_FIELD_SMALL_INTERVAL = Math.round(2 * TPS);
 const SNAKE_FIELD_MEDIUM_INTERVAL = Math.round(5 * TPS);

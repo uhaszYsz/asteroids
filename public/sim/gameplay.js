@@ -996,6 +996,8 @@ function enemySpeed(e) {
   }
   // Worm attack 3 (360° shotgun, phases 6–7): dash at 2× wander speed.
   if (wormIsShotgunRush(e)) base *= 2;
+  // Snake electro rage: 2× chase speed while the charge window is live.
+  if (e && e.kind === 'snake' && (e.snakeRageLeft | 0) > 0) base *= 2;
   return base;
 }
 
@@ -1159,16 +1161,18 @@ function tickWorldPoseSnap(room) {
   emitEnemySnap(room, { field: true });
 }
 
-/** Common / UFO / worm about to fire — charge telegraph for clients. */
+/** Common / UFO / worm / snake about to fire — charge telegraph for clients. */
 function emitEnemyCharge(room, e, opts) {
-  if (!e || (!isCommonKind(e.kind) && e.kind !== 'ufo' && e.kind !== 'worm' && e.kind !== 'gunship')) return;
+  if (!e || (!isCommonKind(e.kind) && e.kind !== 'ufo' && e.kind !== 'worm' && e.kind !== 'gunship' && e.kind !== 'snake')) return;
   const ms = e.kind === 'ufo'
     ? Math.round((ENEMY_UFO_CHARGE * 1000) / TPS)
     : e.kind === 'worm'
       ? Math.round((ENEMY_WORM_AIM_TICKS * 1000) / TPS)
       : e.kind === 'gunship'
         ? Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS)
-        : Math.round((ENEMY_COMMON_CHARGE * 1000) / TPS);
+        : e.kind === 'snake'
+          ? Math.round((ENEMY_SNAKE_RAGE_TICKS * 1000) / TPS)
+          : Math.round((ENEMY_COMMON_CHARGE * 1000) / TPS);
   roomBroadcast(room, {
     t: 'ech',
     id: e.id | 0,
@@ -1318,7 +1322,9 @@ function makeEnemy(kind, wave, weapon) {
     flankDur: 0,
     // Snake: head path stamps (every ENEMY_SNAKE_FOLLOW_DIST px) for tail hits.
     snakeTrail: null,
-    snakeSegMax: k === 'snake' ? ENEMY_SNAKE_SEGMENTS : 0
+    snakeSegMax: k === 'snake' ? ENEMY_SNAKE_SEGMENTS : 0,
+    snakeRageLeft: 0,
+    snakeDmgSinceRage: 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -1512,7 +1518,25 @@ function damageSnakePreferTurret(room, e, dmg, ownerId, hx, hy, hr) {
       tryDamageSnakeTurretAt(room, e, hx, hy, hr != null ? hr : 4, dmg, ownerId)) {
     return;
   }
-  damageEnemy(room, e, dmg, ownerId);
+  let dealt = Math.max(0, dmg | 0);
+  // Head hits count double vs body/tail trail.
+  if (e && e.kind === 'snake' && hx != null && hy != null && snakeHitIsHead(e, hx, hy, hr)) {
+    dealt = Math.max(1, Math.round(dealt * ENEMY_SNAKE_HEAD_DMG_MULT));
+  }
+  damageEnemy(room, e, dealt, ownerId);
+}
+
+/** True when the impact is on the head circle (not a trail stamp). */
+function snakeHitIsHead(e, hx, hy, hr) {
+  if (!e || e.kind !== 'snake') return false;
+  const er = (e.r || ENEMY_R.snake || 10) + (hr != null ? hr : 4);
+  return torusDistSq(hx, hy, e.x, e.y) <= er * er;
+}
+
+function startSnakeRage(room, e) {
+  if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0) return;
+  e.snakeRageLeft = ENEMY_SNAKE_RAGE_TICKS;
+  emitEnemyCharge(room, e);
 }
 
 /** Global 4s timer: one random living mount fires toward the player. */
@@ -3051,6 +3075,7 @@ function updateEnemies(room) {
       }
       stepEnemyMovement(e);
       if (e.kind === 'snake') {
+        if ((e.snakeRageLeft | 0) > 0) e.snakeRageLeft--;
         updateSnakeTrail(e);
         snakeEatAsteroids(room, e);
         tickSnakeTurrets(room, e);
@@ -3083,7 +3108,15 @@ function damageEnemy(room, e, dmg, ownerId) {
   if (!e || e.hp <= 0) return;
   const oid = ownerId | 0;
   if (oid > 0) e.lastHitBy = oid;
-  e.hp -= dmg;
+  const dealt = Math.max(0, dmg | 0);
+  e.hp -= dealt;
+  if (e.kind === 'snake' && dealt > 0 && e.hp > 0) {
+    e.snakeDmgSinceRage = (e.snakeDmgSinceRage | 0) + dealt;
+    while ((e.snakeDmgSinceRage | 0) >= ENEMY_SNAKE_RAGE_EVERY && (e.hp | 0) > 0) {
+      e.snakeDmgSinceRage -= ENEMY_SNAKE_RAGE_EVERY;
+      startSnakeRage(room, e);
+    }
+  }
   if (e.hp > 0) {
     emitEnemyHp(room, e);
     return;

@@ -19376,6 +19376,9 @@ const ENEMY_COMMON_GUNS = [
 const COL_CHARGE_RED = [1.0, 0.14, 0.1];
 const COL_CHARGE_HOT = [1.0, 0.55, 0.22];
 const COL_CHARGE_CORE = [1.0, 0.92, 0.75];
+/** Snake electro rage telegraph. */
+const COL_CHARGE_ELECTRO = [0.35, 0.85, 1.0];
+const COL_CHARGE_ELECTRO_CORE = [0.85, 0.98, 1.0];
 const enemyCharges = new Map(); // id -> { start, until, ms, side, kind }
 /** Last bank used while drawing commons / UFOs — charge orbs match hull roll. */
 const enemyDrawBank = new Map();
@@ -19501,6 +19504,7 @@ function beginEnemyCharge(id, ms, side, kind) {
   if (kind === 'ufo') k = 'ufo';
   else if (kind === 'worm') k = 'worm';
   else if (kind === 'gunship') k = 'gunship';
+  else if (kind === 'snake') k = 'snake';
   enemyCharges.set(id | 0, {
     start: now,
     until: now + dur,
@@ -19884,7 +19888,7 @@ function drawEnemyCommonCharges() {
       continue;
     }
     const kind = ch.kind || e.kind;
-    if (kind !== 'common' && kind !== 'common1' && kind !== 'ufo' && kind !== 'worm' && kind !== 'gunship') {
+    if (kind !== 'common' && kind !== 'common1' && kind !== 'ufo' && kind !== 'worm' && kind !== 'gunship' && kind !== 'snake') {
       clearEnemyCharge(id);
       continue;
     }
@@ -19904,6 +19908,10 @@ function drawEnemyCommonCharges() {
       clearEnemyCharge(id);
       continue;
     }
+    if (kind === 'snake' && e.kind !== 'snake') {
+      clearEnemyCharge(id);
+      continue;
+    }
     // Worm laser aim charge: timed to ENEMY_WORM_AIM_TICKS (clear early once beam starts).
     if (kind === 'worm' && (e.wormPhase | 0) >= 2) {
       clearEnemyCharge(id);
@@ -19919,17 +19927,38 @@ function drawEnemyCommonCharges() {
     const t = Math.min(1, Math.max(0, (now - ch.start) / Math.max(1, ch.ms)));
     // Big → small (ease-in), then hold tiny while shaking.
     const shrink = t * t;
-    const rBig = 5.2 * RES_SCALE;
-    const rSmall = 1.15 * RES_SCALE;
+    const rBig = kind === 'snake' ? (16 * RES_SCALE) : (5.2 * RES_SCALE);
+    const rSmall = kind === 'snake' ? (5.5 * RES_SCALE) : (1.15 * RES_SCALE);
     let r = rBig + (rSmall - rBig) * shrink;
     let shake = 0;
     if (t > 0.58) {
       const u = (t - 0.58) / 0.42;
-      shake = u * u * 2.4 * RES_SCALE;
+      shake = u * u * (kind === 'snake' ? 4.5 : 2.4) * RES_SCALE;
       r *= 1 - 0.08 * Math.sin(now * 0.09);
     }
     const alpha = 0.22 + 0.55 * t;
     const spin = now * 0.007 + id * 1.7;
+
+    if (kind === 'snake') {
+      // Big electro orb sitting just in front of the head while rage dash runs.
+      const nose = (e.r || 12) + r * 0.55;
+      let cx = p.x + Math.cos(p.angle || 0) * nose;
+      let cy = p.y + Math.sin(p.angle || 0) * nose;
+      if (shake > 0) {
+        const ph = now * 0.07 + id * 2.3;
+        cx += Math.cos(ph) * shake;
+        cy += Math.sin(ph * 1.41) * shake;
+      }
+      const parts = updateChargeEnergyField(
+        id, cx, cy, p.angle || 0, spin, 0, 0, 0, r, now, SHIP3D_LIFT
+      );
+      drawEnemyChargeSphere(cx, cy, r, p.angle || 0, spin, COL_CHARGE_ELECTRO, alpha, {
+        depthParts: parts,
+        chargeT: t,
+        coreColor: COL_CHARGE_ELECTRO_CORE
+      });
+      continue;
+    }
 
     if (kind === 'ufo') {
       // Rocket fires from hull center; charge sphere sits on the right cannon.
