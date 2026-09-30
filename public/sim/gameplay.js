@@ -1421,7 +1421,7 @@ function snakeEatAsteroids(room, e) {
       }
     }
     removePortalTwin(room, a);
-    emitAsteroidDead(room, a.aid, false, a.x, a.y, 0);
+    emitAsteroidDead(room, a.aid, true);
     removeAsteroid(room, a);
     growSnakeTrail(e, ENEMY_SNAKE_GROW_PER_EAT);
     grew++;
