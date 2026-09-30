@@ -377,9 +377,14 @@ const ENEMY_HP = {
   gunship: 1000,
   snake: 1000
 };
-/** Snake boss: head + trailing segments (follow gap in world px). */
+/** Snake boss: head + trailing segments.
+ *  FOLLOW_DIST = clear space between sprite edges (not center-to-center). */
 const ENEMY_SNAKE_SEGMENTS = 15;
 const ENEMY_SNAKE_FOLLOW_DIST = 5;
+/** Craft 36 / 88 frame heights — used for edge-gap spacing. */
+const ENEMY_SNAKE_HEAD_FH = 57;
+const ENEMY_SNAKE_SEG_FH = 63;
+const ENEMY_SNAKE_HEAD_SCALE = 1;
 /** Spinner: 2-way radial burst (180°); shoot angle advances `spin` degrees after each volley. */
 const ENEMY_SPINNER = {
   ammo: 25,

@@ -17886,20 +17886,47 @@ function applySnakeSegs(e, flat) {
   if (segs.length !== n) segs.length = 0;
   for (let i = 0; i < n; i++) {
     const o = i * 4;
-    const scale = +flat[o + 3];
     if (segs[i]) {
       segs[i].x = +flat[o];
       segs[i].y = +flat[o + 1];
       segs[i].angle = +flat[o + 2] || 0;
-      segs[i].scale = Number.isFinite(scale) && scale > 0 ? scale : (((i + 1) % 3 === 0) ? 0.6 : 0.3);
+      segs[i].scale = snakeSegmentScaleClient(i);
     } else {
       segs.push({
         x: +flat[o],
         y: +flat[o + 1],
         angle: +flat[o + 2] || 0,
-        scale: Number.isFinite(scale) && scale > 0 ? scale : (((i + 1) % 3 === 0) ? 0.6 : 0.3)
+        scale: snakeSegmentScaleClient(i)
       });
     }
+  }
+  e.snakeSegs = segs;
+}
+
+/** Ensure 15 segments with correct scale pattern (local init if net lag). */
+function ensureSnakeSegs(e, headX, headY, headAng) {
+  if (!e || e.kind !== 'snake') return;
+  if (e.snakeSegs && e.snakeSegs.length === ENEMY_SNAKE_SEGMENTS) {
+    for (let i = 0; i < e.snakeSegs.length; i++) {
+      e.snakeSegs[i].scale = snakeSegmentScaleClient(i);
+    }
+    return;
+  }
+  const ang = headAng || 0;
+  const back = ang + Math.PI;
+  const segs = [];
+  let distAlong = 0;
+  let prevHalf = snakeHeadHalfLenClient();
+  for (let i = 0; i < ENEMY_SNAKE_SEGMENTS; i++) {
+    const scale = snakeSegmentScaleClient(i);
+    distAlong += snakeLinkRestDistClient(prevHalf, scale);
+    segs.push({
+      x: headX + Math.cos(back) * distAlong,
+      y: headY + Math.sin(back) * distAlong,
+      angle: ang,
+      scale
+    });
+    prevHalf = snakeSegHalfLenClient(scale);
   }
   e.snakeSegs = segs;
 }
@@ -17907,11 +17934,13 @@ function applySnakeSegs(e, flat) {
 /** Client-side follow so segments track predicted head between snaps. */
 function updateSnakeSegsToward(e, headX, headY) {
   if (!e || !e.snakeSegs || !e.snakeSegs.length) return;
-  const gap = ENEMY_SNAKE_FOLLOW_DIST;
   let px = headX;
   let py = headY;
+  let prevHalf = snakeHeadHalfLenClient();
   for (let i = 0; i < e.snakeSegs.length; i++) {
     const s = e.snakeSegs[i];
+    s.scale = snakeSegmentScaleClient(i);
+    const gap = snakeLinkRestDistClient(prevHalf, s.scale);
     const dx = px - s.x;
     const dy = py - s.y;
     const dist = Math.hypot(dx, dy);
@@ -17923,6 +17952,7 @@ function updateSnakeSegsToward(e, headX, headY) {
     }
     px = s.x;
     py = s.y;
+    prevHalf = snakeSegHalfLenClient(s.scale);
   }
 }
 
@@ -18254,7 +18284,26 @@ const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_HEAD_SPRITE_ID = 'enemy_36';
 const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
+const ENEMY_SNAKE_SEGMENTS = 15;
 const ENEMY_SNAKE_FOLLOW_DIST = 5;
+const ENEMY_SNAKE_HEAD_FH = 57;
+const ENEMY_SNAKE_SEG_FH = 63;
+
+function snakeSegmentScaleClient(index0) {
+  return ((index0 + 1) % 3 === 0) ? 0.6 : 0.3;
+}
+
+function snakeSegHalfLenClient(scale) {
+  return ENEMY_SNAKE_SEG_FH * 0.5 * (scale > 0 ? scale : 0.3);
+}
+
+function snakeHeadHalfLenClient() {
+  return ENEMY_SNAKE_HEAD_FH * 0.5 * ENEMY_SNAKE_HEAD_SPRITE_SCALE;
+}
+
+function snakeLinkRestDistClient(prevHalf, nextScale) {
+  return prevHalf + snakeSegHalfLenClient(nextScale) + ENEMY_SNAKE_FOLLOW_DIST;
+}
 /** common1 = Craft 10. */
 const ENEMY_COMMON1_SPRITE_ID = 'enemy_10';
 const ENEMY_COMMON1_SPRITE_SCALE = 0.65;
@@ -19566,13 +19615,15 @@ function drawEnemyCarrier(x, y, angle, weapon) {
 
 /** Snake boss: Craft 36 head + Craft 88 trailing segments (scales from net). */
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
+  ensureSnakeSegs(e, x, y, angle);
   updateSnakeSegsToward(e, x, y);
   const segOpt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
   if (segOpt && segOpt.kind === 'sprite' && e.snakeSegs) {
     // Tail first so head draws on top.
     for (let i = e.snakeSegs.length - 1; i >= 0; i--) {
       const s = e.snakeSegs[i];
-      const sc = s.scale > 0 ? s.scale : (((i + 1) % 3 === 0) ? 0.6 : 0.3);
+      const sc = snakeSegmentScaleClient(i);
+      s.scale = sc;
       const sid = id * 64 + i + 1;
       const bank = enemyBankSmoothed(sid, s.angle || 0, dt);
       drawSpriteShipPlane(

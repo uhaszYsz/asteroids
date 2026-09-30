@@ -1340,31 +1340,50 @@ function snakeSegmentScale(index0) {
   return ((index0 + 1) % 3 === 0) ? 0.6 : 0.3;
 }
 
+function snakeSegHalfLen(scale) {
+  return ENEMY_SNAKE_SEG_FH * 0.5 * (scale > 0 ? scale : 0.3);
+}
+
+function snakeHeadHalfLen() {
+  return ENEMY_SNAKE_HEAD_FH * 0.5 * ENEMY_SNAKE_HEAD_SCALE;
+}
+
+/** Center-to-center rest distance: half-lens + edge gap. */
+function snakeLinkRestDist(prevHalf, nextScale) {
+  return prevHalf + snakeSegHalfLen(nextScale) + ENEMY_SNAKE_FOLLOW_DIST;
+}
+
 function initSnakeSegments(e) {
   const n = ENEMY_SNAKE_SEGMENTS;
-  const gap = ENEMY_SNAKE_FOLLOW_DIST;
   const ang = e.angle || e.dir || 0;
   const back = ang + Math.PI;
   e.snakeSegs = [];
+  let distAlong = 0;
+  let prevHalf = snakeHeadHalfLen();
   for (let i = 0; i < n; i++) {
-    const d = gap * (i + 1);
+    const scale = snakeSegmentScale(i);
+    distAlong += snakeLinkRestDist(prevHalf, scale);
     e.snakeSegs.push({
-      x: e.x + Math.cos(back) * d,
-      y: e.y + Math.sin(back) * d,
+      x: e.x + Math.cos(back) * distAlong,
+      y: e.y + Math.sin(back) * distAlong,
       angle: ang,
-      scale: snakeSegmentScale(i)
+      scale
     });
+    prevHalf = snakeSegHalfLen(scale);
   }
 }
 
-/** Each segment follows the previous (head → seg0 → seg1…). Move only if dist > gap. */
+/** Each segment follows the previous (head → seg0 → seg1…). Move only if dist > rest. */
 function updateSnakeSegments(e) {
   if (!e || e.kind !== 'snake' || !e.snakeSegs || !e.snakeSegs.length) return;
-  const gap = ENEMY_SNAKE_FOLLOW_DIST;
   let px = e.x;
   let py = e.y;
+  let prevHalf = snakeHeadHalfLen();
   for (let i = 0; i < e.snakeSegs.length; i++) {
     const s = e.snakeSegs[i];
+    // Keep scale pattern authoritative (net/clients may round).
+    s.scale = snakeSegmentScale(i);
+    const gap = snakeLinkRestDist(prevHalf, s.scale);
     const dx = px - s.x;
     const dy = py - s.y;
     const dist = Math.hypot(dx, dy);
@@ -1376,6 +1395,7 @@ function updateSnakeSegments(e) {
     }
     px = s.x;
     py = s.y;
+    prevHalf = snakeSegHalfLen(s.scale);
   }
 }
 
