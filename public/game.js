@@ -6941,23 +6941,27 @@ function emitMuzzleFx(x, y, angle, color, count, vx, vy, opts) {
  * Default ammo=3 was firing emitLocalShootFx 3× — looked like per-bullet muzzles.
  * cl_muzzle 1: every shot. Laser nose spark always (beam FX, not per-bullet).
  */
-function shouldEmitLocalShipMuzzle() {
+function shouldEmitLocalShipMuzzle(weaponName, ls) {
   if ((cv('cl_muzzle') | 0) !== 0) return true;
-  if (selectedWeapon === 3) return true;
-  const w = effectiveLocalWeapon(currentWeaponName());
-  return (localShoot.shootAmmo | 0) >= Math.max(1, w.ammo | 0);
+  const name = weaponName || 'default';
+  if (name === 'laser') return true;
+  const w = effectiveLocalWeapon(name);
+  const state = ls || activeLocalShoot();
+  return (state.shootAmmo | 0) >= Math.max(1, w.ammo | 0);
 }
 
 /** Instant local muzzle flash (bullets still come from the server). */
-function emitLocalShootFx() {
+function emitLocalShootFx(weaponName, ls) {
   pulseSpriteShipAttack(myId);
   const me = localView();
   const m = shipMuzzle(me.x, me.y, me.angle);
   const ang = me.angle;
-  const wpn = selectedWeapon;
-  const shipMz = shouldEmitLocalShipMuzzle();
+  const name = weaponName || (ls && ls.wpn) || activeWeaponName();
+  const wpn = weaponIndexOf(name);
+  const state = ls || activeLocalShoot();
+  const shipMz = shouldEmitLocalShipMuzzle(name, state);
 
-  spawnGhostBulletsForLocalShot();
+  spawnGhostBulletsForLocalShot(name);
 
   if (wpn === 3) {
     // Laser: nose spark; beam is handled separately.
@@ -6997,8 +7001,8 @@ function emitLocalShootFx() {
   }
 
   if (wpn === 6) {
-    if (localShoot.sfxSkipNext) {
-      localShoot.sfxSkipNext = false;
+    if (state.sfxSkipNext) {
+      state.sfxSkipNext = false;
     } else {
       playSfx(SFX.shoot, { vol: 0.75, pool: 8 });
     }
@@ -7008,20 +7012,20 @@ function emitLocalShootFx() {
 
   if (wpn === 7) {
     // Void: travel loop starts when the orb bullet is added (no generic shoot sting).
-    if (localShoot.sfxSkipNext) localShoot.sfxSkipNext = false;
+    if (state.sfxSkipNext) state.sfxSkipNext = false;
     if (shipMz) emitMuzzleFx(m.x, m.y, ang, COL.voidcannon, 11, me.vx, me.vy, { cone: 1.2, shipMuzzle: true });
     return;
   }
 
   if (wpn === 8) {
     // Asteroid gun: rock spawn FX is separate; no blaster sting.
-    if (localShoot.sfxSkipNext) localShoot.sfxSkipNext = false;
+    if (state.sfxSkipNext) state.sfxSkipNext = false;
     return;
   }
 
   // Default blaster: first shot SFX is on Space press; later burst shots here.
-  if (localShoot.sfxSkipNext) {
-    localShoot.sfxSkipNext = false;
+  if (state.sfxSkipNext) {
+    state.sfxSkipNext = false;
   } else {
     playSfx(SFX.shoot, { vol: 0.9, pool: 8 });
   }
@@ -7071,13 +7075,13 @@ function spawnGhostBullet(x, y, angle, speed, radius, type) {
 }
 
 /** Local predictive projectiles at muzzle/aim the instant a local shot FX fires. */
-function spawnGhostBulletsForLocalShot() {
+function spawnGhostBulletsForLocalShot(weaponName) {
   if ((cv('cl_ghost_bullet') | 0) === 0) {
     // No local ghost — stamp when each of our server bullets first draws.
     _lagProbeOwnBulletLeft++;
     return;
   }
-  const name = currentWeaponName();
+  const name = weaponName || activeWeaponName();
   if (name === 'laser' || name === 'railgun' || name === 'asteroidgun') return;
   const before = ghostBullets.length;
   const me = localView();
@@ -11090,7 +11094,7 @@ function spriteShipAttacking(id) {
   if (id == null) return false;
   const now = performance.now();
   // Local laser: follow burst flag (sim ticks), not a wall-clock clip timer.
-  if ((id | 0) === (myId | 0) && localLaserClip && localShoot.bursting) return true;
+  if ((id | 0) === (myId | 0) && localLaserClip && localLaserBursting()) return true;
   const remoteBeam = remoteLasers.get(id);
   if (remoteBeam && now < (remoteBeam.until || 0)) return true;
   return now < (spriteShipAttackUntil.get(id) || 0);
@@ -11655,7 +11659,47 @@ let unlockedWeapons = {
   default: true, rocket: false, laser: false, shotgun: false,
   railgun: false, plasma: false, voidcannon: false, asteroidgun: false
 };
-const localShoot = { shootAmmo: 3, shootCd: 0, reloadLeft: 0, bursting: false, railChargeLeft: 0, sfxSkipNext: false };
+function freshLocalShootState(ammo) {
+  return {
+    shootAmmo: ammo | 0,
+    shootCd: 0,
+    reloadLeft: 0,
+    bursting: false,
+    railChargeLeft: 0,
+    sfxSkipNext: false,
+    wpn: null
+  };
+}
+/** Per-slot local fire prediction (mirrors server shootAmmo / shootAmmo2). */
+let localShoot1 = freshLocalShootState(3);
+let localShoot2 = freshLocalShootState(0);
+
+function localShootAt(slot) {
+  return (slot | 0) === 2 ? localShoot2 : localShoot1;
+}
+
+function activeFireSlot() {
+  return ((activeWeaponSlot | 0) === 2 && equippedWeapon2) ? 2 : 1;
+}
+
+function activeLocalShoot() {
+  return localShootAt(activeFireSlot());
+}
+
+function weaponNameForSlot(slot) {
+  if ((slot | 0) === 2) return equippedWeapon2 || null;
+  return currentWeaponName();
+}
+
+function weaponIndexOf(name) {
+  const i = WEAPON_NAMES.indexOf(name);
+  return i >= 0 ? (i + 1) : 1;
+}
+
+function localLaserBursting() {
+  return !!((localShoot1.bursting && localShoot1.wpn === 'laser') ||
+    (localShoot2.bursting && localShoot2.wpn === 'laser'));
+}
 
 function currentWeaponName() {
   return WEAPON_NAMES[selectedWeapon - 1] || 'default';
@@ -11677,7 +11721,7 @@ function toggleActiveWeaponSlot() {
   activeWeaponSlot = next;
   shopBuySlot = activeWeaponSlot;
   const name = activeWeaponName();
-  resetLocalShoot(name);
+  // Keep each slot's ammo/cd — never refill on Alt (that mixed cooldowns).
   const me = localView();
   if (me) emitWeaponEquipFx(me.x, me.y, name, getLocalWeaponLevel(name));
   updateLoadoutHud();
@@ -11723,25 +11767,41 @@ function effectiveLocalWeapon(name) {
 /** Nose heat 0..1: rises per shot in the mag, max when empty; cools over last fade ticks of reload. */
 const CANNON_TIP_FADE_TICKS = 8;
 function shipCannonTipHeat() {
-  const w = effectiveLocalWeapon(currentWeaponName());
+  const name = activeWeaponName();
+  const ls = activeLocalShoot();
+  const w = effectiveLocalWeapon(name);
   const maxAmmo = Math.max(1, (w.ammo | 0));
-  const reloadLeft = localShoot.reloadLeft | 0;
+  const reloadLeft = ls.reloadLeft | 0;
   if (reloadLeft > 0) {
     if (reloadLeft >= CANNON_TIP_FADE_TICKS) return 1;
     return reloadLeft / CANNON_TIP_FADE_TICKS;
   }
-  const ammo = Math.max(0, localShoot.shootAmmo | 0);
+  const ammo = Math.max(0, ls.shootAmmo | 0);
   return Math.min(1, Math.max(0, (maxAmmo - ammo) / maxAmmo));
 }
 
-function resetLocalShoot(weaponName) {
-  const w = effectiveLocalWeapon(weaponName || currentWeaponName());
-  localShoot.shootAmmo = w.ammo;
-  localShoot.shootCd = 0;
-  localShoot.reloadLeft = 0;
-  localShoot.bursting = false;
-  localShoot.railChargeLeft = 0;
-  localShoot.sfxSkipNext = false;
+/** Reset one gun slot's local prediction (`slot` 1 or 2). */
+function resetLocalShoot(weaponName, slot) {
+  const s = (slot | 0) === 2 ? 2 : 1;
+  const ls = localShootAt(s);
+  const name = weaponName || weaponNameForSlot(s) || 'default';
+  const w = effectiveLocalWeapon(name);
+  ls.shootAmmo = w.ammo;
+  ls.shootCd = 0;
+  ls.reloadLeft = 0;
+  ls.bursting = false;
+  ls.railChargeLeft = 0;
+  ls.sfxSkipNext = false;
+  ls.wpn = null;
+  if (localLaserClip && !localLaserBursting()) {
+    localLaserClip = null;
+    syncLaserSfx(false);
+  }
+}
+
+function resetAllLocalShoot() {
+  localShoot1 = freshLocalShootState(effectiveLocalWeapon('default').ammo);
+  localShoot2 = freshLocalShootState(0);
   if (localLaserClip) {
     localLaserClip = null;
     syncLaserSfx(false);
@@ -11750,18 +11810,22 @@ function resetLocalShoot(weaponName) {
 
 function tryStartLocalBurst(slot) {
   if (!matchLive) return false;
+  const s = (slot | 0) === 2 ? 2 : 1;
+  if (s === 2 && !equippedWeapon2) return false;
   // Space while invuln: drop godmode and fire (matches server).
   if ((player.godLeft | 0) > 0) player.godLeft = 0;
-  if (localShoot.bursting || localShoot.reloadLeft > 0 || localShoot.shootAmmo <= 0 || (localShoot.shootCd | 0) > 0) {
+  const ls = localShootAt(s);
+  if (ls.bursting || ls.reloadLeft > 0 || ls.shootAmmo <= 0 || (ls.shootCd | 0) > 0) {
     return false;
   }
-  const name = (slot === 2 && equippedWeapon2) ? equippedWeapon2 : currentWeaponName();
-  if (name === 'railgun' && (localShoot.railChargeLeft | 0) > 0) return false;
-  localShoot.bursting = true;
-  localShoot.wpn = name;
+  const name = weaponNameForSlot(s);
+  if (!name) return false;
+  if (name === 'railgun' && (ls.railChargeLeft | 0) > 0) return false;
+  ls.bursting = true;
+  ls.wpn = name;
   if (name === 'laser') {
     const w = effectiveLocalWeapon(name);
-    // Beam stays up while localShoot.bursting (ammo dump on sim ticks) — not wall-clock ms.
+    // Beam stays up while this slot is bursting (ammo dump on sim ticks) — not wall-clock ms.
     // L2+: worm-width beam (matches server ENEMY_WORM_LASER.width = 12*RES_SCALE).
     const wideW = getLocalWeaponLevel('laser') >= 2 ? (12 * RES_SCALE) : 0;
     startLocalLaserClip(
@@ -11779,25 +11843,28 @@ function tryStartLocalBurst(slot) {
     armRailCharge(myId, dur, estSt);
     const ch = railCharges.get(myId);
     const leftMs = ch ? Math.max(0, ch.until - performance.now()) : dur;
-    localShoot.railChargeLeft = Math.max(1, Math.ceil(leftMs / TICK_MS));
+    ls.railChargeLeft = Math.max(1, Math.ceil(leftMs / TICK_MS));
   }
   return true;
 }
 
-/** Advance local ammo/cd like the server; muzzle FX only when a shot would fire. */
-function updateLocalShooting() {
-  const name = localShoot.wpn || activeWeaponName();
+/** Advance one slot's local ammo/cd; muzzle FX when a shot would fire. */
+function updateLocalShootingSlot(slot) {
+  const s = (slot | 0) === 2 ? 2 : 1;
+  if (s === 2 && !equippedWeapon2) return;
+  const ls = localShootAt(s);
+  const name = ls.wpn || weaponNameForSlot(s) || 'default';
   const w = effectiveLocalWeapon(name);
-  if (localShoot.shootCd > 0) localShoot.shootCd--;
+  if (ls.shootCd > 0) ls.shootCd--;
 
   if ((player.godLeft | 0) > 0) {
-    if (localShoot.bursting || (localShoot.railChargeLeft | 0) > 0) {
+    if (ls.bursting || (ls.railChargeLeft | 0) > 0) {
       player.godLeft = 0;
     } else {
-      if (localShoot.reloadLeft > 0) {
-        localShoot.reloadLeft--;
-        if (localShoot.reloadLeft === 0) {
-          localShoot.shootAmmo = w.ammo;
+      if (ls.reloadLeft > 0) {
+        ls.reloadLeft--;
+        if (ls.reloadLeft === 0) {
+          ls.shootAmmo = w.ammo;
           const me = localView();
           emitReloadReadyFx(me.x, me.y, me.angle);
           playSfx(SFX.ready, { vol: 0.85, pool: 2 });
@@ -11808,10 +11875,10 @@ function updateLocalShooting() {
     }
   }
 
-  if (localShoot.reloadLeft > 0) {
-    localShoot.reloadLeft--;
-    if (localShoot.reloadLeft === 0) {
-      localShoot.shootAmmo = w.ammo;
+  if (ls.reloadLeft > 0) {
+    ls.reloadLeft--;
+    if (ls.reloadLeft === 0) {
+      ls.shootAmmo = w.ammo;
       const me = localView();
       emitReloadReadyFx(me.x, me.y, me.angle);
       playSfx(SFX.ready, { vol: 0.85, pool: 2 });
@@ -11819,37 +11886,43 @@ function updateLocalShooting() {
     }
     return;
   }
-  if (!localShoot.bursting) return;
+  if (!ls.bursting) return;
 
   if (name === 'railgun') {
-    if ((localShoot.railChargeLeft | 0) <= 0) {
-      localShoot.bursting = false;
+    if ((ls.railChargeLeft | 0) <= 0) {
+      ls.bursting = false;
       return;
     }
-    localShoot.railChargeLeft--;
-    if (localShoot.railChargeLeft > 0) return;
+    ls.railChargeLeft--;
+    if (ls.railChargeLeft > 0) return;
     // Charge ticks mirror NTP window; beam is emitted when telegraph until expires.
-    localShoot.shootCd = w.cooldown;
-    localShoot.bursting = false;
-    localShoot.railChargeLeft = 0;
-    localShoot.shootAmmo = w.ammo;
-    localShoot.reloadLeft = 0;
+    ls.shootCd = w.cooldown;
+    ls.bursting = false;
+    ls.railChargeLeft = 0;
+    ls.shootAmmo = w.ammo;
+    ls.reloadLeft = 0;
     return;
   }
 
-  if (localShoot.shootCd > 0) return;
-  emitLocalShootFx();
-  localShoot.shootAmmo--;
-  localShoot.shootCd = w.cooldown;
-  if (localShoot.shootAmmo <= 0) {
-    localShoot.bursting = false;
-    if (localLaserClip) {
+  if (ls.shootCd > 0) return;
+  emitLocalShootFx(name, ls);
+  ls.shootAmmo--;
+  ls.shootCd = w.cooldown;
+  if (ls.shootAmmo <= 0) {
+    ls.bursting = false;
+    ls.wpn = null;
+    if (localLaserClip && !localLaserBursting()) {
       localLaserClip = null;
       syncLaserSfx(false);
     }
-    let reload = w.reload;
-    localShoot.reloadLeft = reload;
+    ls.reloadLeft = w.reload;
   }
+}
+
+/** Advance both gun slots each tick (matches server updateShootingSlot 1+2). */
+function updateLocalShooting() {
+  updateLocalShootingSlot(1);
+  updateLocalShootingSlot(2);
 }
 
 // Laser visual: 100% local from ship. Duration = while localShoot.bursting (sim ticks).
@@ -13321,8 +13394,10 @@ function maybeShowFirstHelp() {
     player.vy = 0;
     player.av = 0;
     softErr.x = 0; softErr.y = 0; softErr.angle = 0;
-    localShoot.bursting = false;
-    localShoot.railChargeLeft = 0;
+    localShoot1.bursting = false;
+    localShoot1.railChargeLeft = 0;
+    localShoot2.bursting = false;
+    localShoot2.railChargeLeft = 0;
     syncThrustSfx(false);
     syncLaserSfx(false);
     stopAllRailChargeSfx();
@@ -16713,8 +16788,10 @@ function applyPausedMsg(msg) {
     player.vy = 0;
     player.av = 0;
     softErr.x = 0; softErr.y = 0; softErr.angle = 0;
-    localShoot.bursting = false;
-    localShoot.railChargeLeft = 0;
+    localShoot1.bursting = false;
+    localShoot1.railChargeLeft = 0;
+    localShoot2.bursting = false;
+    localShoot2.railChargeLeft = 0;
     syncThrustSfx(false);
     syncLaserSfx(false);
     stopAllRailChargeSfx();
@@ -16877,7 +16954,7 @@ function resetMatchState() {
     railgun: false, plasma: false, voidcannon: false, asteroidgun: false
   };
   hideSoloShop();
-  resetLocalShoot('default');
+  resetAllLocalShoot();
   clearParticles();
   clearFxLabels();
   clearWaveBanner();
@@ -17389,12 +17466,11 @@ function addLaser(row, hitKind, weaponName, rays) {
     }
     if (wormLaserDbg.length > 36) wormLaserDbg.splice(0, wormLaserDbg.length - 36);
   }
-  // Own slot-1 (Z) laser beam is 100% local (ship pose + clip timer, see localLaserClip).
-  // Slot-2 (X) has no local prediction, so its own shots draw from the server segment too,
-  // same as remotes — otherwise the beam never renders on your own screen.
-  const isOwnSlot1Laser = (owner | 0) === (myId | 0) && wpn === currentWeaponName();
+  // Own laser beam is 100% local (ship pose + clip timer, see localLaserClip) when
+  // that weapon is equipped in either slot — skip drawing the server segment then.
+  const isOwnLocalLaser = (owner | 0) === (myId | 0) && wpn === 'laser' && localLaserBursting();
   const isOwnShot = (owner | 0) === (myId | 0);
-  if (owner && !isOwnSlot1Laser) {
+  if (owner && !isOwnLocalLaser) {
     // Own shots (slot 2 / X) get every 'lf' reliably — no need for the generous
     // network-jitter linger remotes get; a short bridge just covers inter-tick gaps
     // so the beam actually disappears right after the burst ends instead of hanging.
@@ -17413,27 +17489,30 @@ function addLaser(row, hitKind, weaponName, rays) {
 
 function canPlayDefaultShootOnPress() {
   if (!matchLive) return false;
-  const n = currentWeaponName();
+  const n = activeWeaponName();
   if (n !== 'default' && n !== 'plasma') return false;
-  if (localShoot.bursting || localShoot.reloadLeft > 0) return false;
-  if (localShoot.shootAmmo <= 0 || (localShoot.shootCd | 0) > 0) return false;
+  const ls = activeLocalShoot();
+  if (ls.bursting || ls.reloadLeft > 0) return false;
+  if (ls.shootAmmo <= 0 || (ls.shootCd | 0) > 0) return false;
   return true;
 }
 
 function canPlayRailChargeOnPress() {
   if (!matchLive) return false;
-  if (currentWeaponName() !== 'railgun') return false;
-  if (localShoot.bursting || localShoot.reloadLeft > 0) return false;
-  if (localShoot.shootAmmo <= 0 || (localShoot.shootCd | 0) > 0) return false;
-  if ((localShoot.railChargeLeft | 0) > 0) return false;
+  if (activeWeaponName() !== 'railgun') return false;
+  const ls = activeLocalShoot();
+  if (ls.bursting || ls.reloadLeft > 0) return false;
+  if (ls.shootAmmo <= 0 || (ls.shootCd | 0) > 0) return false;
+  if ((ls.railChargeLeft | 0) > 0) return false;
   return true;
 }
 
 function canPlayShotgunOnPress() {
   if (!matchLive) return false;
-  if (currentWeaponName() !== 'shotgun') return false;
-  if (localShoot.bursting || localShoot.reloadLeft > 0) return false;
-  if (localShoot.shootAmmo <= 0 || (localShoot.shootCd | 0) > 0) return false;
+  if (activeWeaponName() !== 'shotgun') return false;
+  const ls = activeLocalShoot();
+  if (ls.bursting || ls.reloadLeft > 0) return false;
+  if (ls.shootAmmo <= 0 || (ls.shootCd | 0) > 0) return false;
   return true;
 }
 
@@ -17441,7 +17520,7 @@ function canPlayShotgunOnPress() {
 function playDefaultShootOnPress() {
   if (!canPlayDefaultShootOnPress()) return;
   playSfx(SFX.shoot, { vol: 0.9 });
-  localShoot.sfxSkipNext = true;
+  activeLocalShoot().sfxSkipNext = true;
 }
 
 /** Instant rail charge hum on keydown (same held clip reused forever). */
@@ -17460,7 +17539,8 @@ function playShotgunOnPress() {
 /** Dry-fire click when mag empty / still reloading. */
 function playNoAmmoOnPress() {
   if (!matchLive || deathSpectating || matchPaused) return;
-  if (localShoot.reloadLeft > 0 || localShoot.shootAmmo <= 0) {
+  const ls = activeLocalShoot();
+  if (ls.reloadLeft > 0 || ls.shootAmmo <= 0) {
     playSfx(SFX.noAmmo, { vol: 0.85, pool: 2 });
   }
 }
@@ -17770,11 +17850,11 @@ function drawLaserBeams() {
   // Fixed beam width (old time%5 flicker looked like size pulsing).
   const width = 4 * RES_SCALE;
   // Local laser: follow ammo burst on sim ticks (same cadence as server), not wall-clock ms.
-  if (localLaserClip && !localShoot.bursting) {
+  if (localLaserClip && !localLaserBursting()) {
     localLaserClip = null;
     syncLaserSfx(false);
   }
-  const localOn = !!(localLaserClip && localShoot.bursting);
+  const localOn = !!(localLaserClip && localLaserBursting());
   if (localOn) {
     const me = localView();
     const m = shipMuzzle(me.x, me.y, me.angle);
@@ -21892,8 +21972,9 @@ function predictTick(forceShoot) {
   // Dual predict+snap was the shake/jump fight (esp. early thrust).
   // With sv_ping lag-sim, fall through to online-style client prediction so cl_server_pose can diverge.
   if (isOfflineLocalPlay() && !offlineLagSimActive()) {
-    if (shootHeld() && !localShoot.bursting && localShoot.reloadLeft === 0 &&
-        localShoot.shootAmmo > 0 && (localShoot.shootCd | 0) <= 0) {
+    const als = activeLocalShoot();
+    if (shootHeld() && !als.bursting && als.reloadLeft === 0 &&
+        als.shootAmmo > 0 && (als.shootCd | 0) <= 0) {
       shootPulse = true;
     }
     const inp = getInput();
@@ -21922,9 +22003,12 @@ function predictTick(forceShoot) {
   }
 
   // Held shoot: re-pulse when a new burst can start (railgun after cooldown, post-reload, etc.).
-  if (shootHeld() && !localShoot.bursting && localShoot.reloadLeft === 0 &&
-      localShoot.shootAmmo > 0 && (localShoot.shootCd | 0) <= 0) {
-    shootPulse = true;
+  {
+    const als = activeLocalShoot();
+    if (shootHeld() && !als.bursting && als.reloadLeft === 0 &&
+        als.shootAmmo > 0 && (als.shootCd | 0) <= 0) {
+      shootPulse = true;
+    }
   }
   const inp = getInput();
   if (forceShoot) {
@@ -23132,7 +23216,7 @@ function enterGameFromWelcome(msg) {
     };
   }
   hideSoloShop();
-  resetLocalShoot('default');
+  resetAllLocalShoot();
   clearParticles();
   clearFxLabels();
   clearWaveBanner();
@@ -23846,9 +23930,12 @@ function handleWsMessage(e) {
           if (slot > 0) selectedWeapon = slot;
         }
         if (msg.hp != null) player.hp = msg.hp | 0;
-        // Only reset slot-1 (Z) local prediction if slot 1 is what actually changed.
-        if (msg.item !== 'weapon' || boughtSlot === 1) resetLocalShoot(currentWeaponName());
-        else if (boughtSlot === 2 && equippedWeapon2) resetLocalShoot(equippedWeapon2);
+        // Reset only the gun slot this purchase actually changed.
+        if (msg.item === 'weapon' && boughtSlot === 2 && equippedWeapon2) {
+          resetLocalShoot(equippedWeapon2, 2);
+        } else {
+          resetLocalShoot(currentWeaponName(), 1);
+        }
         if (boughtSlot === 1 || boughtSlot === 2) {
           shopBuySlot = boughtSlot;
           if (boughtSlot === 2 && equippedWeapon2) activeWeaponSlot = 2;
@@ -24064,8 +24151,14 @@ function handleWsMessage(e) {
         const ch = railCharges.get(myId);
         if (ch) {
           const leftMs = Math.max(0, ch.until - performance.now());
-          localShoot.railChargeLeft = Math.max(0, Math.ceil(leftMs / TICK_MS));
-          if ((localShoot.railChargeLeft | 0) > 0) localShoot.bursting = true;
+          // Prefer the active rail slot; otherwise whichever gun is a railgun.
+          let railSlot = 1;
+          if (activeWeaponName() === 'railgun') railSlot = activeFireSlot();
+          else if (equippedWeapon2 === 'railgun') railSlot = 2;
+          else if (currentWeaponName() === 'railgun') railSlot = 1;
+          const ls = localShootAt(railSlot);
+          ls.railChargeLeft = Math.max(0, Math.ceil(leftMs / TICK_MS));
+          if ((ls.railChargeLeft | 0) > 0) ls.bursting = true;
         }
       }
       return;
@@ -24075,7 +24168,6 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'wpn' && inGame) {
-      const slot1Changed = msg.changed !== 2;
       if (msg.w) selectedWeapon = msg.w | 0;
       if (msg.weapon2 !== undefined) equippedWeapon2 = msg.weapon2 || null;
       if ((activeWeaponSlot | 0) === 2 && !equippedWeapon2) activeWeaponSlot = 1;
@@ -24097,8 +24189,9 @@ function handleWsMessage(e) {
         };
         unlockedWeapons[msg.weapon] = true;
       }
-      // Slot 1 (Z) drives local client-side prediction — only reset it when it actually changed.
-      if (slot1Changed) resetLocalShoot(currentWeaponName());
+      // Reset local prediction for the slot that actually changed.
+      if (msg.changed === 2 && equippedWeapon2) resetLocalShoot(equippedWeapon2, 2);
+      else resetLocalShoot(currentWeaponName(), 1);
       // Pickup FX plays from pd (all clients); only flash on manual switch.
       if (!msg.pickup) {
         const me = localView();
@@ -24140,8 +24233,10 @@ function handleWsMessage(e) {
       player.vy = 0;
       player.av = 0;
       softErr.x = 0; softErr.y = 0; softErr.angle = 0;
-      localShoot.bursting = false;
-      localShoot.railChargeLeft = 0;
+      localShoot1.bursting = false;
+      localShoot1.railChargeLeft = 0;
+      localShoot2.bursting = false;
+      localShoot2.railChargeLeft = 0;
       stopAllRocketTravelSfx();
       stopAllVoidTravelSfx();
       bullets.clear();
@@ -24254,10 +24349,16 @@ function handleWsMessage(e) {
         weaponLevels = Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, msg.levels);
       }
       if (msg.ammo != null) {
-        resetLocalShoot(currentWeaponName());
-        localShoot.shootAmmo = msg.ammo | 0;
+        resetLocalShoot(currentWeaponName(), 1);
+        localShoot1.shootAmmo = msg.ammo | 0;
       } else {
-        resetLocalShoot(currentWeaponName());
+        resetLocalShoot(currentWeaponName(), 1);
+      }
+      if (equippedWeapon2) {
+        resetLocalShoot(equippedWeapon2, 2);
+        if (msg.ammo2 != null) localShoot2.shootAmmo = msg.ammo2 | 0;
+      } else {
+        localShoot2 = freshLocalShootState(0);
       }
       if (msg.you) {
         const y = msg.you;
