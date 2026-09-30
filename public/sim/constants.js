@@ -387,7 +387,6 @@ const ENEMY_SNAKE_TURRET_HP = 150;
 /** Shared fire cadence for all living mounts on a snake. */
 const ENEMY_SNAKE_TURRET_FIRE_TICKS = 4 * TPS;
 const ENEMY_SNAKE_TURRET_BULLET_SPEED = 4.5;
-const ENEMY_SNAKE_TURRET_HIT_R = 20;
 /** Every this much boss HP lost (head/tail, not turrets) → electro rage dash. */
 const ENEMY_SNAKE_RAGE_EVERY = 800;
 /** Rage duration: 2× move speed + big electro charge FX in front of the head. */

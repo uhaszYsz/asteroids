@@ -1491,32 +1491,48 @@ function damageSnakeTurret(room, e, seg, dmg, ownerId) {
   return true;
 }
 
-/** Prefer a living turret near (x,y) over the boss body. */
-function tryDamageSnakeTurretAt(room, e, x, y, hitR, dmg, ownerId) {
-  if (!e || e.kind !== 'snake' || !e.snakeTurrets) return false;
-  const tr = ENEMY_SNAKE_TURRET_HIT_R;
-  const pad = (hitR > 0 ? hitR : 2) + tr;
-  const lim = pad * pad;
-  let best = null;
+/**
+ * If the impact overlaps a body trail stamp that mounts a living turret,
+ * damage that turret. No separate turret circle — same segment hit as the body.
+ * Trail index → body seg: newest stamp is near head (not a body seg);
+ * stamp fromEnd=1 → seg 0, fromEnd=2 → seg 1, …
+ */
+function snakeTurretOnHitSegment(e, hx, hy, hr) {
+  if (!e || e.kind !== 'snake' || !e.snakeTurrets || !e.snakeTurrets.length) return null;
+  const trail = e.snakeTrail;
+  if (!trail || !trail.length) return null;
+  const bodyR = (e.r || ENEMY_R.snake || 10) + (hr != null ? hr : 4);
+  const lim = bodyR * bodyR;
+  const headD2 = torusDistSq(hx, hy, e.x, e.y);
+  let bestI = -1;
   let bestD2 = Infinity;
-  for (let i = 0; i < e.snakeTurrets.length; i++) {
-    const t = e.snakeTurrets[i];
-    if ((t.hp | 0) <= 0) continue;
-    const pose = snakeTurretWorldPos(e, t.seg);
-    const d2 = torusDistSq(x, y, pose.x, pose.y);
+  for (let i = 0; i < trail.length; i++) {
+    const d2 = torusDistSq(hx, hy, trail[i].x, trail[i].y);
     if (d2 <= lim && d2 < bestD2) {
       bestD2 = d2;
-      best = t;
+      bestI = i;
     }
   }
-  if (!best) return false;
-  return damageSnakeTurret(room, e, best.seg, dmg, ownerId);
+  // Head is closer / only head hit → boss head, not a turret mount.
+  if (headD2 <= lim && headD2 <= bestD2) return null;
+  if (bestI < 0) return null;
+  const fromEnd = trail.length - 1 - bestI;
+  const segIdx = fromEnd - 1;
+  if (segIdx < 0) return null;
+  for (let i = 0; i < e.snakeTurrets.length; i++) {
+    const t = e.snakeTurrets[i];
+    if ((t.seg | 0) === segIdx && (t.hp | 0) > 0) return t;
+  }
+  return null;
 }
 
 function damageSnakePreferTurret(room, e, dmg, ownerId, hx, hy, hr) {
-  if (e && e.kind === 'snake' && hx != null && hy != null &&
-      tryDamageSnakeTurretAt(room, e, hx, hy, hr != null ? hr : 4, dmg, ownerId)) {
-    return;
+  if (e && e.kind === 'snake' && hx != null && hy != null) {
+    const tur = snakeTurretOnHitSegment(e, hx, hy, hr != null ? hr : 4);
+    if (tur) {
+      damageSnakeTurret(room, e, tur.seg, dmg, ownerId);
+      return;
+    }
   }
   let dealt = Math.max(0, dmg | 0);
   // Head hits count double vs body/tail trail.
