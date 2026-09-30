@@ -12160,21 +12160,31 @@ addEventListener('keydown', e => {
         shopSlotMenuActivate();
         return;
       }
-      if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      if (e.code === 'ArrowLeft' || e.code === 'KeyA' || e.code === 'ArrowUp' || e.code === 'KeyW') {
         e.preventDefault();
         shopSlotMenuMove(-1);
         return;
       }
-      if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      if (e.code === 'ArrowRight' || e.code === 'KeyD' || e.code === 'ArrowDown' || e.code === 'KeyS') {
         e.preventDefault();
         shopSlotMenuMove(1);
         return;
       }
-      if (
-        e.code === 'ArrowLeft' || e.code === 'KeyA' ||
-        e.code === 'ArrowRight' || e.code === 'KeyD' ||
-        e.code === 'KeyZ' || e.code === 'KeyX' || e.code === 'AltLeft'
-      ) {
+      if (e.code === 'KeyZ') {
+        e.preventDefault();
+        shopSlotMenuFocus = 0;
+        shopSlotMenuApplyFocus();
+        shopSlotMenuActivate();
+        return;
+      }
+      if (e.code === 'KeyX') {
+        e.preventDefault();
+        shopSlotMenuFocus = 1;
+        shopSlotMenuApplyFocus();
+        shopSlotMenuActivate();
+        return;
+      }
+      if (e.code === 'AltLeft') {
         e.preventDefault();
         return;
       }
@@ -13548,7 +13558,11 @@ function updateShopSlotBadge() {
 
 function closeShopWeaponSlotMenu() {
   const m = document.getElementById('ss-slot-menu');
-  if (m) m.remove();
+  if (m) {
+    const host = m.parentElement;
+    m.remove();
+    if (host && host.classList) host.classList.remove('ss-slot-picking');
+  }
   shopSlotMenuButtons = [];
   shopSlotMenuFocus = 0;
 }
@@ -13590,20 +13604,20 @@ function shopSlotMenuActivate() {
   b.click();
 }
 
-/** Little context menu: pick slot 1 or 2 when buying a weapon (opened via Space). */
-function openShopWeaponSlotMenu(name, clientX, clientY) {
+/**
+ * Two outlined slot buttons (1 / 2) overlaid on the shop weapon cell.
+ * Esc cancels; no title / cancel row.
+ */
+function openShopWeaponSlotMenuForEl(name, el) {
   closeShopWeaponSlotMenu();
   const st = soloShopState;
-  if (!st) return;
+  if (!st || !el) return;
+  el.classList.add('ss-slot-picking');
   const menu = document.createElement('div');
   menu.id = 'ss-slot-menu';
   menu.className = 'ss-slot-menu';
   menu.setAttribute('role', 'menu');
   menu.tabIndex = -1;
-  const title = document.createElement('div');
-  title.className = 'ss-slot-menu-title';
-  title.textContent = shopItemLabel(name).toUpperCase();
-  menu.appendChild(title);
   shopSlotMenuButtons = [];
   for (let s = 1; s <= 2; s++) {
     const cost = shopWeaponCostForSlotClient(st, name, s);
@@ -13611,61 +13625,25 @@ function openShopWeaponSlotMenu(name, clientX, clientY) {
     btn.type = 'button';
     btn.className = 'ss-slot-menu-btn';
     btn.setAttribute('role', 'menuitem');
-    const cur = s === 2 ? st.weapon2 : st.weapon;
-    let label = 'SLOT ' + s;
-    if (cur === name) {
-      const lvl = Math.max(1, (st.levels[name] | 0) || 1);
-      label += cost < 0 ? ' · MAX L' + lvl : ' · UP L' + (lvl + 1);
-    } else if (cur) {
-      label += ' · REPLACE';
-    } else {
-      label += ' · EMPTY';
-    }
-    if (cost < 0) {
-      btn.textContent = label;
+    btn.textContent = String(s);
+    btn.title = 'Slot ' + s;
+    if (cost < 0 || st.coins < cost) {
       btn.disabled = true;
     } else {
-      btn.textContent = label + '  ' + shopCreditPrice(cost);
-      if (st.coins < cost) btn.disabled = true;
-      else {
-        btn.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          ev.stopPropagation();
-          shopBuySlot = s;
-          activeWeaponSlot = s;
-          updateShopSlotBadge();
-          closeShopWeaponSlotMenu();
-          sendShopBuy('weapon', name, s);
-        });
-      }
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        shopBuySlot = s;
+        activeWeaponSlot = s;
+        updateShopSlotBadge();
+        closeShopWeaponSlotMenu();
+        sendShopBuy('weapon', name, s);
+      });
     }
     menu.appendChild(btn);
     shopSlotMenuButtons.push(btn);
   }
-  const cancelBtn = document.createElement('button');
-  cancelBtn.type = 'button';
-  cancelBtn.className = 'ss-slot-menu-btn ss-slot-menu-cancel';
-  cancelBtn.setAttribute('role', 'menuitem');
-  cancelBtn.textContent = 'CANCEL';
-  cancelBtn.addEventListener('click', (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
-    closeShopWeaponSlotMenu();
-  });
-  menu.appendChild(cancelBtn);
-  shopSlotMenuButtons.push(cancelBtn);
-  document.body.appendChild(menu);
-  const pad = 8;
-  let x = clientX | 0;
-  let y = clientY | 0;
-  const mw = menu.offsetWidth || 160;
-  const mh = menu.offsetHeight || 100;
-  if (x + mw > window.innerWidth - pad) x = window.innerWidth - mw - pad;
-  if (y + mh > window.innerHeight - pad) y = window.innerHeight - mh - pad;
-  if (x < pad) x = pad;
-  if (y < pad) y = pad;
-  menu.style.left = x + 'px';
-  menu.style.top = y + 'px';
+  el.appendChild(menu);
   shopSlotMenuFocus = 0;
   for (let i = 0; i < shopSlotMenuButtons.length; i++) {
     if (!shopSlotMenuButtons[i].disabled) {
@@ -13674,16 +13652,6 @@ function openShopWeaponSlotMenu(name, clientX, clientY) {
     }
   }
   shopSlotMenuApplyFocus();
-}
-
-/** Open slot menu for a shop weapon row (centered on the element). */
-function openShopWeaponSlotMenuForEl(name, el) {
-  if (!el) {
-    openShopWeaponSlotMenu(name, window.innerWidth * 0.5, window.innerHeight * 0.45);
-    return;
-  }
-  const r = el.getBoundingClientRect();
-  openShopWeaponSlotMenu(name, r.left + r.width * 0.5, r.bottom + 4);
 }
 
 function focusShopWeaponRow(el) {

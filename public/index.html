@@ -904,51 +904,55 @@
     #solo-shop .ss-slot-badge.slot-2 { color: #ff9a3c; border-color: #a65a20; }
     #solo-shop .ss-slot-badge b { font-weight: 700; }
     .ss-slot-menu {
-      position: fixed;
-      z-index: 40;
-      min-width: 168px;
-      padding: 8px;
-      background: #0c1828;
-      border: 1px solid #3a7a98;
-      border-radius: 4px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+      position: absolute;
+      inset: 0;
+      z-index: 6;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      padding: 4px;
+      margin: 0;
+      min-width: 0;
+      background: rgba(4, 10, 18, 0.92);
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
       font-family: Consolas, "Courier New", monospace;
-      color: #b8f0ff;
     }
-    .ss-slot-menu-title {
-      font-size: 10px;
-      letter-spacing: 0.08em;
-      color: #5ad8ff;
-      margin: 0 0 8px;
-      text-transform: uppercase;
+    #solo-shop .ss-row.ss-slot-picking {
+      pointer-events: auto;
     }
     .ss-slot-menu-btn {
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
       width: 100%;
-      text-align: left;
-      margin: 0 0 6px;
-      padding: 8px 10px;
-      font: 12px Consolas, "Courier New", monospace;
-      color: #d0f8ff;
-      background: #122436;
-      border: 1px solid #2a5a72;
-      border-radius: 3px;
+      height: 100%;
+      min-height: 0;
+      padding: 0;
+      font: 700 20px Consolas, "Courier New", monospace;
+      letter-spacing: 0.04em;
+      color: #9ad8ef;
+      background: transparent;
+      border: 2px solid #2a5a72;
+      border-radius: 2px;
       cursor: pointer;
     }
-    .ss-slot-menu-btn:last-child { margin-bottom: 0; }
     .ss-slot-menu-btn:hover:not(:disabled),
     .ss-slot-menu-btn.ss-focus:not(:disabled),
     .ss-slot-menu-btn:focus:not(:disabled) {
       border-color: #7ee8ff;
-      background: #1a3448;
+      background: rgba(30, 70, 96, 0.35);
+      color: #e8fbff;
       outline: none;
     }
     .ss-slot-menu-btn.ss-focus:not(:disabled),
     .ss-slot-menu-btn:focus-visible:not(:disabled) {
-      box-shadow: 0 0 0 2px rgba(126, 232, 255, 0.55);
+      box-shadow: 0 0 0 1px #7ee8ff, 0 0 12px rgba(126, 232, 255, 0.5);
     }
     .ss-slot-menu-btn:disabled {
-      opacity: 0.45;
+      opacity: 0.35;
       cursor: default;
     }
     #solo-shop .ss-scanlines { display: none; }
@@ -2574,7 +2578,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=95');
-      await loadScript('game.js?v=1128');
+      await loadScript('game.js?v=1129');
     } catch (err) {
       console.error(err);
     }
