@@ -17962,14 +17962,11 @@ function ensureSnakeSegs(e, headX, headY, headAng) {
   if (!e || e.kind !== 'snake') return;
   if (e.snakeSegs && e.snakeSegs.length === ENEMY_SNAKE_SEGMENTS && e.snakeTrail) return;
   const ang = headAng || 0;
-  const back = ang + Math.PI;
-  const gap = ENEMY_SNAKE_FOLLOW_DIST;
   const segs = [];
   for (let i = 0; i < ENEMY_SNAKE_SEGMENTS; i++) {
-    const d = gap * (i + 1);
     segs.push({
-      x: headX + Math.cos(back) * d,
-      y: headY + Math.sin(back) * d,
+      x: headX,
+      y: headY,
       angle: ang,
       scale: snakeSegmentScaleClient(i)
     });
@@ -18007,14 +18004,12 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
     const ang = headAng != null && Number.isFinite(headAng)
       ? headAng
       : (step > 1e-6 ? Math.atan2(dy, dx) : (e.angle || 0));
-    const back = ang + Math.PI;
     e.snakeTrail = [{ x: headX, y: headY, dist: 0 }];
     e.snakeTrailLen = 0;
     for (let i = 0; i < e.snakeSegs.length; i++) {
-      const d = gap * (i + 1);
       const s = e.snakeSegs[i];
-      s.x = wrapCoord(headX + Math.cos(back) * d, W);
-      s.y = wrapCoord(headY + Math.sin(back) * d, H);
+      s.x = headX;
+      s.y = headY;
       s.angle = ang;
       s.scale = snakeSegmentScaleClient(i);
     }
@@ -18055,13 +18050,18 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
       }
     }
     if (!placed) {
-      // Beyond recorded path — keep spacing behind the oldest stamp (don't pile on head).
+      // Not enough path yet — pile on the oldest stamp; peel off as head travels.
       const a = trail[0];
-      const backAng = (headAng != null && Number.isFinite(headAng) ? headAng : (s.angle || 0)) + Math.PI;
-      const extra = Math.max(0, gap * (i + 1) - headDist);
-      s.x = wrapCoord(a.x + Math.cos(backAng) * extra, W);
-      s.y = wrapCoord(a.y + Math.sin(backAng) * extra, H);
-      if (headAng != null && Number.isFinite(headAng)) s.angle = headAng;
+      s.x = a.x;
+      s.y = a.y;
+      if (trail.length > 1) {
+        const b = trail[1];
+        const wdx = shortestWrapDelta(a.x, b.x, W);
+        const wdy = shortestWrapDelta(a.y, b.y, H);
+        if (Math.hypot(wdx, wdy) > 1e-6) s.angle = Math.atan2(wdy, wdx);
+      } else if (headAng != null && Number.isFinite(headAng)) {
+        s.angle = headAng;
+      }
     }
   }
 }
