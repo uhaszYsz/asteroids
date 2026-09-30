@@ -16183,8 +16183,8 @@ function isOfflineLocalPlay() {
 }
 
 /**
- * When room lag-sim (sv_ping) is on, offline must client-predict like online —
- * otherwise mirrorOfflineHostShip / hard snaps keep pose glued to the live host.
+ * When room lag-sim (sv_ping) is on, offline delays snaps like online RTT.
+ * Pose always uses client prediction (same in-frame apply loop as online).
  */
 function offlineLagSimActive() {
   return isOfflineLocalPlay() && (roomSimPingMs | 0) > 0;
@@ -16192,7 +16192,7 @@ function offlineLagSimActive() {
 
 /** True when local ship motion is predicted from inputs (not host-mirrored). */
 function clientPredictsMotion() {
-  return !isOfflineLocalPlay() || offlineLagSimActive();
+  return true;
 }
 
 /**
@@ -16258,12 +16258,6 @@ function clampSoftErr() {
 }
 
 function decaySoftErr(dt) {
-  if (isOfflineLocalPlay() && !offlineLagSimActive()) {
-    softErr.x = 0;
-    softErr.y = 0;
-    softErr.angle = 0;
-    return;
-  }
   if (dt <= 0) return;
   const rate = cv('cl_recon');
   if (rate <= 0) {
@@ -16284,18 +16278,6 @@ function decaySoftErr(dt) {
 
 /** Visual pose for local ship (sim + soft error). */
 function localView() {
-  // Host-mirrored offline: no softErr. Lag-sim offline predicts like online.
-  if (isOfflineLocalPlay() && !offlineLagSimActive()) {
-    return {
-      x: player.x,
-      y: player.y,
-      angle: player.angle,
-      vx: player.vx,
-      vy: player.vy,
-      av: player.av || 0,
-      hp: player.hp
-    };
-  }
   return {
     x: wrapCoord(player.x + softErr.x, W),
     y: wrapCoord(player.y + softErr.y, H),
@@ -16362,10 +16344,10 @@ function estimatedServerTick() {
   if (isOfflineLocalPlay() && !offlineLagSimActive()) {
     // Local sim steps on performance.now() (see local-server hrtime). Wall-clock
     // Date.now()+NTP drifts ahead of setTimeout → input flood → laggy/ghost lasers.
+    // No syncTick+1 ceiling: syncSimTicks catchup drains queued frames in-frame
+    // (same while-loop as online) when the host hitch stalls snaps.
     let t = syncTick;
     if (syncStPerf > 0) t = syncTick + (performance.now() - syncStPerf) / TICK_MS;
-    // Never more than one tick ahead of the last authoritative snap.
-    if (t > syncTick + 1) t = syncTick + 1;
     if (t < syncTick) t = syncTick;
     return t;
   }
@@ -16382,29 +16364,8 @@ function resetTickClock() {
 /**
  * After a long rAF pause: snap sim to last known server pose but keep the
  * on-screen ship continuous via softErr so it blends instead of teleports.
- * Offline solo: never soft-blend — that fights host mirrors and causes shake.
  */
 function adoptServerGhostVisual() {
-  if (isOfflineLocalPlay() && !offlineLagSimActive()) {
-    if (serverGhost.valid) {
-      player.x = serverGhost.x;
-      player.y = serverGhost.y;
-      player.vx = serverGhost.vx;
-      player.vy = serverGhost.vy;
-      player.angle = serverGhost.angle;
-      player.av = serverGhost.av || 0;
-      player.hp = serverGhost.hp;
-      player.turnDecelStep = 0;
-      player.turnDecelLeft = 0;
-      player.turnDecelRev = 0;
-      lastAppliedSeq = ackedSeq;
-    }
-    softErr.x = 0;
-    softErr.y = 0;
-    softErr.angle = 0;
-    resumeBlendUntil = 0;
-    return;
-  }
   const prevX = player.x + softErr.x;
   const prevY = player.y + softErr.y;
   const prevA = player.angle + softErr.angle;
@@ -16435,51 +16396,11 @@ function adoptServerGhostVisual() {
 }
 
 /**
- * Solo local host: copy the live sim ship every frame (same JS process).
- * Snaps alone leave 1-frame vel/pose fights after hitches; this is the source of truth.
+ * Former host-mirror path — offline now predicts like online (in-frame apply loop).
+ * Kept as a no-op so call sites stay stable.
  */
 function mirrorOfflineHostShip() {
-  // Lag-sim: must not bypass delayed snaps — serverGhost would equal the live ship.
-  if (offlineLagSimActive()) return false;
-  if (!isOfflineLocalPlay() || !inGame || myId == null) return false;
-  const sw = ws && ws.__local ? ws._server : null;
-  if (!sw || !sw.room) return false;
-  const p = sw.room.players.get(myId);
-  if (!p) return false;
-  const ack = p.lastSeq | 0;
-  player.x = p.x;
-  player.y = p.y;
-  player.vx = p.vx;
-  player.vy = p.vy;
-  player.angle = p.angle;
-  player.av = p.av || 0;
-  player.hp = p.hp;
-  player.stunned = !!p.stunned;
-  player.godLeft = p.godLeft | 0;
-  player.collideCd = p.collideCd || 0;
-  player.turnDecelStep = p.turnDecelStep || 0;
-  player.turnDecelLeft = p.turnDecelLeft || 0;
-  player.turnDecelRev = p.turnDecelRev || 0;
-  softErr.x = 0;
-  softErr.y = 0;
-  softErr.angle = 0;
-  resumeBlendUntil = 0;
-  serverGhost.x = p.x;
-  serverGhost.y = p.y;
-  serverGhost.vx = p.vx;
-  serverGhost.vy = p.vy;
-  serverGhost.angle = p.angle;
-  serverGhost.hp = p.hp;
-  serverGhost.av = p.av || 0;
-  serverGhost.valid = true;
-  if (ack > (ackedSeq | 0)) {
-    ackedSeq = ack;
-    pendingInputs = pendingInputs.filter(f => f.seq > ack);
-  }
-  lastAppliedSeq = ack;
-  offlineShootSeq = Math.max(offlineShootSeq | 0, ack);
-  predReady = true;
-  return true;
+  return false;
 }
 
 /**
@@ -16516,25 +16437,11 @@ function syncSimTicks() {
     return;
   }
 
-  // Never flood the dedicated-server input queue. Local host is exempt.
+  // Never flood the dedicated-server input queue. Local host is exempt from
+  // the glue-to-ghost path — prediction keeps moving while acks catch up.
   if (!canProduceInputFrame()) {
     // Clock estimate ran ahead (or queue already deep): skip ticking until acks
     // drain unacked depth. Snap cursor so we don't bank a huge catchup burst.
-    // Offline (no lag-sim): host may keep thrusting while we pause — stick to ghost.
-    // Lag-sim: do not glue local pose to delayed serverGhost.
-    if (offline && !offlineLagSimActive() && serverGhost.valid) {
-      player.x = serverGhost.x;
-      player.y = serverGhost.y;
-      player.vx = serverGhost.vx;
-      player.vy = serverGhost.vy;
-      player.angle = serverGhost.angle;
-      player.av = serverGhost.av || 0;
-      player.hp = serverGhost.hp;
-      softErr.x = 0;
-      softErr.y = 0;
-      softErr.angle = 0;
-      lastAppliedSeq = Math.max(lastAppliedSeq | 0, ackedSeq | 0);
-    }
     if (behind > maxUnackedInputs()) clientTickCursor = target;
     return;
   }
@@ -22266,40 +22173,6 @@ function predictTick(forceShoot) {
     return;
   }
 
-  // Offline local host (no lag-sim): send inputs only — pose comes from every snap / host mirror.
-  // Dual predict+snap was the shake/jump fight (esp. early thrust).
-  // With sv_ping lag-sim, fall through to online-style client prediction so cl_server_pose can diverge.
-  if (isOfflineLocalPlay() && !offlineLagSimActive()) {
-    const als = activeLocalShoot();
-    if (shootHeld() && !als.bursting && als.reloadLeft === 0 &&
-        als.shootAmmo > 0 && (als.shootCd | 0) <= 0) {
-      shootPulse = true;
-    }
-    const inp = getInput();
-    if (forceShoot) {
-      if ((activeWeaponSlot | 0) === 2 && equippedWeapon2) inp.sp2 = 1;
-      else inp.sp = 1;
-    }
-    const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sp2: inp.sp2, sh: inp.sh, j: inp.j | 0 };
-    pendingInputs.push(frame);
-    shedPendingInputHistory();
-    rememberFrame(frame);
-    sendPendingInputs();
-    // Local shoot FX only; do not advance lastAppliedSeq (snaps own that).
-    const applyUntil = releasedSeq();
-    while (offlineShootSeq < applyUntil) {
-      const ready = frameBySeq(offlineShootSeq + 1);
-      if (!ready) break;
-      offlineShootSeq++;
-      if (ready.sp) tryStartLocalBurst(1);
-      if (ready.sp2) tryStartLocalBurst(2);
-      updateLocalShooting();
-    }
-    if (shootPulse) shootPulse = false;
-    if (demoRec) demoRecordAfterTick(frame);
-    return;
-  }
-
   // Held shoot: re-pulse when a new burst can start (railgun after cooldown, post-reload, etc.).
   {
     const als = activeLocalShoot();
@@ -22320,6 +22193,7 @@ function predictTick(forceShoot) {
   sendPendingInputs();
 
   // Apply inputs that finished INPUT_DELAY — movement and local shoot FX together.
+  // Offline uses this same in-frame drain loop (no host-mirror / send-only path).
   const applyUntil = releasedSeq();
   while (lastAppliedSeq < applyUntil) {
     const ready = frameBySeq(lastAppliedSeq + 1);
@@ -22337,12 +22211,6 @@ function predictTick(forceShoot) {
 }
 
 function reconcileFromServer(row) {
-  // Offline without lag-sim: every snap is law — dedicated path, no softErr / spike hold.
-  if (isOfflineLocalPlay() && !offlineLagSimActive()) {
-    syncOfflineLocalPlayerFromRow(row);
-    return;
-  }
-
   serverGhost.x = row[1];
   serverGhost.y = row[2];
   serverGhost.vx = row[3];
@@ -22506,9 +22374,8 @@ function applyBinarySnap(buf) {
     const row = [id, x, y, vx, vy, angle, hp, lastSeq, av, stunned, godLeft];
     seen.add(id);
     if (id === myId) {
-      // Offline + lag-sim: delayed snaps must reconcile (not hard-snap / not skip).
-      if (isOfflineLocalPlay() && !offlineLagSimActive()) syncOfflineLocalPlayerFromRow(row);
-      else if (!slightReorder || offlineLagSimActive()) reconcileFromServer(row);
+      // Soft reconcile (online + offline) — prediction owns pose between snaps.
+      if (!slightReorder || offlineLagSimActive()) reconcileFromServer(row);
     } else {
       pushRemoteSample(id, row, st);
     }
