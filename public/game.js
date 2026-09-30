@@ -18486,9 +18486,9 @@ const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
-/** Hit pulse: hops both ways every 0.035s, advancing 2 segs per hop (both pulse); each does 0.25s grow 0.6→1. */
+/** Hit pulse: hops both ways every 0.035s, advancing 4 segs per hop (all 4 pulse); head never scales. Each does 0.25s grow 0.6→1. */
 const SNAKE_PULSE_HOP_MS = 35;
-const SNAKE_PULSE_HOP_SEGS = 2;
+const SNAKE_PULSE_HOP_SEGS = 4;
 const SNAKE_PULSE_CYCLE_MS = 250;
 const SNAKE_PULSE_HIT_DEBOUNCE_MS = 100;
 const SNAKE_SEG_SCALE_BASE = 0.6;
@@ -18576,8 +18576,9 @@ function trySnakeHitPulseAt(x, y, hitR) {
   }
 }
 
-/** Base 0.6 → peak → 0.6; hops outward both ways, 2 segs per hop (pair shares delay). */
+/** Base 0.6 → peak → 0.6; hops outward both ways, HOP_SEGS per step (pair/group shares delay). Head (0) never pulses. */
 function snakeSegmentPulseScale(e, chainIdx, now) {
+  if ((chainIdx | 0) === 0) return SNAKE_SEG_SCALE_BASE;
   const base = SNAKE_SEG_SCALE_BASE;
   const waves = e && e.snakePulseWaves;
   if (!waves || !waves.length) return base;
@@ -20074,9 +20075,7 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   if (headOpt && headOpt.kind === 'sprite') {
     const headSpec = headOpt.sprite;
-    const headPulse = snakeSegmentPulseScale(e, 0, performance.now());
-    const headDrawScale = (ENEMY_SNAKE_HEAD_SPRITE_SCALE > 0 ? ENEMY_SNAKE_HEAD_SPRITE_SCALE : 1)
-      * (headPulse / SNAKE_SEG_SCALE_BASE);
+    const headDrawScale = ENEMY_SNAKE_HEAD_SPRITE_SCALE > 0 ? ENEMY_SNAKE_HEAD_SPRITE_SCALE : 1;
     const headM = Math.max(1, headSpec.fh, headSpec.fw) * 0.5 * SPRITE_SHIP_PX_SCALE
       * headDrawScale + 4;
     if (wrapTwins) snakeEdgeWrapOffsets(x, y, headM, _snakeWrapOff);
