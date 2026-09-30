@@ -18147,8 +18147,13 @@ function rebaseEnemyPredictOrigin(e) {
   e.spawnY = y;
   e.spawnSt = serverNow();
   e.travelDist = Math.hypot((e.tx || 0) - x, (e.ty || 0) - y);
-  // Never clamp an off-screen entry onto the rim during client predict.
-  if (x < 8 || x > W - 8 || y < 8 || y > H - 8) e.enteredPlay = false;
+  // Snake wraps to x≈0 / x≈W — that is still in-play. Only true exterior is off-screen entry.
+  // Using the old <8 rim test cleared enteredPlay every edge pass → no wrap → head flies into void.
+  if (e.kind === 'snake') {
+    if (x < 0 || x > W || y < 0 || y > H) e.enteredPlay = false;
+  } else if (x < 8 || x > W - 8 || y < 8 || y > H - 8) {
+    e.enteredPlay = false;
+  }
 }
 
 function applyEnemyUpdate(row) {
@@ -18337,6 +18342,8 @@ function enemyAt(e) {
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));
     const stepOpts = chase ? { noArriveSnap: true, noStop: true } : null;
     for (let i = 0; i < steps; i++) stepEnemyDestinationSmoothLocal(state, stepOpts);
+    // Predict may enter the field before the next net snap — keep wrap/twins in sync.
+    if (state.enteredPlay) e.enteredPlay = true;
     return {
       x: state.x,
       y: state.y,
@@ -19889,8 +19896,7 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor, opts) {
 }
 
 /** Snake boss: Craft 274 head (server) + Craft 88 tail (local path trail, batched).
- *  Head/segs draw wrap twins near edges so the nose doesn't vanish mid-cross.
- *  Twins stay off until enteredPlay so off-screen entry isn't mirrored on-screen. */
+ *  Wrap twins only after enteredPlay (edge spawn at x=0 must not mirror to +W). */
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
   updateSnakeSegsToward(e, x, y, angle);
   const wrapTwins = !!e.enteredPlay;

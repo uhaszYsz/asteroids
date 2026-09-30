@@ -1207,12 +1207,21 @@ function randomOffscreenSpawnPoint(margin) {
   return { x: Math.random() * W, y: H + m };
 }
 
+/** Snake: spawn centered on a screen edge (flies straight in). */
+function randomSnakeEdgeSpawnPoint() {
+  const pad = 40 * RES_SCALE;
+  const side = (Math.random() * 4) | 0;
+  if (side === 0) return { x: 0, y: pad + Math.random() * (H - pad * 2) };
+  if (side === 1) return { x: W, y: pad + Math.random() * (H - pad * 2) };
+  if (side === 2) return { x: pad + Math.random() * (W - pad * 2), y: 0 };
+  return { x: pad + Math.random() * (W - pad * 2), y: H };
+}
+
 /** Place enemy off-screen aimed at an on-field wander point. */
 function placeEnemyOffscreenEntry(e) {
-  // Snake head sprite is ~55px — keep the whole nose clearly off-screen.
-  let margin = (e.r || 12) + 24 * RES_SCALE;
-  if (e.kind === 'snake') margin = Math.max(margin, 48 * RES_SCALE);
-  const spawn = randomOffscreenSpawnPoint(margin);
+  const spawn = e.kind === 'snake'
+    ? randomSnakeEdgeSpawnPoint()
+    : randomOffscreenSpawnPoint((e.r || 12) + 24 * RES_SCALE);
   const target = randomWanderPoint();
   e.x = spawn.x;
   e.y = spawn.y;
