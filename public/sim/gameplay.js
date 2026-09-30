@@ -4237,7 +4237,7 @@ function spawnPlayer(id, name, colors, room) {
   };
 }
 
-function respawnPlayer(room, p, keepLoadout, maxHp) {
+function respawnPlayer(room, p, keepLoadout, maxHp, resetLevels) {
   const pose = playerSpawnPose(p.id, room);
   p.x = pose.x; p.y = pose.y; p.vx = 0; p.vy = 0;
   p.angle = pose.angle;
@@ -4247,16 +4247,16 @@ function respawnPlayer(room, p, keepLoadout, maxHp) {
   p.lastHitBy = 0;
   p.hp = maxHp != null ? maxHp : MAX_HP;
   if (keepLoadout) {
-    // Round winner: keep both equipped guns (Z + X) and their levels.
+    // Keep both equipped guns (Z + X). Death: resetLevels → all L1, never demount.
     if (!p.weapon) p.weapon = 'default';
-    if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+    if (resetLevels || !p.weaponLevels) p.weaponLevels = freshWeaponLevels();
     ensureUnlockedWeapons(p);
     p.unlockedWeapons[p.weapon] = true;
     if (p.weapon2) p.unlockedWeapons[p.weapon2] = true;
     resetWeaponSlotRuntime(p, 1);
     if (p.weapon2) resetWeaponSlotRuntime(p, 2);
   } else {
-    // Round loser (or fresh): default gun, no upgrades, no second weapon.
+    // Fresh / full wipe: default gun only.
     ownOnlyWeapon(p, 'default', 1);
     resetWeaponSlotRuntime(p, 1);
   }
@@ -5218,8 +5218,8 @@ function finishDeathRound(room) {
         return;
       }
       if (victim && (victim.lives | 0) > 0) {
-        // Solo/coop waves: keep guns + levels across deaths; PvP still strips the loser.
-        respawnPlayer(room, victim, true, SOLO_MAX_HP);
+        // Solo/coop: keep mounts, downgrade all weapons to L1.
+        respawnPlayer(room, victim, true, SOLO_MAX_HP, true);
         resyncAllAsteroids(room);
         emitRoundReset(room);
       }
@@ -5230,8 +5230,8 @@ function finishDeathRound(room) {
       endSoloPractice(room);
       return;
     }
-    // Keep wave field / enemies; only respawn the pilot (keep loadout).
-    respawnPlayer(room, victim, true, SOLO_MAX_HP);
+    // Keep wave field / enemies; keep mounts, downgrade all weapons to L1.
+    respawnPlayer(room, victim, true, SOLO_MAX_HP, true);
     resyncAllAsteroids(room);
     emitRoundReset(room);
     return;
@@ -5248,8 +5248,9 @@ function finishDeathRound(room) {
     return;
   }
   for (const p of room.players.values()) {
-    // Round winner keeps gun + upgrades; the dead player resets to default.
-    respawnPlayer(room, p, p.id !== room.deathVictimId);
+    // Dead player: keep mounts, all weapons → L1. Living: keep mounts + levels.
+    const died = p.id === room.deathVictimId;
+    respawnPlayer(room, p, true, undefined, died);
   }
   resetCenterAsteroid(room);
   // Bake frozen poses into spawn clocks so clients don't extrapolate death-freeze time.
