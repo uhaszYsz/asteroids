@@ -3734,7 +3734,7 @@ function handleShopBuy(room, p, item, name, slot) {
     const info = equipWeaponIntoSlot(p, name, wantSlot);
     notifyPlayerCoins(room, p);
     notifyPlayerWeapon(room, p, false, info && info.slot);
-    return { ok: 1 };
+    return { ok: 1, slot: info && info.slot, changed: info && info.slot };
   }
 
   return { ok: 0, err: 'item' };

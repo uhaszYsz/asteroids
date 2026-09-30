@@ -516,6 +516,7 @@ wss.on('connection', (ws) => {
       send(ws, Object.assign({ t: 'shopBuy' }, result, {
         item,
         name,
+        slot,
         wave: room.shopWave | 0,
         coins: p.coins | 0,
         score: p.coinsCollected | 0,

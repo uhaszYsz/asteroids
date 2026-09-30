@@ -11612,7 +11612,7 @@ function armCampaignJumpPulse() {
 const GAME_KEYS = new Set([
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'Enter',
-  'ShiftLeft', 'ShiftRight', 'KeyZ', 'KeyX'
+  'ShiftLeft', 'ShiftRight', 'KeyZ', 'KeyX', 'AltLeft'
 ]);
 
 const WEAPON_NAMES = ['default', 'rocket', 'laser', 'shotgun', 'railgun', 'plasma', 'voidcannon', 'asteroidgun'];
@@ -11620,6 +11620,10 @@ const WEAPON_MAX_LEVEL = 3;
 let selectedWeapon = 1; // 1 default … 8 asteroidgun
 /** Second gun slot (X) — weapon name, or null when empty. Level lives in weaponLevels[name]. */
 let equippedWeapon2 = null;
+/** Which loadout slot Space/Z fires (1 or 2). Left Alt toggles. */
+let activeWeaponSlot = 1;
+/** Shop: preferred buy slot (1/2) shown in the corner badge. */
+let shopBuySlot = 1;
 /** Mirror of server WEAPONS — used only to gate local muzzle/fake shot FX. */
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
@@ -11651,6 +11655,29 @@ const localShoot = { shootAmmo: 3, shootCd: 0, reloadLeft: 0, bursting: false, r
 
 function currentWeaponName() {
   return WEAPON_NAMES[selectedWeapon - 1] || 'default';
+}
+
+/** Weapon name for the active fire slot (Alt switches). */
+function activeWeaponName() {
+  if ((activeWeaponSlot | 0) === 2) return equippedWeapon2 || currentWeaponName();
+  return currentWeaponName();
+}
+
+function toggleActiveWeaponSlot() {
+  const next = (activeWeaponSlot | 0) === 2 ? 1 : 2;
+  // Don't land on empty slot 2 — bounce back to 1.
+  if (next === 2 && !equippedWeapon2) {
+    activeWeaponSlot = 1;
+    return;
+  }
+  activeWeaponSlot = next;
+  shopBuySlot = activeWeaponSlot;
+  const name = activeWeaponName();
+  resetLocalShoot(name);
+  const me = localView();
+  if (me) emitWeaponEquipFx(me.x, me.y, name, getLocalWeaponLevel(name));
+  updateLoadoutHud();
+  if (soloShopOpen) updateShopSlotBadge();
 }
 
 function getLocalWeaponLevel(name) {
@@ -11717,17 +11744,19 @@ function resetLocalShoot(weaponName) {
   }
 }
 
-function tryStartLocalBurst() {
+function tryStartLocalBurst(slot) {
   if (!matchLive) return false;
   // Space while invuln: drop godmode and fire (matches server).
   if ((player.godLeft | 0) > 0) player.godLeft = 0;
   if (localShoot.bursting || localShoot.reloadLeft > 0 || localShoot.shootAmmo <= 0 || (localShoot.shootCd | 0) > 0) {
     return false;
   }
-  if (currentWeaponName() === 'railgun' && (localShoot.railChargeLeft | 0) > 0) return false;
+  const name = (slot === 2 && equippedWeapon2) ? equippedWeapon2 : currentWeaponName();
+  if (name === 'railgun' && (localShoot.railChargeLeft | 0) > 0) return false;
   localShoot.bursting = true;
-  if (selectedWeapon === 3) {
-    const w = effectiveLocalWeapon(currentWeaponName());
+  localShoot.wpn = name;
+  if (name === 'laser') {
+    const w = effectiveLocalWeapon(name);
     // Beam stays up while localShoot.bursting (ammo dump on sim ticks) — not wall-clock ms.
     // L2+: worm-width beam (matches server ENEMY_WORM_LASER.width = 12*RES_SCALE).
     const wideW = getLocalWeaponLevel('laser') >= 2 ? (12 * RES_SCALE) : 0;
@@ -11738,7 +11767,7 @@ function tryStartLocalBurst() {
       wideW
     );
   }
-  if (currentWeaponName() === 'railgun') {
+  if (name === 'railgun') {
     const w = effectiveLocalWeapon('railgun');
     const dur = Math.round((w.charge | 0) * (1000 / TPS));
     // Estimate when the server will start charge (input delay ticks ahead).
@@ -11753,7 +11782,7 @@ function tryStartLocalBurst() {
 
 /** Advance local ammo/cd like the server; muzzle FX only when a shot would fire. */
 function updateLocalShooting() {
-  const name = currentWeaponName();
+  const name = localShoot.wpn || activeWeaponName();
   const w = effectiveLocalWeapon(name);
   if (localShoot.shootCd > 0) localShoot.shootCd--;
 
@@ -12047,6 +12076,13 @@ addEventListener('keydown', e => {
       closeSoloShopContinue();
       return;
     }
+    if (e.code === 'AltLeft') {
+      e.preventDefault();
+      shopBuySlot = shopBuySlot === 2 ? 1 : 2;
+      activeWeaponSlot = shopBuySlot;
+      updateShopSlotBadge();
+      return;
+    }
     if (e.code === 'Space') {
       e.preventDefault();
       shopActivateFocus(null);
@@ -12066,6 +12102,11 @@ addEventListener('keydown', e => {
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { e.preventDefault(); shopMoveFocus(1, 0); return; }
     if (e.code === 'ArrowLeft' || e.code === 'KeyA') { e.preventDefault(); shopMoveFocus(0, -1); return; }
     if (e.code === 'ArrowRight' || e.code === 'KeyD') { e.preventDefault(); shopMoveFocus(0, 1); return; }
+  }
+  if (e.code === 'AltLeft' && inGame && !e.repeat && !soloShopOpen && !consoleOpen) {
+    e.preventDefault();
+    toggleActiveWeaponSlot();
+    return;
   }
   if (e.code === 'F1') {
     e.preventDefault();
@@ -13194,12 +13235,15 @@ const loadoutHudEl = document.getElementById('loadout-hud');
 const loadoutZNameEl = document.getElementById('loadout-z-name');
 const loadoutXNameEl = document.getElementById('loadout-x-name');
 
-/** [Z]/[X] loadout readout, top-left — lets the player see what's actually equipped. */
+/** [1]/[2] loadout readout, top-left — active slot highlighted (Alt switches). */
 function updateLoadoutHud() {
   if (!loadoutHudEl) return;
   const show = inGame && !campaignMapOpen;
   loadoutHudEl.classList.toggle('hidden', !show);
   if (!show) return;
+  const rows = loadoutHudEl.querySelectorAll('.loadout-row');
+  if (rows[0]) rows[0].classList.toggle('loadout-active', (activeWeaponSlot | 0) !== 2);
+  if (rows[1]) rows[1].classList.toggle('loadout-active', (activeWeaponSlot | 0) === 2 && !!equippedWeapon2);
   if (loadoutZNameEl) {
     const zName = currentWeaponName() || 'default';
     const zLvl = getLocalWeaponLevel(zName);
@@ -13369,12 +13413,93 @@ function classifyWeaponAcquireClient(st, name) {
   return { kind: st.weapon2 ? 'replace' : 'mount', slot: st.weapon2 ? 1 : 2 };
 }
 
-function shopWeaponCostClient(st, name) {
-  const info = classifyWeaponAcquireClient(st, name);
-  if (info.kind !== 'upgrade') return 800;
+/** Mirrors server shopWeaponCostForSlot for a chosen gun slot. */
+function shopWeaponCostForSlotClient(st, name, slot) {
+  const s = slot === 2 ? 2 : 1;
+  const curName = s === 2 ? st.weapon2 : st.weapon;
+  if (curName !== name) return 800;
   const lvl = Math.max(1, (st.levels && st.levels[name]) | 0 || 1);
   if (lvl >= WEAPON_MAX_LEVEL) return -1;
   return 800 + 200 * (lvl + 1);
+}
+
+function shopWeaponCostClient(st, name) {
+  return shopWeaponCostForSlotClient(st, name, shopBuySlot);
+}
+
+function updateShopSlotBadge() {
+  const el = document.getElementById('ss-slot-num');
+  if (el) el.textContent = String(shopBuySlot === 2 ? 2 : 1);
+  const badge = document.getElementById('ss-slot-badge');
+  if (badge) {
+    badge.classList.toggle('slot-2', shopBuySlot === 2);
+  }
+}
+
+function closeShopWeaponSlotMenu() {
+  const m = document.getElementById('ss-slot-menu');
+  if (m) m.remove();
+}
+
+/** Little context menu: pick slot 1 or 2 when buying a weapon. */
+function openShopWeaponSlotMenu(name, clientX, clientY) {
+  closeShopWeaponSlotMenu();
+  const st = soloShopState;
+  if (!st) return;
+  const menu = document.createElement('div');
+  menu.id = 'ss-slot-menu';
+  menu.className = 'ss-slot-menu';
+  const title = document.createElement('div');
+  title.className = 'ss-slot-menu-title';
+  title.textContent = shopItemLabel(name).toUpperCase();
+  menu.appendChild(title);
+  for (let s = 1; s <= 2; s++) {
+    const cost = shopWeaponCostForSlotClient(st, name, s);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ss-slot-menu-btn';
+    const cur = s === 2 ? st.weapon2 : st.weapon;
+    let label = 'SLOT ' + s;
+    if (cur === name) {
+      const lvl = Math.max(1, (st.levels[name] | 0) || 1);
+      label += cost < 0 ? ' · MAX L' + lvl : ' · UP L' + (lvl + 1);
+    } else if (cur) {
+      label += ' · REPLACE';
+    } else {
+      label += ' · EMPTY';
+    }
+    if (cost < 0) {
+      btn.textContent = label;
+      btn.disabled = true;
+    } else {
+      btn.textContent = label + '  ' + shopCreditPrice(cost);
+      if (st.coins < cost) btn.disabled = true;
+      else {
+        btn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          shopBuySlot = s;
+          activeWeaponSlot = s;
+          updateShopSlotBadge();
+          closeShopWeaponSlotMenu();
+          sendShopBuy('weapon', name, s);
+        });
+      }
+    }
+    menu.appendChild(btn);
+  }
+  document.body.appendChild(menu);
+  const pad = 8;
+  let x = clientX | 0;
+  let y = clientY | 0;
+  const mw = menu.offsetWidth || 160;
+  const mh = menu.offsetHeight || 100;
+  if (x + mw > window.innerWidth - pad) x = window.innerWidth - mw - pad;
+  if (y + mh > window.innerHeight - pad) y = window.innerHeight - mh - pad;
+  if (x < pad) x = pad;
+  if (y < pad) y = pad;
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
 }
 
 function attachShopPreview(row, kind, name, seedId, opts) {
@@ -13457,6 +13582,7 @@ function applyShopState(st) {
   weaponLevels = Object.assign({}, soloShopState.levels);
   unlockedWeapons = Object.assign({}, blankUnlock, unlocked);
   equippedWeapon2 = cur2;
+  if ((activeWeaponSlot | 0) === 2 && !equippedWeapon2) activeWeaponSlot = 1;
   renderSoloShop();
 }
 
@@ -13548,7 +13674,7 @@ function renderSoloShop() {
         const lvl = Math.max(1, (st.levels[name] | 0) || 1);
         const lvlEl = document.createElement('div');
         lvlEl.className = 'ss-lvl';
-        lvlEl.textContent = (slotHere === 1 ? 'Z' : 'X') + ' · LVL ' + lvl;
+        lvlEl.textContent = (slotHere === 1 ? '1' : '2') + ' · LVL ' + lvl;
         row.appendChild(lvlEl);
       }
       const price = document.createElement('div');
@@ -13560,11 +13686,18 @@ function renderSoloShop() {
         price.textContent = shopCreditPrice(cost);
         if (st.coins < cost) row.classList.add('ss-owned');
         else {
-          // Mouse click defaults to Z (slot 1); keyboard Z/X pick the slot explicitly.
-          row.addEventListener('click', () => sendShopBuy('weapon', name, 1));
+          row.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            openShopWeaponSlotMenu(name, ev.clientX, ev.clientY);
+          });
           weaponRow.push({
             el: row,
-            activate: (key) => sendShopBuy('weapon', name, key === 'x' ? 2 : 1)
+            activate: (key) => {
+              const s = key === 'x' ? 2 : (key === 'z' ? 1 : shopBuySlot);
+              shopBuySlot = s;
+              updateShopSlotBadge();
+              sendShopBuy('weapon', name, s);
+            }
           });
         }
       }
@@ -13583,6 +13716,7 @@ function renderSoloShop() {
     shopFocusGrid.push([{ el: ssContinueBtn, activate: closeSoloShopContinue }]);
   }
   shopApplyFocusHighlight();
+  updateShopSlotBadge();
 }
 
 function shopFocusClamp() {
@@ -13629,6 +13763,7 @@ function showSoloShop(st) {
   soloShopOpen = true;
   shopFocusRow = 0;
   shopFocusCol = 0;
+  shopBuySlot = (activeWeaponSlot | 0) === 2 ? 2 : 1;
   pvpShopMode = !!(st && st.pvp);
   player.vx = 0;
   player.vy = 0;
@@ -13639,6 +13774,7 @@ function showSoloShop(st) {
     ssContinueBtn.disabled = false;
   }
   applyShopState(st);
+  updateShopSlotBadge();
   if (soloShopEl) {
     soloShopEl.classList.add('show');
     soloShopEl.setAttribute('aria-hidden', 'false');
@@ -13651,6 +13787,7 @@ function hideSoloShop() {
   pvpShopMode = false;
   soloShopState = null;
   shopPreviewSlots = [];
+  closeShopWeaponSlotMenu();
   if (ssContinueBtn) {
     ssContinueBtn.textContent = 'START WAVE [ENTER]';
     ssContinueBtn.disabled = false;
@@ -13682,6 +13819,25 @@ if (ssContinueBtn) {
   ssContinueBtn.addEventListener('click', (e) => {
     e.preventDefault();
     closeSoloShopContinue();
+  });
+}
+
+{
+  const badge = document.getElementById('ss-slot-badge');
+  if (badge) {
+    badge.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      shopBuySlot = shopBuySlot === 2 ? 1 : 2;
+      activeWeaponSlot = shopBuySlot;
+      updateShopSlotBadge();
+    });
+  }
+  document.addEventListener('mousedown', (e) => {
+    const menu = document.getElementById('ss-slot-menu');
+    if (!menu) return;
+    if (menu.contains(e.target)) return;
+    closeShopWeaponSlotMenu();
   });
 }
 
@@ -21464,12 +21620,23 @@ function copyShipState(from, to) {
 function getInput() {
   const j = jumpPulse ? 1 : 0;
   if (jumpPulse) jumpPulse = false;
+  const fire = !!shootPulse;
+  const fire2Key = shoot2Held();
+  // Primary fire → active slot; X still fires slot 2 directly when held.
+  let sp = 0;
+  let sp2 = 0;
+  if ((activeWeaponSlot | 0) === 2 && equippedWeapon2) {
+    if (fire) sp2 = 1;
+  } else {
+    if (fire) sp = 1;
+  }
+  if (fire2Key) sp2 = 1;
   return {
     l: turnLeft() ? 1 : 0,
     r: turnRight() ? 1 : 0,
     u: thrustUp() ? 1 : 0,
-    sp: shootPulse ? 1 : 0,
-    sp2: shoot2Held() ? 1 : 0,
+    sp,
+    sp2,
     sh: precisionTurn() ? 1 : 0,
     j
   };
@@ -21581,7 +21748,10 @@ function predictTick(forceShoot) {
       shootPulse = true;
     }
     const inp = getInput();
-    if (forceShoot) inp.sp = 1;
+    if (forceShoot) {
+      if ((activeWeaponSlot | 0) === 2 && equippedWeapon2) inp.sp2 = 1;
+      else inp.sp = 1;
+    }
     const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sp2: inp.sp2, sh: inp.sh, j: inp.j | 0 };
     pendingInputs.push(frame);
     shedPendingInputHistory();
@@ -21593,7 +21763,8 @@ function predictTick(forceShoot) {
       const ready = frameBySeq(offlineShootSeq + 1);
       if (!ready) break;
       offlineShootSeq++;
-      if (ready.sp) tryStartLocalBurst();
+      if (ready.sp) tryStartLocalBurst(1);
+      if (ready.sp2) tryStartLocalBurst(2);
       updateLocalShooting();
     }
     if (shootPulse) shootPulse = false;
@@ -21607,7 +21778,10 @@ function predictTick(forceShoot) {
     shootPulse = true;
   }
   const inp = getInput();
-  if (forceShoot) inp.sp = 1;
+  if (forceShoot) {
+    if ((activeWeaponSlot | 0) === 2 && equippedWeapon2) inp.sp2 = 1;
+    else inp.sp = 1;
+  }
   const frame = { seq: ++inputSeq, l: inp.l, r: inp.r, u: inp.u, sp: inp.sp, sp2: inp.sp2, sh: inp.sh, j: inp.j | 0 };
   pendingInputs.push(frame);
   shedPendingInputHistory();
@@ -21620,7 +21794,8 @@ function predictTick(forceShoot) {
     const ready = frameBySeq(lastAppliedSeq + 1);
     if (!ready) break;
     applyInputTo(player, ready, { localCollide: true });
-    if (ready.sp) tryStartLocalBurst();
+    if (ready.sp) tryStartLocalBurst(1);
+    if (ready.sp2) tryStartLocalBurst(2);
     // One local shoot step per released sim tick (matches server cadence).
     updateLocalShooting();
     lastAppliedSeq++;
@@ -23510,8 +23685,10 @@ function handleWsMessage(e) {
       if (msg.ok) {
         // Which gun slot this purchase touched — mirror the server's rule against the PRE-buy state.
         const prevSt = soloShopState;
-        const boughtSlot = (msg.item === 'weapon' && msg.name && prevSt)
-          ? classifyWeaponAcquireClient(prevSt, msg.name).slot
+        const boughtSlot = (msg.item === 'weapon')
+          ? ((msg.slot | 0) === 2 || (msg.changed | 0) === 2 ? 2
+            : ((msg.slot | 0) === 1 || (msg.changed | 0) === 1 ? 1
+              : (prevSt && msg.name ? classifyWeaponAcquireClient(prevSt, msg.name).slot : 1)))
           : 1;
         applyShopState(msg);
         if (msg.shopTimeLeft != null) pvpShopTimeLeft = msg.shopTimeLeft | 0;
@@ -23522,6 +23699,13 @@ function handleWsMessage(e) {
         if (msg.hp != null) player.hp = msg.hp | 0;
         // Only reset slot-1 (Z) local prediction if slot 1 is what actually changed.
         if (msg.item !== 'weapon' || boughtSlot === 1) resetLocalShoot(currentWeaponName());
+        else if (boughtSlot === 2 && equippedWeapon2) resetLocalShoot(equippedWeapon2);
+        if (boughtSlot === 1 || boughtSlot === 2) {
+          shopBuySlot = boughtSlot;
+          if (boughtSlot === 2 && equippedWeapon2) activeWeaponSlot = 2;
+          else if (boughtSlot === 1) activeWeaponSlot = 1;
+          updateShopSlotBadge();
+        }
         updateHud();
         renderPreRoundHud();
       }

@@ -91,12 +91,17 @@
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
     }
     #loadout-hud.hidden { display: none; }
-    #loadout-hud .loadout-row { display: flex; gap: 6px; align-items: center; }
+    #loadout-hud .loadout-row { display: flex; gap: 6px; align-items: center; opacity: 0.55; }
+    #loadout-hud .loadout-row.loadout-active { opacity: 1; }
     #loadout-hud .loadout-key {
       color: #7ee8ff; font-weight: 700;
     }
-    #loadout-hud .loadout-row:last-child .loadout-key { color: #ff9a3c; }
+    #loadout-hud .loadout-row:nth-child(2) .loadout-key { color: #ff9a3c; }
     #loadout-hud span:last-child { color: #d0f8ff; text-transform: uppercase; }
+    #loadout-hud .loadout-hint {
+      margin-top: 2px; font-size: 9px; letter-spacing: 0.1em;
+      color: #5a8a9a; opacity: 0.85;
+    }
     #score-hud {
       position: fixed; left: 50%; top: 36px; transform: translateX(-50%);
       color: #ff9ad8; font: 700 18px Consolas, "Courier New", monospace;
@@ -878,6 +883,66 @@
       background: #0a1220;
       border: 2px solid #1e4a62;
       border-radius: 6px;
+    }
+    #solo-shop .ss-slot-badge {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      z-index: 3;
+      font-family: "Press Start 2P", Consolas, monospace;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      color: #7ee8ff;
+      background: rgba(8, 20, 36, 0.92);
+      border: 1px solid #2a6a88;
+      border-radius: 4px;
+      padding: 6px 8px;
+      pointer-events: auto;
+      cursor: pointer;
+      user-select: none;
+    }
+    #solo-shop .ss-slot-badge.slot-2 { color: #ff9a3c; border-color: #a65a20; }
+    #solo-shop .ss-slot-badge b { font-weight: 700; }
+    .ss-slot-menu {
+      position: fixed;
+      z-index: 40;
+      min-width: 168px;
+      padding: 8px;
+      background: #0c1828;
+      border: 1px solid #3a7a98;
+      border-radius: 4px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+      font-family: Consolas, "Courier New", monospace;
+      color: #b8f0ff;
+    }
+    .ss-slot-menu-title {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      color: #5ad8ff;
+      margin: 0 0 8px;
+      text-transform: uppercase;
+    }
+    .ss-slot-menu-btn {
+      display: block;
+      width: 100%;
+      text-align: left;
+      margin: 0 0 6px;
+      padding: 8px 10px;
+      font: 12px Consolas, "Courier New", monospace;
+      color: #d0f8ff;
+      background: #122436;
+      border: 1px solid #2a5a72;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .ss-slot-menu-btn:last-child { margin-bottom: 0; }
+    .ss-slot-menu-btn:hover:not(:disabled) {
+      border-color: #7ee8ff;
+      background: #1a3448;
+    }
+    .ss-slot-menu-btn:disabled {
+      opacity: 0.45;
+      cursor: default;
     }
     #solo-shop .ss-scanlines { display: none; }
     #solo-shop .ss-card {
@@ -1758,8 +1823,9 @@
   <div id="status" class="hidden"></div>
   <div id="fps-hud">-- fps</div>
 <div id="loadout-hud" class="hidden">
-  <div class="loadout-row"><span class="loadout-key">[Z]</span><span id="loadout-z-name">DEFAULT</span></div>
-  <div class="loadout-row"><span class="loadout-key">[X]</span><span id="loadout-x-name">—</span></div>
+  <div class="loadout-row"><span class="loadout-key">[1]</span><span id="loadout-z-name">DEFAULT</span></div>
+  <div class="loadout-row"><span class="loadout-key">[2]</span><span id="loadout-x-name">—</span></div>
+  <div class="loadout-hint">ALT SWITCH</div>
 </div>
 <div id="score-hud" class="hidden"><span id="score-me">0</span><span class="sep">—</span><span id="score-foe">0</span><span class="sep" id="score-limit"></span></div>
 <div id="wait-banner" class="hidden">Waiting for player...</div>
@@ -1799,6 +1865,7 @@
       </div>
     </div>
     <div class="ss-screen">
+      <div class="ss-slot-badge" id="ss-slot-badge" title="Buy for this slot (Alt toggles)">SLOT <b id="ss-slot-num">1</b></div>
       <div class="ss-card">
         <div class="ss-tag">BUY GEAR · SPEND CREDITS</div>
         <div class="ss-hud">
@@ -2500,7 +2567,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=95');
-      await loadScript('game.js?v=1122');
+      await loadScript('game.js?v=1123');
     } catch (err) {
       console.error(err);
     }
