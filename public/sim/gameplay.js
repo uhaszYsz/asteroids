@@ -1031,6 +1031,11 @@ function gunshipIsHolding(e) {
   return !!(e && e.kind === 'gunship' && (p === 3 || p === 4));
 }
 
+/** Player hull collision only during magnet / suck (phase 4). */
+function gunshipPlayerCollideActive(e) {
+  return !!(e && e.kind === 'gunship' && (e.wormPhase | 0) === 4);
+}
+
 /** Worm 3rd attack: 360° line shotgun while moving (phases 6–7). */
 function wormIsShotgunRush(e) {
   const p = e && (e.wormPhase | 0);
@@ -5208,6 +5213,7 @@ function hitPlayerGunship(room, p, e, hit) {
   if (p.godLeft > 0) return;
   if (p.bot && !(room && room.perfTest)) return;
   if (!e || e.kind !== 'gunship' || (e.hp | 0) <= 0) return;
+  if (!gunshipPlayerCollideActive(e)) return;
   const dmg = asteroidCollideDamage(p, e, 0.5);
   applyShipCrash(room, p, hit.nx, hit.ny, hit.overlap, dmg, 0.5);
   separatePlayerFromGunships(p, room, 8);
@@ -5223,6 +5229,7 @@ function separatePlayerFromGunships(p, room, maxIters) {
     for (let i = 0; i < room.enemies.length; i++) {
       const e = room.enemies[i];
       if (!e || e.kind !== 'gunship' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
+      if (!gunshipPlayerCollideActive(e)) continue;
       const hit = playerGunshipHit(p, e);
       if (!hit) continue;
       const pad = 2;
@@ -5298,6 +5305,7 @@ function resolvePlayerGunshipCollisions(room) {
     for (let i = 0; i < room.enemies.length; i++) {
       const e = room.enemies[i];
       if (!e || e.kind !== 'gunship' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
+      if (!gunshipPlayerCollideActive(e)) continue;
       const hit = playerGunshipHit(p, e);
       if (!hit) continue;
       hitPlayerGunship(room, p, e, hit);
