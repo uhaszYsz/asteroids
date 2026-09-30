@@ -8147,21 +8147,6 @@ function emitPlayerDeathFx(x, y, color, opts) {
   deathRings.push({ x, y, born: now + 90, life: 2000, color: [1.0, 0.55, 0.15], r0: 10, r1: 160 });
 }
 
-/** Huge special: player-death blast, then big rock burst 0.1s later. */
-function emitHugeAsteroidDeathFx(x, y, r) {
-  emitPlayerDeathFx(x, y, COL.asteroid);
-  const br = r || 26 * RES_SCALE;
-  setTimeout(() => {
-    emitAsteroidBurst(x, y, br, 'big');
-    pushFxRing(x, y, COL.asteroid, {
-      r0: 6,
-      r1: Math.min(80, 18 + br * 0.7),
-      life: 420
-    });
-    pushGridShock(x, y, gridBlastAsteroidOpts(br));
-  }, 100);
-}
-
 function updateDeathRings(now) {
   for (let i = deathRings.length - 1; i >= 0; i--) {
     if (now - deathRings[i].born >= deathRings[i].life) deathRings.splice(i, 1);
@@ -8818,7 +8803,6 @@ function asteroidRng(id) {
 
 function asteroidOutlineCount(id, size) {
   const h = asteroidHash01(id);
-  if (size === 'huge') return 16 + ((h * 4) | 0);
   if (size === 'big') return 12 + ((h * 3) | 0);
   if (size === 'medium') return 10 + ((h * 3) | 0);
   return 8 + ((h * 3) | 0);
@@ -16883,18 +16867,14 @@ function removeAsteroid(id, silent) {
   const a = asteroids.get(id);
   if (a && !silent) {
     const p = asteroidAt(a);
-    if (a.special === 'huge' || a.size === 'huge') {
-      emitHugeAsteroidDeathFx(p.x, p.y, a.r || 52 * RES_SCALE);
-    } else {
-      const burstCol = a.special === 'golden' ? COL.golden : COL.asteroid;
-      emitAsteroidBurst(p.x, p.y, a.r || 10 * RES_SCALE, a.size);
-      pushFxRing(p.x, p.y, burstCol, {
-        r0: 4,
-        r1: Math.min(50, 12 + (a.r || 10) * 0.6),
-        life: 360
-      });
-      pushGridShock(p.x, p.y, gridBlastAsteroidOpts(a.r || 10 * RES_SCALE));
-    }
+    const burstCol = a.special === 'golden' ? COL.golden : COL.asteroid;
+    emitAsteroidBurst(p.x, p.y, a.r || 10 * RES_SCALE, a.size);
+    pushFxRing(p.x, p.y, burstCol, {
+      r0: 4,
+      r1: Math.min(50, 12 + (a.r || 10) * 0.6),
+      life: 360
+    });
+    pushGridShock(p.x, p.y, gridBlastAsteroidOpts(a.r || 10 * RES_SCALE));
   }
   asteroids.delete(id);
 }
@@ -19941,15 +19921,13 @@ function updateAttractedCoins(dt) {
 
 function unpackAsteroid(row) {
   const sizeCode = row[9] | 0;
-  // 3 = huge, 2 = big, 1 = medium, 0 = small (legacy true/1 treated as big).
-  const size = sizeCode >= 3 ? 'huge'
-    : sizeCode >= 2 || sizeCode === true ? 'big'
+  // 2 = big, 1 = medium, 0 = small (legacy size code 3 → big).
+  const size = sizeCode >= 2 || sizeCode === true ? 'big'
     : sizeCode === 1 ? 'medium'
     : 'small';
   const specialCode = row[11] | 0;
   const special = specialCode === 1 ? 'meteor'
     : specialCode === 2 ? 'golden'
-    : specialCode === 3 ? 'huge'
     : null;
   const shapeId = row[14] != null ? (row[14] | 0)
     : shapeIdFromPos(row[1], row[2]);
@@ -19969,7 +19947,7 @@ function unpackAsteroid(row) {
     // Network no longer sends pts — rebuild from shapeId (portal twin keeps parent id).
     pts: buildAsteroidSilhouettePts(shapeId, row[7], size),
     size,
-    big: size === 'big' || size === 'huge',
+    big: size === 'big',
     spawnSt: row[10],
     special,
     centerRock: !!(row[12] | 0),
@@ -24831,9 +24809,9 @@ function demoCollectAsteroids() {
     out.push([
       a.id, a.spawnX, a.spawnY, a.vx, a.vy, a.spawnAngle, a.spin, a.r,
       0,
-      a.size === 'huge' ? 3 : (a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0)),
+      a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0),
       a.spawnSt,
-      a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : a.special === 'huge' ? 3 : 0,
+      a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : 0,
       a.centerRock ? 1 : 0,
       a.portal ? 1 : 0,
       a.shapeId != null ? (a.shapeId | 0) : 0,
@@ -25249,8 +25227,8 @@ function normalizeDemoAsteroidRow(a) {
   if (Array.isArray(a)) return a;
   if (!a || typeof a !== 'object') return null;
   // Legacy server object format (pre-playback packing).
-  const size = a.size === 'huge' ? 3 : (a.size === 'big' || a.big ? 2 : (a.size === 'medium' ? 1 : 0));
-  const special = a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : a.special === 'huge' ? 3 : 0;
+  const size = a.size === 'big' || a.big || a.size === 'huge' ? 2 : (a.size === 'medium' ? 1 : 0);
+  const special = a.special === 'meteor' ? 1 : a.special === 'golden' ? 2 : 0;
   return [
     a.aid | a.id | 0,
     a.spawnX != null ? a.spawnX : a.x,
@@ -25832,7 +25810,7 @@ function runConsole(line) {
   if (cmdName === 'spawn') {
     if (!conRequireAdmin()) return;
     if (!args.length) {
-      conPrint('usage: spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner|gunship', 'err');
+      conPrint('usage: spawn big|medium|small|meteor|common|common1|ufo|worm|spinner|gunship', 'err');
       return;
     }
     if (!ws || ws.readyState !== 1) {
@@ -25852,7 +25830,7 @@ function runConsole(line) {
     conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
     conPrint('give <weapon|live>  — grant loadout / 99 lives (admin, in-game)', 'info');
-    conPrint('spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner|gunship  — off-screen spawn (admin, in-game)', 'info');
+    conPrint('spawn big|medium|small|meteor|common|common1|ufo|worm|spinner|gunship  — off-screen spawn (admin, in-game)', 'info');
     conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');

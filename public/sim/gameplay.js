@@ -21,7 +21,6 @@ function asteroidRng(id) {
 
 function asteroidOutlineCount(id, size) {
   const h = asteroidHash01(id);
-  if (size === 'huge') return 16 + ((h * 4) | 0);
   if (size === 'big') return 12 + ((h * 3) | 0);
   if (size === 'medium') return 10 + ((h * 3) | 0);
   return 8 + ((h * 3) | 0);
@@ -89,10 +88,6 @@ function asteroidSpeedBand(special) {
   if (special === 'meteor') {
     return { min: 4, max: 6 };
   }
-  if (special === 'huge') {
-    // Cap at half of the normal random-speed max.
-    return { min: ASTEROID_SPEED_MIN, max: ASTEROID_SPEED_MAX * 0.5 };
-  }
   return { min: ASTEROID_SPEED_MIN, max: ASTEROID_SPEED_MAX };
 }
 
@@ -119,26 +114,22 @@ function rollNormalAsteroidVelocity() {
   };
 }
 
-function rollSpecialAsteroid(allowSpecial, allowHuge) {
+function rollSpecialAsteroid(allowSpecial) {
   if (!allowSpecial || Math.random() >= SPECIAL_ASTEROID_CHANCE) return null;
-  const kinds = allowHuge ? SPECIAL_ASTEROID_KINDS_START : SPECIAL_ASTEROID_KINDS;
-  return kinds[Math.random() * kinds.length | 0];
+  return SPECIAL_ASTEROID_KINDS[Math.random() * SPECIAL_ASTEROID_KINDS.length | 0];
 }
 
 function makeAsteroid(opts) {
   const o = opts || {};
   const special = o.special !== undefined
     ? o.special
-    : rollSpecialAsteroid(!!o.allowSpecial, !!o.allowHuge);
-  let size = o.size || (o.big === false ? 'medium' : 'big');
-  // Huge specials always use the huge tier (2× big radius).
-  if (special === 'huge') size = 'huge';
-  const big = size === 'big' || size === 'huge';
+    : rollSpecialAsteroid(!!o.allowSpecial);
+  const size = o.size || (o.big === false ? 'medium' : 'big');
+  const big = size === 'big';
   const baseR = ASTEROID_R[size] || ASTEROID_R.big;
   const r = o.r != null ? o.r : baseR * (0.92 + Math.random() * 0.16);
   let hp = ASTEROID_HP;
   if (special === 'golden') hp = GOLDEN_ASTEROID_HP;
-  if (special === 'huge') hp = HUGE_ASTEROID_HP;
   if (o.hp != null) hp = o.hp;
   const angle = Math.random() * Math.PI * 2;
   const now = Date.now();
@@ -155,7 +146,7 @@ function makeAsteroid(opts) {
       vx = rolled.vx;
       vy = rolled.vy;
     }
-    if (special === 'meteor' || special === 'huge') {
+    if (special === 'meteor') {
       const fitted = fitAsteroidSpeed(vx, vy, special);
       vx = fitted.vx;
       vy = fitted.vy;
@@ -168,7 +159,7 @@ function makeAsteroid(opts) {
     y = pose.y;
     vx = o.vx != null ? o.vx : pose.vx;
     vy = o.vy != null ? o.vy : pose.vy;
-    if (special === 'meteor' || special === 'huge') {
+    if (special === 'meteor') {
       const fitted = fitAsteroidSpeed(vx, vy, special);
       vx = fitted.vx;
       vy = fitted.vy;
@@ -412,8 +403,7 @@ function createSoloWaveAsteroids(wave) {
   const list = [];
   const allowSpecial = wave > 1;
   for (let i = 0; i < c.big; i++) {
-    // Huge only here (wave start) — not from destroyed-big replacements / shards.
-    list.push(makeAsteroid({ size: 'big', offscreen: true, allowSpecial, allowHuge: allowSpecial }));
+    list.push(makeAsteroid({ size: 'big', offscreen: true, allowSpecial }));
   }
   for (let i = 0; i < c.medium; i++) {
     list.push(makeAsteroid({ size: 'medium', offscreen: true, allowSpecial: false }));
@@ -707,7 +697,7 @@ function createCampaignStageAsteroids() {
   const medN = 1 + ((Math.random() * 3) | 0);
   const smN = 1 + ((Math.random() * 3) | 0);
   for (let i = 0; i < bigN; i++) {
-    list.push(makeAsteroid({ size: 'big', offscreen: true, allowSpecial: false, allowHuge: false }));
+    list.push(makeAsteroid({ size: 'big', offscreen: true, allowSpecial: false }));
   }
   for (let i = 0; i < medN; i++) {
     list.push(makeAsteroid({ size: 'medium', offscreen: true, allowSpecial: false }));
@@ -1307,6 +1297,7 @@ function makeEnemy(kind, wave, weapon) {
  * Wave ends only when asteroids and enemies are all cleared.
  */
 const MAX_COMMON_ON_FIELD = 6;
+const MAX_COMMON1_ON_FIELD = 2;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
 const SOLO_BOSS_KINDS = ['worm', 'gunship'];
 
@@ -1365,11 +1356,31 @@ function countCommonSlots(room) {
   return n;
 }
 
+/** Live common1 holding a field slot (active or counting down to appear). */
+function countCommon1Slots(room) {
+  let n = 0;
+  for (const e of room.enemies || []) {
+    if (e.kind !== 'common1' || e.queued) continue;
+    n++;
+  }
+  return n;
+}
+
+/** Random common vs common1; common1 capped at MAX_COMMON1_ON_FIELD. */
+function pickRandomCommonKind(room) {
+  if (countCommon1Slots(room) >= MAX_COMMON1_ON_FIELD) return 'common';
+  return Math.random() < 0.5 ? 'common1' : 'common';
+}
+
 /** When a slot frees, pull the next queued common in with a 2s delay. */
 function tryPromoteQueuedCommons(room) {
   if (!room.enemies) return;
   while (countCommonSlots(room) < MAX_COMMON_ON_FIELD) {
-    const next = room.enemies.find(e => isCommonKind(e.kind) && e.queued);
+    const next = room.enemies.find(e => {
+      if (!isCommonKind(e.kind) || !e.queued) return false;
+      if (e.kind === 'common1' && countCommon1Slots(room) >= MAX_COMMON1_ON_FIELD) return false;
+      return true;
+    });
     if (!next) break;
     next.queued = false;
     next.appearLeft = COMMON_QUEUE_SPAWN_DELAY;
@@ -1412,7 +1423,7 @@ function spawnCampaignStageEnemies(room) {
     n = Math.max(1, Math.min(MAX_COMMON_ON_FIELD, n));
     room.campaignLastCommonN = n;
     for (let i = 0; i < n; i++) {
-      const commonKind = Math.random() < 0.5 ? 'common1' : 'common';
+      const commonKind = pickRandomCommonKind(room);
       const e = makeEnemy(commonKind, wave);
       e.id = room.nextEnemyId++;
       e.queued = false;
@@ -1472,7 +1483,7 @@ function spawnSoloWaveEnemies(room, wave) {
   }
 
   for (let i = 0; i < commonN; i++) {
-    const commonKind = Math.random() < 0.5 ? 'common1' : 'common';
+    const commonKind = pickRandomCommonKind(room);
     const e = makeEnemy(commonKind, wave);
     e.id = room.nextEnemyId++;
     if (i < MAX_COMMON_ON_FIELD) {
@@ -1836,7 +1847,7 @@ function gunshipMagnetAstAccelFor(a) {
   let frac = 1;
   if (!a) return 0;
   if (a.size === 'medium') frac = 0.5;
-  else if (a.size === 'big' || a.size === 'huge') frac = 1 / 3;
+  else if (a.size === 'big') frac = 1 / 3;
   else if (a.size !== 'small') frac = 0.5;
   return ENEMY_GUNSHIP_MAGNET_AST_ACCEL * frac;
 }
@@ -2102,7 +2113,7 @@ function wormCrushAsteroids(room, e) {
   e.astCheckLeft = ENEMY_WORM_AST_CHECK;
 
   const er = e.r || (e.kind === 'gunship' ? ENEMY_GUNSHIP_HIT_R : ENEMY_R.worm) || 10;
-  const queryR = er + (ASTEROID_R.huge || ASTEROID_R.big || 40);
+  const queryR = er + (ASTEROID_R.big || 40);
   const crush = [];
   forEachAsteroidNear(room, e.x, e.y, queryR, (a) => {
     if (!a || a.noCollide || a.hp <= 0) return false;
@@ -3438,39 +3449,6 @@ function splitAsteroid(room, parent) {
     spawnPickup(room, parent);
   }
 
-  // Huge: 1 big + 4 small shards.
-  if (parent.special === 'huge' || parent.size === 'huge') {
-    if (!parent.centerRock) scheduleBigAsteroidSpawn(room);
-    const parentHue = parent.hue != null
-      ? wrapHue01(parent.hue)
-      : asteroidHueFromShape(parent.shapeId != null ? parent.shapeId : parent.aid);
-    const shards = [
-      { size: 'big', count: 1 },
-      { size: 'small', count: 4 }
-    ];
-    for (let s = 0; s < shards.length; s++) {
-      const spec = shards[s];
-      for (let i = 0; i < spec.count; i++) {
-        const ang = Math.random() * Math.PI * 2;
-        const kick = (0.4 + Math.random() * 0.8) * RES_SCALE;
-        const child = makeAsteroid({
-          size: spec.size,
-          allowSpecial: true,
-          x: parent.x + Math.cos(ang) * parent.r * 0.25,
-          y: parent.y + Math.sin(ang) * parent.r * 0.25,
-          vx: parent.vx * 0.4 + Math.cos(ang) * kick,
-          vy: parent.vy * 0.4 + Math.sin(ang) * kick,
-          edgeWrapMax: 1,
-          hue: shardHueFromParent(parentHue)
-        });
-        clampSpeed(child);
-        pushAsteroid(room, child);
-        emitAsteroidFire(room, child);
-      }
-    }
-    return;
-  }
-
   if (parent.size === 'small') return;
 
   // Non-center big destroyed → replacement enters from off-screen after a delay.
@@ -4014,7 +3992,7 @@ function resolveAdminGiveItem(raw) {
 
 /**
  * Admin console `spawn <kind>` — off-screen asteroid / enemy with normal entry path.
- * kinds: big medium small huge meteor common common1 ufo worm spinner gunship
+ * kinds: big medium small meteor common common1 ufo worm spinner gunship
  */
 function handleAdminSpawn(ws, kindRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -4024,12 +4002,6 @@ function handleAdminSpawn(ws, kindRaw) {
 
   if (kind === 'big' || kind === 'medium' || kind === 'small') {
     const a = makeAsteroid({ size: kind, offscreen: true, allowSpecial: false, special: null });
-    pushAsteroid(room, a);
-    emitAsteroidFire(room, a);
-    return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
-  }
-  if (kind === 'huge') {
-    const a = makeAsteroid({ size: 'huge', special: 'huge', offscreen: true, allowSpecial: false });
     pushAsteroid(room, a);
     emitAsteroidFire(room, a);
     return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
@@ -4054,7 +4026,7 @@ function handleAdminSpawn(ws, kindRaw) {
   }
   return {
     ok: 0,
-    err: 'usage: spawn big|medium|small|huge|meteor|common|common1|ufo|worm|spinner|gunship'
+    err: 'usage: spawn big|medium|small|meteor|common|common1|ufo|worm|spinner|gunship'
   };
 }
 
@@ -4295,7 +4267,7 @@ function asteroidCosSin(a) {
  * overlap the playfield; query with circle → dedup via per-query id.
  */
 const AST_HASH_CELL = 64;
-const AST_HASH_PAD_CELLS = Math.ceil(ASTEROID_R.huge / AST_HASH_CELL) + 1;
+const AST_HASH_PAD_CELLS = Math.ceil(ASTEROID_R.big / AST_HASH_CELL) + 1;
 const AST_HASH_COLS = Math.ceil(W / AST_HASH_CELL) + AST_HASH_PAD_CELLS * 2;
 const AST_HASH_ROWS = Math.ceil(H / AST_HASH_CELL) + AST_HASH_PAD_CELLS * 2;
 const AST_HASH_OX = -AST_HASH_PAD_CELLS * AST_HASH_CELL;
@@ -4530,7 +4502,7 @@ function circleVsAsteroidPoly(cir, a) {
   };
 }
 
-/** Bullet vs asteroid: small rocks are circles; medium/big/huge stay jagged polys. */
+/** Bullet vs asteroid: small rocks are circles; medium/big stay jagged polys. */
 function hitBulletAsteroid(b, a) {
   if (!hitBulletTarget(b, a.x, a.y, asteroidHitR(a), false)) return false;
   if (a.size === 'small') return true;

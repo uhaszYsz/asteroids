@@ -512,8 +512,6 @@ const ASTEROID_R = {
   medium: 15 * RES_SCALE * 1.3 * 1.35,
   small: 9 * RES_SCALE * 1.35
 };
-/** Huge specials are 2× big. */
-ASTEROID_R.huge = ASTEROID_R.big * 2;
 /** Collision shape is this fraction of visual radius / polygon (visual unchanged). */
 const ASTEROID_HIT_SCALE = 0.9;
 const PICKUP_R = 7 * RES_SCALE;
@@ -538,14 +536,10 @@ const ENEMY_WORM_COIN_VISUAL = 200;
 /** Chance a non-start spawn (replacement big / split shard) is a special type. */
 const SPECIAL_ASTEROID_CHANCE = 0.1;
 const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden'];
-/** Extra specials only for wave / match-start rocks (not replacement bigs or shards). */
-const SPECIAL_ASTEROID_KINDS_START = ['meteor', 'golden', 'huge'];
 /** Golden special rocks — tanky ore; coins drip on each damaging hit. */
 const GOLDEN_ASTEROID_HP = 400;
 /** Coins per point of HP damage dealt to a golden asteroid. */
 const GOLDEN_ASTEROID_COIN_PER_DMG = 0.4;
-/** Huge special rocks — slow, massive, split into many mediums. */
-const HUGE_ASTEROID_HP = 600;
 /** Base random speed spread used by normal asteroids (±half of this per axis). */
 const ASTEROID_SPEED_SPREAD = 2.4 * RES_SCALE;
 /** Normal speed magnitude band (px/tick). Min matches offscreen inward floor. */
@@ -557,17 +551,15 @@ const ASTEROID_INBOUND_STUCK_MS = 20000;
 const ASTEROID_LIFE_MS = 20000;
 /** Rail damage vs players/enemies when an asteroid is closer on the beam. */
 const RAIL_THROUGH_ASTEROID_MULT = 0.2;
-/** Network special codes: 0 normal, 1 meteor, 2 golden, 3 huge. */
+/** Network special codes: 0 normal, 1 meteor, 2 golden (3 legacy — ignored). */
 function specialAsteroidCode(a) {
   if (a.special === 'meteor') return 1;
   if (a.special === 'golden') return 2;
-  if (a.special === 'huge') return 3;
   return 0;
 }
 function specialAsteroidFromCode(code) {
   if (code === 1) return 'meteor';
   if (code === 2) return 'golden';
-  if (code === 3) return 'huge';
   return null;
 }
 /** Keep this many ticks of poses for lag compensation (~1s). */

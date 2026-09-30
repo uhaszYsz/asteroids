@@ -357,8 +357,7 @@ function packBullet(b) {
 }
 
 function asteroidSizeCode(a) {
-  // 3 = huge, 2 = big, 1 = medium, 0 = small (legacy clients treated non-zero as big).
-  if (a.size === 'huge') return 3;
+  // 2 = big, 1 = medium, 0 = small (legacy size code 3 treated as big).
   if (a.size === 'big' || a.big) return 2;
   if (a.size === 'medium') return 1;
   return 0;
