@@ -18864,7 +18864,7 @@ const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_HEAD_SPRITE_ID = 'enemy_274';
 const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
-const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
+const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1.6;
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 /** Interval pulse: every 1.2s from a random body seg, both ways, 4 segs/0.035s hop; head never scales. */
@@ -18872,8 +18872,8 @@ const SNAKE_PULSE_INTERVAL_MS = 1200;
 const SNAKE_PULSE_HOP_MS = 35;
 const SNAKE_PULSE_HOP_SEGS = 4;
 const SNAKE_PULSE_CYCLE_MS = 250;
-const SNAKE_SEG_SCALE_BASE = 0.6;
-const SNAKE_SEG_SCALE_PEAK = 0.8;
+const SNAKE_SEG_SCALE_BASE = 0.9;
+const SNAKE_SEG_SCALE_PEAK = 1.15;
 
 function snakeSegmentScaleClient(index0) {
   return SNAKE_SEG_SCALE_BASE;
