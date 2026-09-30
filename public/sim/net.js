@@ -312,7 +312,7 @@ function broadcastPresence() {
 
 const DEMO_MIRROR_TYPES = new Set([
   'bd', 'bu', 'lf', 'rf', 'rc', 'die', 'boom', 'round', 'go',
-  'paused', 'resumed', 'wpn', 'pup', 'eh', 'ed', 'ef', 'eu', 'es', 'ech', 'vd',
+  'paused', 'resumed', 'wpn', 'pup', 'eh', 'ed', 'ef', 'eu', 'es', 'ech', 'vd', 'sth',
   'colors', 'roster'
 ]);
 

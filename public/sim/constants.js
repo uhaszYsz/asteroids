@@ -381,6 +381,13 @@ const ENEMY_HP = {
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 const ENEMY_SNAKE_GROW_PER_EAT = 7;
+/** Body mounts every N segments (0-based indices 19, 39, …). */
+const ENEMY_SNAKE_TURRET_EVERY = 20;
+const ENEMY_SNAKE_TURRET_HP = 150;
+/** Shared fire cadence for all living mounts on a snake. */
+const ENEMY_SNAKE_TURRET_FIRE_TICKS = 4 * TPS;
+const ENEMY_SNAKE_TURRET_BULLET_SPEED = 4.5;
+const ENEMY_SNAKE_TURRET_HIT_R = 10;
 /** Snake field event: drip smalls / mediums while the boss lives. */
 const SNAKE_FIELD_SMALL_INTERVAL = Math.round(2 * TPS);
 const SNAKE_FIELD_MEDIUM_INTERVAL = Math.round(5 * TPS);

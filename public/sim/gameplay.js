@@ -1110,6 +1110,10 @@ function packEnemySnap(e) {
 function emitEnemyFire(room, e) {
   stampEnemyNet(e);
   roomBroadcast(room, { t: 'ef', e: packEnemy(e) });
+  if (e && e.kind === 'snake') {
+    ensureSnakeTurrets(e);
+    broadcastSnakeTurrets(room, e);
+  }
 }
 
 function emitEnemyUpdate(room, e) {
@@ -1329,6 +1333,7 @@ function makeEnemy(kind, wave, weapon) {
   if (k === 'snake') {
     e.snakeTrail = [{ x: e.x, y: e.y }];
     e.snakeSegMax = ENEMY_SNAKE_SEGMENTS;
+    ensureSnakeTurrets(e);
   }
   return e;
 }
@@ -1382,6 +1387,163 @@ function growSnakeTrail(e, addN) {
   }
 }
 
+/** Keep turret slots on every Nth body segment (preserve HP when list grows). */
+function ensureSnakeTurrets(e) {
+  if (!e || e.kind !== 'snake') return;
+  const max = Math.max(1, (e.snakeSegMax | 0) || ENEMY_SNAKE_SEGMENTS);
+  const bySeg = new Map();
+  if (e.snakeTurrets) {
+    for (let i = 0; i < e.snakeTurrets.length; i++) {
+      const t = e.snakeTurrets[i];
+      bySeg.set(t.seg | 0, t);
+    }
+  }
+  const next = [];
+  for (let seg = ENEMY_SNAKE_TURRET_EVERY - 1; seg < max; seg += ENEMY_SNAKE_TURRET_EVERY) {
+    const prev = bySeg.get(seg);
+    next.push(prev || { seg, hp: ENEMY_SNAKE_TURRET_HP });
+  }
+  e.snakeTurrets = next;
+  if (e.snakeTurretFireCd == null || !Number.isFinite(e.snakeTurretFireCd)) {
+    e.snakeTurretFireCd = ENEMY_SNAKE_TURRET_FIRE_TICKS;
+  }
+}
+
+function broadcastSnakeTurrets(room, e) {
+  if (!room || !e || e.kind !== 'snake') return;
+  const list = [];
+  const arr = e.snakeTurrets || [];
+  for (let i = 0; i < arr.length; i++) {
+    list.push([arr[i].seg | 0, arr[i].hp | 0]);
+  }
+  roomBroadcast(room, { t: 'sth', id: e.id | 0, list });
+}
+
+/** World pose for body segment index (0 = nearest head), from server trail stamps. */
+function snakeTurretWorldPos(e, segIdx) {
+  const trail = e && e.snakeTrail;
+  if (!trail || !trail.length) {
+    return { x: e.x, y: e.y, angle: e.angle || 0 };
+  }
+  const fromEnd = (segIdx | 0) + 1;
+  const idx = Math.max(0, trail.length - 1 - fromEnd);
+  const s = trail[idx];
+  let ang = e.angle || 0;
+  const nextIdx = Math.min(trail.length - 1, idx + 1);
+  if (nextIdx !== idx) {
+    const n = trail[nextIdx];
+    const dx = shortestWrapDelta(s.x, n.x, W);
+    const dy = shortestWrapDelta(s.y, n.y, H);
+    if (Math.hypot(dx, dy) > 1e-6) ang = Math.atan2(dy, dx);
+  } else {
+    const dx = shortestWrapDelta(s.x, e.x, W);
+    const dy = shortestWrapDelta(s.y, e.y, H);
+    if (Math.hypot(dx, dy) > 1e-6) ang = Math.atan2(dy, dx);
+  }
+  return { x: s.x, y: s.y, angle: ang };
+}
+
+function fireEnemyLineBulletAt(room, e, ang, spd, dmg, typeName, ox, oy) {
+  const speed = spd != null ? spd : ENEMY_BULLET_SPEED;
+  const type = typeName || 'enemy';
+  const damage = dmg != null ? dmg : ((BULLET_TYPES[type] && BULLET_TYPES[type].dmg) || BULLET_TYPES.enemy.dmg);
+  const x = ox != null ? +ox : (e.x + Math.cos(ang) * (e.r + 4));
+  const y = oy != null ? +oy : (e.y + Math.sin(ang) * (e.r + 4));
+  const now = Date.now();
+  const b = {
+    id: room.nextBulletId++,
+    owner: 0,
+    enemyOwner: e.id,
+    type,
+    dmg: damage,
+    x, y,
+    spawnX: x,
+    spawnY: y,
+    vx: Math.cos(ang) * speed,
+    vy: Math.sin(ang) * speed,
+    spawnSt: now
+  };
+  room.bullets.push(b);
+  roomBroadcast(room, { t: 'bf', b: packBullet(b) });
+}
+
+function damageSnakeTurret(room, e, seg, dmg, ownerId) {
+  if (!e || e.kind !== 'snake' || !e.snakeTurrets) return false;
+  const want = seg | 0;
+  let t = null;
+  for (let i = 0; i < e.snakeTurrets.length; i++) {
+    if ((e.snakeTurrets[i].seg | 0) === want) {
+      t = e.snakeTurrets[i];
+      break;
+    }
+  }
+  if (!t || (t.hp | 0) <= 0) return false;
+  const oid = ownerId | 0;
+  if (oid > 0) e.lastHitBy = oid;
+  t.hp = Math.max(0, (t.hp | 0) - Math.max(0, dmg | 0));
+  roomBroadcast(room, { t: 'sth', id: e.id | 0, seg: t.seg | 0, hp: t.hp | 0 });
+  return true;
+}
+
+/** Prefer a living turret near (x,y) over the boss body. */
+function tryDamageSnakeTurretAt(room, e, x, y, hitR, dmg, ownerId) {
+  if (!e || e.kind !== 'snake' || !e.snakeTurrets) return false;
+  const tr = ENEMY_SNAKE_TURRET_HIT_R;
+  const pad = (hitR > 0 ? hitR : 2) + tr;
+  const lim = pad * pad;
+  let best = null;
+  let bestD2 = Infinity;
+  for (let i = 0; i < e.snakeTurrets.length; i++) {
+    const t = e.snakeTurrets[i];
+    if ((t.hp | 0) <= 0) continue;
+    const pose = snakeTurretWorldPos(e, t.seg);
+    const d2 = torusDistSq(x, y, pose.x, pose.y);
+    if (d2 <= lim && d2 < bestD2) {
+      bestD2 = d2;
+      best = t;
+    }
+  }
+  if (!best) return false;
+  return damageSnakeTurret(room, e, best.seg, dmg, ownerId);
+}
+
+function damageSnakePreferTurret(room, e, dmg, ownerId, hx, hy, hr) {
+  if (e && e.kind === 'snake' && hx != null && hy != null &&
+      tryDamageSnakeTurretAt(room, e, hx, hy, hr != null ? hr : 4, dmg, ownerId)) {
+    return;
+  }
+  damageEnemy(room, e, dmg, ownerId);
+}
+
+/** Global 4s timer: one random living mount fires toward the player. */
+function tickSnakeTurrets(room, e) {
+  if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0 || !enemyIsSpawned(e) || !e.enteredPlay) return;
+  ensureSnakeTurrets(e);
+  e.snakeTurretFireCd = (e.snakeTurretFireCd | 0) - 1;
+  if ((e.snakeTurretFireCd | 0) > 0) return;
+  e.snakeTurretFireCd = ENEMY_SNAKE_TURRET_FIRE_TICKS;
+  const living = [];
+  for (let i = 0; i < e.snakeTurrets.length; i++) {
+    if ((e.snakeTurrets[i].hp | 0) > 0) living.push(e.snakeTurrets[i]);
+  }
+  if (!living.length) return;
+  const target = soloHumanTarget(room);
+  if (!target || (target.hp | 0) <= 0) return;
+  const t = living[(Math.random() * living.length) | 0];
+  const pose = snakeTurretWorldPos(e, t.seg);
+  const dx = shortestWrapDelta(pose.x, target.x, W);
+  const dy = shortestWrapDelta(pose.y, target.y, H);
+  if (Math.hypot(dx, dy) < 1e-6) return;
+  const ang = Math.atan2(dy, dx);
+  fireEnemyLineBulletAt(
+    room, e, ang,
+    ENEMY_SNAKE_TURRET_BULLET_SPEED,
+    ENEMY_COMMON_BULLET_DMG,
+    'enemy',
+    pose.x, pose.y
+  );
+}
+
 /**
  * Snake head vs asteroids: remove rock (no split / no coins) and grow +7 body stamps.
  * Check cadence matches worm crush.
@@ -1426,7 +1588,11 @@ function snakeEatAsteroids(room, e) {
     growSnakeTrail(e, ENEMY_SNAKE_GROW_PER_EAT);
     grew++;
   }
-  if (grew > 0) emitEnemyUpdate(room, e);
+  if (grew > 0) {
+    ensureSnakeTurrets(e);
+    emitEnemyUpdate(room, e);
+    broadcastSnakeTurrets(room, e);
+  }
 }
 
 /**
@@ -2606,27 +2772,7 @@ function updateCarrierWeapon(room, e, target) {
 }
 
 function fireEnemyLineBullet(room, e, ang, spd, dmg, typeName) {
-  const speed = spd != null ? spd : ENEMY_BULLET_SPEED;
-  const type = typeName || 'enemy';
-  const damage = dmg != null ? dmg : ((BULLET_TYPES[type] && BULLET_TYPES[type].dmg) || BULLET_TYPES.enemy.dmg);
-  const x = e.x + Math.cos(ang) * (e.r + 4);
-  const y = e.y + Math.sin(ang) * (e.r + 4);
-  const now = Date.now();
-  const b = {
-    id: room.nextBulletId++,
-    owner: 0,
-    enemyOwner: e.id,
-    type,
-    dmg: damage,
-    x, y,
-    spawnX: x,
-    spawnY: y,
-    vx: Math.cos(ang) * speed,
-    vy: Math.sin(ang) * speed,
-    spawnSt: now
-  };
-  room.bullets.push(b);
-  roomBroadcast(room, { t: 'bf', b: packBullet(b) });
+  fireEnemyLineBulletAt(room, e, ang, spd, dmg, typeName, null, null);
 }
 
 /** UFO lead-aim rocket (tiny, skips asteroids). Kick → ENEMY_UFO_ROCKET_ACCEL → cruise. */
@@ -2907,6 +3053,7 @@ function updateEnemies(room) {
       if (e.kind === 'snake') {
         updateSnakeTrail(e);
         snakeEatAsteroids(room, e);
+        tickSnakeTurrets(room, e);
       }
       if (e.kind === 'common1') enemyTryFire(room, e);
       chaseSnap = true;
@@ -5755,7 +5902,7 @@ function resolvePlayerShotEnemyHits(room) {
       if (!hit) continue;
       // Damage only — leave velocities alone (no push / stun).
       shot.enemyHitCd = 6;
-      damageEnemy(room, e, PLAYER_SHOT_ENEMY_DMG, shot.ownerId | 0);
+      damageSnakePreferTurret(room, e, PLAYER_SHOT_ENEMY_DMG, shot.ownerId | 0, shot.x, shot.y, shot.r || 10);
       break;
     }
   }
@@ -6188,7 +6335,7 @@ function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
       if (skipEnemyId && (e.id | 0) === skipEnemyId) continue;
       const dist = distToEnemyHit(x, y, e);
       const dmg = rocketBlastDamageAt(dist, R, maxDmg);
-      if (dmg > 0) damageEnemy(room, e, dmg, ownerId | 0);
+      if (dmg > 0) damageSnakePreferTurret(room, e, dmg, ownerId | 0, x, y, R);
     }
   }
 }
@@ -6436,7 +6583,7 @@ function fireLaser(room, p, weaponName) {
     });
     if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg, p.id);
     else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, p.id);
-    else if (hit.kind === 'enemy') damageEnemy(room, hit.target, dmg, p.id);
+    else if (hit.kind === 'enemy') damageSnakePreferTurret(room, hit.target, dmg, p.id, hit.x, hit.y, 6);
     else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
     return;
   }
@@ -6473,7 +6620,7 @@ function fireLaser(room, p, weaponName) {
     damaged.add(key);
     if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg, p.id);
     else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, p.id);
-    else if (hit.kind === 'enemy') damageEnemy(room, hit.target, dmg, p.id);
+    else if (hit.kind === 'enemy') damageSnakePreferTurret(room, hit.target, dmg, p.id, hit.x, hit.y, 6);
     else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
   }
   const x1 = midHit ? midHit.x : ox + dx * remaining;
@@ -6523,7 +6670,7 @@ function fireThrustRay(room, p) {
   } else if (hit.kind === 'asteroid') {
     damageAsteroid(room, hit.target, dmg, p.id);
   } else if (hit.kind === 'enemy') {
-    damageEnemy(room, hit.target, dmg, p.id);
+    damageSnakePreferTurret(room, hit.target, dmg, p.id, hit.x, hit.y, 4);
   } else if (hit.kind === 'rocket') {
     damageRocket(room, hit.target, dmg);
   }
@@ -6705,7 +6852,7 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
     if (h.kind === 'player') {
       dealDamageToPlayer(room, h.target, pdmg, p.id);
     } else if (h.kind === 'enemy') {
-      damageEnemy(room, h.target, pdmg, p.id);
+      damageSnakePreferTurret(room, h.target, pdmg, p.id, h.x, h.y, 6);
     }
   }
 
@@ -7351,7 +7498,7 @@ function updateBullets(room) {
           active.add(key);
           applyVoidOverlapPulse(b, key, (dmg) => {
             let d = dmg;
-            damageEnemy(room, e, d, b.owner | 0);
+            damageSnakePreferTurret(room, e, d, b.owner | 0, b.x, b.y, 8);
             roomBroadcast(room, { t: 'vd', k: 'e', id: e.id | 0, x: e.x, y: e.y });
           });
         }
@@ -7427,10 +7574,10 @@ function updateBullets(room) {
         if (!enemyIsSpawned(e)) continue;
         if (!hitBulletEnemy(b, e)) continue;
         if (b.type === 'rocket') {
-          if (b.noBlast) damageEnemy(room, e, b.dmg || 30, b.owner | 0);
+          if (b.noBlast) damageSnakePreferTurret(room, e, b.dmg || 30, b.owner | 0, b.x, b.y, 6);
           detonateRocket(room, b, 3);
         } else {
-          damageEnemy(room, e, b.dmg, b.owner | 0);
+          damageSnakePreferTurret(room, e, b.dmg, b.owner | 0, b.x, b.y, 4);
           roomBroadcast(room, { t: 'bd', id: b.id, hit: 3, x: b.x, y: b.y });
         }
         bullets.splice(i, 1);

@@ -18597,6 +18597,7 @@ function applyEnemyUpdate(row) {
     e.snakePulseWaves = prev.snakePulseWaves;
     e.snakePulseNext = prev.snakePulseNext;
   }
+  if (prev && prev.snakeTurrets) e.snakeTurrets = prev.snakeTurrets;
   rebaseEnemyPredictOrigin(e);
   enemies.set(id, e);
 }
@@ -18661,6 +18662,44 @@ function applyEnemyHp(id, hp) {
   const next = hp | 0;
   if ((e.hp | 0) > next && next > 0) triggerHitVibration('e', id);
   e.hp = next;
+}
+
+function applySnakeTurretHpMsg(msg) {
+  const id = msg.id | 0;
+  const e = enemies.get(id);
+  if (!e || e.kind !== 'snake') return;
+  if (msg.list && msg.list.length) {
+    e.snakeTurrets = [];
+    for (let i = 0; i < msg.list.length; i++) {
+      const row = msg.list[i];
+      e.snakeTurrets.push({ seg: row[0] | 0, hp: row[1] | 0 });
+    }
+    return;
+  }
+  if (msg.seg == null) return;
+  if (!e.snakeTurrets) e.snakeTurrets = [];
+  const seg = msg.seg | 0;
+  const hp = msg.hp | 0;
+  let found = false;
+  for (let i = 0; i < e.snakeTurrets.length; i++) {
+    if ((e.snakeTurrets[i].seg | 0) === seg) {
+      const prev = e.snakeTurrets[i].hp | 0;
+      e.snakeTurrets[i].hp = hp;
+      if (prev > 0 && hp <= 0) {
+        const segs = e.snakeSegs;
+        const s = segs && segs[seg];
+        if (s) emitParticles({
+          x: s.x, y: s.y, count: 10, speed: 80 * RES_SCALE, speedSpread: 50 * RES_SCALE,
+          spread: Math.PI * 2, size: 2.2 * RES_SCALE, lifetime: 0.35, color: COL.enemy, drag: 4
+        });
+      } else if (prev > hp && hp > 0) {
+        triggerHitVibration('e', id);
+      }
+      found = true;
+      break;
+    }
+  }
+  if (!found) e.snakeTurrets.push({ seg, hp });
 }
 
 function removeEnemy(id, x, y, silent) {
@@ -18867,6 +18906,14 @@ const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1.6;
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
+/** Body turret mounts (must match server ENEMY_SNAKE_TURRET_*). */
+const ENEMY_SNAKE_TURRET_EVERY = 20;
+const ENEMY_SNAKE_TURRET_SHEET = 'medium';
+/** Sheet cell: column 3, row 1 (0-based col=2, row=0). */
+const ENEMY_SNAKE_TURRET_COL = 2;
+const ENEMY_SNAKE_TURRET_ROW = 0;
+const ENEMY_SNAKE_TURRET_SCALE = 0.55;
+const ENEMY_SNAKE_TURRET_Z = -8;
 /** Interval pulse: every 1.2s from a random body seg, both ways, 4 segs/0.035s hop; head never scales. */
 const SNAKE_PULSE_INTERVAL_MS = 1200;
 const SNAKE_PULSE_HOP_MS = 35;
@@ -20392,7 +20439,49 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor, opts) {
 }
 
 /** Snake boss: Craft 274 head (server) + Craft 88 tail (local path trail, batched).
- *  Wrap twins only after enteredPlay (edge spawn at x=0 must not mirror to +W). */
+ *  Wrap twins only after enteredPlay (edge spawn at x=0 must not mirror to +W).
+ *  Every 20th body seg mounts a medium turret (col 3 / row 1) that aims the player. */
+function drawEnemySnakeTurrets(e, color, wrapTwins) {
+  const turrets = e && e.snakeTurrets;
+  const segs = e && e.snakeSegs;
+  if (!turrets || !turrets.length || !segs || !segs.length) return;
+  const sheet = TURRET_SHEETS[ENEMY_SNAKE_TURRET_SHEET];
+  const entry = turretTexById.get(sheet.id);
+  if (!entry || !entry.ready) return;
+  const uv = turretCellUV(entry, ENEMY_SNAKE_TURRET_COL, ENEMY_SNAKE_TURRET_ROW);
+  const cell = sheet.cell;
+  const tint = color || COL.enemy;
+  const remap = {
+    src: SPRITE_REMAP_HULL_RED,
+    dst: COL.self,
+    range: SPRITE_REMAP_HULL_RANGE
+  };
+  for (let i = 0; i < turrets.length; i++) {
+    const t = turrets[i];
+    if ((t.hp | 0) <= 0) continue;
+    const seg = segs[t.seg | 0];
+    if (!seg) continue;
+    const scale = (seg.scale > 0 ? seg.scale : SNAKE_SEG_SCALE_BASE) * ENEMY_SNAKE_TURRET_SCALE;
+    const halfL = cell * 0.5 * scale;
+    const halfW = cell * 0.5 * scale;
+    const aimRaw = turretAimAngle(null, seg.x, seg.y);
+    const aim = aimRaw != null ? aimRaw : (seg.angle || 0);
+    const margin = Math.max(halfL, halfW) + 4;
+    if (wrapTwins) snakeEdgeWrapOffsets(seg.x, seg.y, margin, _snakeWrapOff);
+    else {
+      _snakeWrapOff.length = 0;
+      _snakeWrapOff.push(0, 0);
+    }
+    for (let wi = 0; wi < _snakeWrapOff.length; wi += 2) {
+      drawFlatSpriteQuad(
+        seg.x + _snakeWrapOff[wi], seg.y + _snakeWrapOff[wi + 1],
+        aim, 0, entry, uv, halfL, halfW, ENEMY_SNAKE_TURRET_Z, tint, remap,
+        COL.enemyOutline, e.id
+      );
+    }
+  }
+}
+
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
   updateSnakeSegsToward(e, x, y, angle);
   const wrapTwins = !!e.enteredPlay;
@@ -20403,6 +20492,7 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
       e.snakeSegs[i].scale = snakeSegmentPulseScale(e, i + 1, now);
     }
     drawSnakeSegmentsBatched(e.snakeSegs, color || COL.enemy, COL.enemyOutline, { wrapTwins });
+    drawEnemySnakeTurrets(e, color, wrapTwins);
   }
   const headOpt = getShipOptionById(ENEMY_SNAKE_HEAD_SPRITE_ID);
   const bank = enemyBankSmoothed(id, angle, dt);
@@ -24001,6 +24091,10 @@ function handleWsMessage(e) {
       applyEnemyHp(msg.id, msg.hp);
       return;
     }
+    if (msg.t === 'sth' && inGame) {
+      applySnakeTurretHpMsg(msg);
+      return;
+    }
     if (msg.t === 'ed' && inGame) {
       removeEnemy(msg.id | 0, msg.x, msg.y, !!msg.silent);
       return;
@@ -26268,6 +26362,10 @@ function demoReplayEvent(ev) {
   }
   if (ev.t === 'eh') {
     applyEnemyHp(ev.id, ev.hp);
+    return;
+  }
+  if (ev.t === 'sth') {
+    applySnakeTurretHpMsg(ev);
     return;
   }
   if (ev.t === 'ed') {
