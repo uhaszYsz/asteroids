@@ -18280,7 +18280,7 @@ const ENEMY_SNAKE_HEAD_SPRITE_ID = 'enemy_36';
 const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_SEGMENTS = 15;
-const ENEMY_SNAKE_FOLLOW_DIST = 5;
+const ENEMY_SNAKE_FOLLOW_DIST = 15;
 
 function snakeSegmentScaleClient(index0) {
   return ((index0 + 1) % 3 === 0) ? 0.6 : 0.3;
