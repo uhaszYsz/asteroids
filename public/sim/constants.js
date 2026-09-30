@@ -553,7 +553,7 @@ const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden'];
 /** Golden special rocks — tanky ore; coins drip on each damaging hit. */
 const GOLDEN_ASTEROID_HP = 400;
 /** Coins per point of HP damage dealt to a golden asteroid. */
-const GOLDEN_ASTEROID_COIN_PER_DMG = 0.4;
+const GOLDEN_ASTEROID_COIN_PER_DMG = 0.6;
 /** Base random speed spread used by normal asteroids (±half of this per axis). */
 const ASTEROID_SPEED_SPREAD = 2.4 * RES_SCALE;
 /** Normal speed magnitude band (px/tick). Min matches offscreen inward floor. */

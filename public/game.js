@@ -13441,7 +13441,7 @@ function closeShopWeaponSlotMenu() {
   if (m) m.remove();
 }
 
-/** Little context menu: pick slot 1 or 2 when buying a weapon. */
+/** Little context menu: pick slot 1 or 2 when buying a weapon (opened via Space). */
 function openShopWeaponSlotMenu(name, clientX, clientY) {
   closeShopWeaponSlotMenu();
   const st = soloShopState;
@@ -13500,6 +13500,31 @@ function openShopWeaponSlotMenu(name, clientX, clientY) {
   if (y < pad) y = pad;
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
+}
+
+/** Open slot menu for a shop weapon row (centered on the element). */
+function openShopWeaponSlotMenuForEl(name, el) {
+  if (!el) {
+    openShopWeaponSlotMenu(name, window.innerWidth * 0.5, window.innerHeight * 0.45);
+    return;
+  }
+  const r = el.getBoundingClientRect();
+  openShopWeaponSlotMenu(name, r.left + r.width * 0.5, r.bottom + 4);
+}
+
+function focusShopWeaponRow(el) {
+  if (!el || !shopFocusGrid.length) return;
+  for (let r = 0; r < shopFocusGrid.length; r++) {
+    const row = shopFocusGrid[r];
+    for (let c = 0; c < row.length; c++) {
+      if (row[c].el === el) {
+        shopFocusRow = r;
+        shopFocusCol = c;
+        shopApplyFocusHighlight();
+        return;
+      }
+    }
+  }
 }
 
 function attachShopPreview(row, kind, name, seedId, opts) {
@@ -13686,17 +13711,23 @@ function renderSoloShop() {
         price.textContent = shopCreditPrice(cost);
         if (st.coins < cost) row.classList.add('ss-owned');
         else {
+          // Click focuses; Space opens slot context menu.
           row.addEventListener('click', (ev) => {
             ev.preventDefault();
-            openShopWeaponSlotMenu(name, ev.clientX, ev.clientY);
+            focusShopWeaponRow(row);
           });
           weaponRow.push({
             el: row,
             activate: (key) => {
-              const s = key === 'x' ? 2 : (key === 'z' ? 1 : shopBuySlot);
-              shopBuySlot = s;
-              updateShopSlotBadge();
-              sendShopBuy('weapon', name, s);
+              if (key === 'z' || key === 'x') {
+                const s = key === 'x' ? 2 : 1;
+                shopBuySlot = s;
+                updateShopSlotBadge();
+                sendShopBuy('weapon', name, s);
+                return;
+              }
+              // Space / default: open slot picker menu on the focused row.
+              openShopWeaponSlotMenuForEl(name, row);
             }
           });
         }
