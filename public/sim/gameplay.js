@@ -1340,66 +1340,43 @@ function snakeSegmentScale(index0) {
   return ((index0 + 1) % 3 === 0) ? 0.6 : 0.3;
 }
 
-function snakeSegHalfLen(scale) {
-  return ENEMY_SNAKE_SEG_FH * 0.5 * (scale > 0 ? scale : 0.3);
-}
-
-function snakeHeadHalfLen() {
-  return ENEMY_SNAKE_HEAD_FH * 0.5 * ENEMY_SNAKE_HEAD_SCALE;
-}
-
-/** Center-to-center rest distance: half-lens + edge gap. */
-function snakeLinkRestDist(prevHalf, nextScale) {
-  return prevHalf + snakeSegHalfLen(nextScale) + ENEMY_SNAKE_FOLLOW_DIST;
-}
-
 function initSnakeSegments(e) {
   const n = ENEMY_SNAKE_SEGMENTS;
+  const gap = ENEMY_SNAKE_FOLLOW_DIST;
   const ang = e.angle || e.dir || 0;
   const back = ang + Math.PI;
   e.snakeSegs = [];
-  let distAlong = 0;
-  let prevHalf = snakeHeadHalfLen();
   for (let i = 0; i < n; i++) {
-    const scale = snakeSegmentScale(i);
-    distAlong += snakeLinkRestDist(prevHalf, scale);
+    const d = gap * (i + 1);
     e.snakeSegs.push({
-      x: e.x + Math.cos(back) * distAlong,
-      y: e.y + Math.sin(back) * distAlong,
+      x: e.x + Math.cos(back) * d,
+      y: e.y + Math.sin(back) * d,
       angle: ang,
-      scale
+      scale: snakeSegmentScale(i)
     });
-    prevHalf = snakeSegHalfLen(scale);
   }
 }
 
-/** Each segment follows the previous (head → seg0 → seg1…).
- *  Always hold exact rest distance so sharp turns don't collapse the chain. */
+/** Each segment follows the previous. Move only if farther than 5px dead zone. */
 function updateSnakeSegments(e) {
   if (!e || e.kind !== 'snake' || !e.snakeSegs || !e.snakeSegs.length) return;
+  const gap = ENEMY_SNAKE_FOLLOW_DIST;
   let px = e.x;
   let py = e.y;
-  let prevHalf = snakeHeadHalfLen();
   for (let i = 0; i < e.snakeSegs.length; i++) {
     const s = e.snakeSegs[i];
     s.scale = snakeSegmentScale(i);
-    const gap = snakeLinkRestDist(prevHalf, s.scale);
     const dx = px - s.x;
     const dy = py - s.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > 1e-6) {
-      s.angle = Math.atan2(dy, dx);
-      s.x = px - (dx / dist) * gap;
-      s.y = py - (dy / dist) * gap;
-    } else {
-      // Identical pose — park directly behind previous along its facing.
-      const back = (s.angle || 0) + Math.PI;
-      s.x = px + Math.cos(back) * gap;
-      s.y = py + Math.sin(back) * gap;
+    if (dist > 1e-6) s.angle = Math.atan2(dy, dx);
+    if (dist > gap && dist > 1e-6) {
+      const pull = dist - gap;
+      s.x += (dx / dist) * pull;
+      s.y += (dy / dist) * pull;
     }
     px = s.x;
     py = s.y;
-    prevHalf = snakeSegHalfLen(s.scale);
   }
 }
 

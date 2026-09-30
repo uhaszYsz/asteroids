@@ -17914,49 +17914,40 @@ function ensureSnakeSegs(e, headX, headY, headAng) {
   }
   const ang = headAng || 0;
   const back = ang + Math.PI;
+  const gap = ENEMY_SNAKE_FOLLOW_DIST;
   const segs = [];
-  let distAlong = 0;
-  let prevHalf = snakeHeadHalfLenClient();
   for (let i = 0; i < ENEMY_SNAKE_SEGMENTS; i++) {
-    const scale = snakeSegmentScaleClient(i);
-    distAlong += snakeLinkRestDistClient(prevHalf, scale);
+    const d = gap * (i + 1);
     segs.push({
-      x: headX + Math.cos(back) * distAlong,
-      y: headY + Math.sin(back) * distAlong,
+      x: headX + Math.cos(back) * d,
+      y: headY + Math.sin(back) * d,
       angle: ang,
-      scale
+      scale: snakeSegmentScaleClient(i)
     });
-    prevHalf = snakeSegHalfLenClient(scale);
   }
   e.snakeSegs = segs;
 }
 
-/** Client-side follow so segments track predicted head between snaps.
- *  Always hold exact rest distance (matches server — no turn-clumping). */
+/** Client-side follow: 5px dead zone — move only if farther than gap. */
 function updateSnakeSegsToward(e, headX, headY) {
   if (!e || !e.snakeSegs || !e.snakeSegs.length) return;
+  const gap = ENEMY_SNAKE_FOLLOW_DIST;
   let px = headX;
   let py = headY;
-  let prevHalf = snakeHeadHalfLenClient();
   for (let i = 0; i < e.snakeSegs.length; i++) {
     const s = e.snakeSegs[i];
     s.scale = snakeSegmentScaleClient(i);
-    const gap = snakeLinkRestDistClient(prevHalf, s.scale);
     const dx = px - s.x;
     const dy = py - s.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > 1e-6) {
-      s.angle = Math.atan2(dy, dx);
-      s.x = px - (dx / dist) * gap;
-      s.y = py - (dy / dist) * gap;
-    } else {
-      const back = (s.angle || 0) + Math.PI;
-      s.x = px + Math.cos(back) * gap;
-      s.y = py + Math.sin(back) * gap;
+    if (dist > 1e-6) s.angle = Math.atan2(dy, dx);
+    if (dist > gap && dist > 1e-6) {
+      const pull = dist - gap;
+      s.x += (dx / dist) * pull;
+      s.y += (dy / dist) * pull;
     }
     px = s.x;
     py = s.y;
-    prevHalf = snakeSegHalfLenClient(s.scale);
   }
 }
 
@@ -18290,23 +18281,9 @@ const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_SEGMENTS = 15;
 const ENEMY_SNAKE_FOLLOW_DIST = 5;
-const ENEMY_SNAKE_HEAD_FH = 57;
-const ENEMY_SNAKE_SEG_FH = 63;
 
 function snakeSegmentScaleClient(index0) {
   return ((index0 + 1) % 3 === 0) ? 0.6 : 0.3;
-}
-
-function snakeSegHalfLenClient(scale) {
-  return ENEMY_SNAKE_SEG_FH * 0.5 * (scale > 0 ? scale : 0.3);
-}
-
-function snakeHeadHalfLenClient() {
-  return ENEMY_SNAKE_HEAD_FH * 0.5 * ENEMY_SNAKE_HEAD_SPRITE_SCALE;
-}
-
-function snakeLinkRestDistClient(prevHalf, nextScale) {
-  return prevHalf + snakeSegHalfLenClient(nextScale) + ENEMY_SNAKE_FOLLOW_DIST;
 }
 /** common1 = Craft 10. */
 const ENEMY_COMMON1_SPRITE_ID = 'enemy_10';
