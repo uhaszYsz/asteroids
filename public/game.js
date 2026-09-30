@@ -13169,6 +13169,7 @@ function maybeShowFirstHelp() {
     pauseFreezeAt = serverNow();
     rebaseAsteroidsToTime(pauseFreezeAt);
     rebasePickupsToTime(pauseFreezeAt);
+    rebaseEnemiesToTime(pauseFreezeAt);
     player.vx = 0;
     player.vy = 0;
     player.av = 0;
@@ -16336,6 +16337,7 @@ function applyPausedMsg(msg) {
     pauseFreezeAt = serverNow();
     rebaseAsteroidsToTime(pauseFreezeAt);
     rebasePickupsToTime(pauseFreezeAt);
+    rebaseEnemiesToTime(pauseFreezeAt);
     player.vx = 0;
     player.vy = 0;
     player.av = 0;
