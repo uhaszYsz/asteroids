@@ -546,7 +546,7 @@ const ASTEROID_SPEED_SPREAD = 2.4 * RES_SCALE;
 const ASTEROID_SPEED_MIN = 0.45 * RES_SCALE;
 const ASTEROID_SPEED_MAX = (ASTEROID_SPEED_SPREAD * 0.5) * Math.SQRT2;
 /** Max |v| for big world rocks (meteor specials exempt). px/tick. */
-const BIG_ASTEROID_MAX_SPEED = 0.6;
+const BIG_ASTEROID_MAX_SPEED = 1;
 /** Cull inbound rocks that never reach the playfield (soft-lock guard). */
 const ASTEROID_INBOUND_STUCK_MS = 20000;
 /** World asteroid lifetime from create moment (replaces edge-teleport counts). */
