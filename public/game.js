@@ -18488,10 +18488,10 @@ const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 /** Hit pulse: hops both ways from hit chain index every 0.035s; each seg one 0.6s grow cycle. */
 const SNAKE_PULSE_HOP_MS = 35;
-const SNAKE_PULSE_CYCLE_MS = 600;
+const SNAKE_PULSE_CYCLE_MS = 250;
 const SNAKE_PULSE_HIT_DEBOUNCE_MS = 100;
 const SNAKE_SEG_SCALE_BASE = 0.6;
-const SNAKE_SEG_SCALE_PEAK = 0.8;
+const SNAKE_SEG_SCALE_PEAK = 1;
 
 function snakeSegmentScaleClient(index0) {
   return SNAKE_SEG_SCALE_BASE;
