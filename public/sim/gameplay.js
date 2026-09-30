@@ -1800,10 +1800,10 @@ function pickRandomCommonKind(room) {
   const world = (room && room.world) | 0;
   const opts = ['common'];
   if (countCommon1Slots(room) < MAX_COMMON1_ON_FIELD) opts.push('common1');
-  if (roomHasAttachableAsteroid(room)) opts.push('volkano');
   if (world >= 2) {
     opts.push('commonVoid');
     if (countCommonRailSlots(room) < MAX_COMMON_RAIL_ON_FIELD) opts.push('commonRail');
+    if (roomHasAttachableAsteroid(room)) opts.push('volkano');
   }
   return opts[(Math.random() * opts.length) | 0];
 }
