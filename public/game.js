@@ -5430,19 +5430,8 @@ function spawnSnakeTailCorpse(e) {
 
 function drawSnakeTailCorpses(dt) {
   if (!snakeTailCorpses.length) return;
-  const opt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
-  if (!opt || opt.kind !== 'sprite') return;
   for (let c = 0; c < snakeTailCorpses.length; c++) {
-    const corpse = snakeTailCorpses[c];
-    const segs = corpse.segs;
-    for (let i = segs.length - 1; i >= 0; i--) {
-      const s = segs[i];
-      const sid = -(900000 + c * 256 + i);
-      drawSpriteShipPlane(
-        s.x, s.y, s.angle || 0, 0, sid, dt, opt, false, COL.enemy,
-        0, s.scale > 0 ? s.scale : 0.6, COL.enemyOutline
-      );
-    }
+    drawSnakeSegmentsBatched(snakeTailCorpses[c].segs, COL.enemy, COL.enemyOutline);
   }
 }
 
@@ -10988,6 +10977,9 @@ function bindSpriteColorRemap(src, dst, range) {
 const spriteShipBuf = gl.createBuffer();
 /** One roof panel, both windings: 12 verts × (xy + uv + depth + local). */
 const spriteShipMesh = new Float32Array(12 * 7); // x,y,u,v,depth,lx,ly
+/** Batched snake-tail mesh: segs × 2 roof panels × 12 verts × 7 floats. */
+const SNAKE_SEG_BATCH_MAX = 128;
+const snakeSegBatchMesh = new Float32Array(SNAKE_SEG_BATCH_MAX * 2 * 12 * 7);
 /** Pitch of the two sprite halves (house-roof fold along nose→tail). */
 const SPRITE_ROOF_PITCH = 0.58;
 /** Screen lift so the ridge reads above the wing tips even at bank=0. */
@@ -19682,23 +19674,149 @@ function drawEnemyCarrier(x, y, angle, weapon) {
   drawThickSegment(x, y, nx, ny, 2.2 * RES_SCALE, accent);
 }
 
-/** Snake boss: Craft 36 head (server) + Craft 88 tail (local path trail). */
+/**
+ * Draw all snake body segments in one mesh upload.
+ * Fill = 1 drawArrays; outline = 8 offset passes on the same VBO (same look as
+ * drawSpriteShipPlane, without per-segment program/texture binds).
+ */
+function drawSnakeSegmentsBatched(segs, color, outlineColor) {
+  if (!segs || !segs.length) return;
+  const opt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
+  const spec = opt && opt.sprite;
+  if (!spec) return;
+  const entry = spriteShipTexById.get(spec.id);
+  if (!entry || !entry.ready || !entry.tex) return;
+
+  const tint = color || COL.enemy;
+  const outlineTint = outlineColor || COL.enemyOutline || tint;
+  const scale = 0.6;
+  const sc = SPRITE_SHIP_PX_SCALE * scale;
+  const halfL = Math.max(1, spec.fh) * 0.5 * sc;
+  const halfW = Math.max(1, spec.fw) * 0.5 * sc;
+  const pitch = SPRITE_ROOF_PITCH;
+  const wingY = halfW * Math.cos(pitch);
+  const drop = halfW * Math.sin(pitch);
+  const invHalfL = 1 / Math.max(1e-3, halfL);
+  const invHalfW = 1 / Math.max(1e-3, halfW);
+
+  const state = tinyShipDesiredState(spec, true, false);
+  const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
+  const uMid = (uv.u0 + uv.u1) * 0.5;
+  const uvsL = [[uMid, uv.v0], [uv.u0, uv.v0], [uv.u0, uv.v1], [uMid, uv.v1]];
+  const uvsR = [[uMid, uv.v0], [uv.u1, uv.v0], [uv.u1, uv.v1], [uMid, uv.v1]];
+  const panelLocal = [
+    {
+      verts: [
+        [halfL, 0, 0],
+        [halfL, -wingY, -drop],
+        [-halfL, -wingY, -drop],
+        [-halfL, 0, 0]
+      ],
+      uvs: uvsL
+    },
+    {
+      verts: [
+        [halfL, 0, 0],
+        [halfL, wingY, -drop],
+        [-halfL, wingY, -drop],
+        [-halfL, 0, 0]
+      ],
+      uvs: uvsR
+    }
+  ];
+  const windFwd = [0, 1, 2, 0, 2, 3];
+  const windBack = [0, 2, 1, 0, 3, 2];
+  const nSeg = Math.min(segs.length, SNAKE_SEG_BATCH_MAX);
+  let o = 0;
+  // Tail → head so nearer segments overpaint (painter's).
+  for (let si = nSeg - 1; si >= 0; si--) {
+    const s = segs[si];
+    const ang = s.angle || 0;
+    const bank = 0;
+    for (let p = 0; p < panelLocal.length; p++) {
+      const panel = panelLocal[p];
+      const { xy, depth } = projectMesh3D(panel.verts, s.x, s.y, ang, bank, SPRITE_ROOF_LIFT);
+      const uvs = panel.uvs;
+      const verts = panel.verts;
+      for (let pass = 0; pass < 2; pass++) {
+        const idx = pass === 0 ? windFwd : windBack;
+        for (let v = 0; v < idx.length; v++) {
+          const i = idx[v];
+          snakeSegBatchMesh[o++] = xy[i * 2];
+          snakeSegBatchMesh[o++] = xy[i * 2 + 1];
+          snakeSegBatchMesh[o++] = uvs[i][0];
+          snakeSegBatchMesh[o++] = uvs[i][1];
+          snakeSegBatchMesh[o++] = spriteWorldZToClip(depth[i]);
+          snakeSegBatchMesh[o++] = verts[i][0] * invHalfL;
+          snakeSegBatchMesh[o++] = verts[i][1] * invHalfW;
+        }
+      }
+    }
+  }
+  if (o < 7) return;
+  const nVert = o / 7;
+
+  gl.useProgram(spriteShipProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, spriteShipBuf);
+  gl.enableVertexAttribArray(ssAPos);
+  gl.enableVertexAttribArray(ssAUV);
+  gl.enableVertexAttribArray(ssADepth);
+  gl.enableVertexAttribArray(ssALocal);
+  const ssStride = 7 * 4;
+  gl.vertexAttribPointer(ssAPos, 2, gl.FLOAT, false, ssStride, 0);
+  gl.vertexAttribPointer(ssAUV, 2, gl.FLOAT, false, ssStride, 8);
+  gl.vertexAttribPointer(ssADepth, 1, gl.FLOAT, false, ssStride, 16);
+  gl.vertexAttribPointer(ssALocal, 2, gl.FLOAT, false, ssStride, 20);
+  gl.uniform2f(ssURes, W, H);
+  bindSceneLightUniforms(spriteShipLightU);
+  gl.uniform1f(ssUTintPow, 0);
+  gl.uniform1f(ssUEmit, Math.max(0, Number(cv('cl_ship_emit')) || 0));
+  bindSpriteDeadLook(false, 1);
+  bindSpriteTipHeat(0, halfL, halfW);
+  if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
+  bindSpriteColorRemap(null, null, 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.uniform1i(ssUTex, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.bufferData(gl.ARRAY_BUFFER, snakeSegBatchMesh.subarray(0, o), gl.DYNAMIC_DRAW);
+
+  const outlineA = Math.max(0, Math.min(1, Number(cv('cl_ast_outline_alpha'))));
+  if (outlineA > 0.001) {
+    const outlineW = spriteShipOutlineWidth(-1);
+    gl.uniform3f(ssUTint, outlineTint[0], outlineTint[1], outlineTint[2]);
+    gl.uniform1f(ssUOutline, 1);
+    gl.uniform1f(ssUAlpha, outlineA);
+    for (let d = 0; d < SPRITE_SHIP_OUTLINE_DIRS.length; d++) {
+      const dir = SPRITE_SHIP_OUTLINE_DIRS[d];
+      gl.uniform2f(ssUOffset, dir[0] * outlineW, dir[1] * outlineW);
+      gl.drawArrays(gl.TRIANGLES, 0, nVert);
+    }
+  }
+
+  gl.uniform3f(ssUTint, tint[0], tint[1], tint[2]);
+  gl.uniform1f(ssUOutline, 0);
+  gl.uniform1f(ssUAlpha, 1);
+  gl.uniform2f(ssUOffset, 0, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, nVert);
+
+  gl.disable(gl.BLEND);
+  gl.disableVertexAttribArray(ssAUV);
+  gl.disableVertexAttribArray(ssADepth);
+  gl.disableVertexAttribArray(ssALocal);
+}
+
+/** Snake boss: Craft 274 head (server) + Craft 88 tail (local path trail, batched). */
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
   updateSnakeSegsToward(e, x, y, angle);
-  const segOpt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
-  if (segOpt && segOpt.kind === 'sprite' && e.snakeSegs) {
-    // Tail first so head draws on top.
-    for (let i = e.snakeSegs.length - 1; i >= 0; i--) {
-      const s = e.snakeSegs[i];
-      const sc = snakeSegmentScaleClient(i);
-      s.scale = sc;
-      const sid = id * 64 + i + 1;
-      const bank = enemyBankSmoothed(sid, s.angle || 0, dt);
-      drawSpriteShipPlane(
-        s.x, s.y, s.angle || 0, 0, sid, dt, segOpt, true, color,
-        bank, sc, COL.enemyOutline
-      );
+  if (e.snakeSegs && e.snakeSegs.length) {
+    for (let i = 0; i < e.snakeSegs.length; i++) {
+      e.snakeSegs[i].scale = snakeSegmentScaleClient(i);
     }
+    drawSnakeSegmentsBatched(e.snakeSegs, color || COL.enemy, COL.enemyOutline);
   }
   const headOpt = getShipOptionById(ENEMY_SNAKE_HEAD_SPRITE_ID);
   const bank = enemyBankSmoothed(id, angle, dt);
