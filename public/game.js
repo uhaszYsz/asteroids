@@ -18912,7 +18912,7 @@ const ENEMY_SNAKE_TURRET_SHEET = 'medium';
 /** Sheet cell: column 3, row 1 (0-based col=2, row=0). */
 const ENEMY_SNAKE_TURRET_COL = 2;
 const ENEMY_SNAKE_TURRET_ROW = 0;
-const ENEMY_SNAKE_TURRET_SCALE = 0.55;
+const ENEMY_SNAKE_TURRET_SCALE = 1.1;
 const ENEMY_SNAKE_TURRET_Z = -8;
 /** Interval pulse: every 1.2s from a random body seg, both ways, 4 segs/0.035s hop; head never scales. */
 const SNAKE_PULSE_INTERVAL_MS = 1200;
