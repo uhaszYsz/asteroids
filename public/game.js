@@ -18316,7 +18316,7 @@ function pickForwardGunLocals(mesh) {
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
-const ENEMY_SNAKE_HEAD_SPRITE_ID = 'enemy_36';
+const ENEMY_SNAKE_HEAD_SPRITE_ID = 'enemy_274';
 const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_SEGMENTS = 100;
