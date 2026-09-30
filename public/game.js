@@ -5260,13 +5260,14 @@ let debrisTexReady = false;
 function clearShipDebris() {
   shipDebris.length = 0;
   enemyCorpses.length = 0;
-  snakeTailCorpses.length = 0;
+  snakeDeathAnims.length = 0;
 }
 
 /** Dead common-enemy hull sprites (no strip debris). */
 const enemyCorpses = [];
-/** Frozen snake tails left behind after the head dies (client-only). */
-const snakeTailCorpses = [];
+/** Snake death: remaining body segs, popped one-by-one with delay. */
+const snakeDeathAnims = [];
+const SNAKE_DEATH_SEG_DELAY_MS = 300;
 const ENEMY_CORPSE_MAX = 24;
 const ENEMY_CORPSE_VALUE = 0.7; // HSV V after grayscale
 /** Approx half-extents of common sprite (enemy_4 is 36×36). */
@@ -5412,8 +5413,8 @@ function drawEnemyCorpses(dt) {
   }
 }
 
-/** Freeze snake body in place when the head dies (client-only visual). */
-function spawnSnakeTailCorpse(e) {
+/** Start chain-explode of snake body after the head dies (client-only). */
+function spawnSnakeDeathAnim(e) {
   if (!e || e.kind !== 'snake' || !e.snakeSegs || !e.snakeSegs.length) return;
   const segs = [];
   for (let i = 0; i < e.snakeSegs.length; i++) {
@@ -5425,13 +5426,36 @@ function spawnSnakeTailCorpse(e) {
       scale: snakeSegmentScaleClient(i)
     });
   }
-  snakeTailCorpses.push({ segs });
+  snakeDeathAnims.push({
+    segs,
+    nextIdx: 0,
+    nextAt: performance.now() + SNAKE_DEATH_SEG_DELAY_MS
+  });
 }
 
-function drawSnakeTailCorpses(dt) {
-  if (!snakeTailCorpses.length) return;
-  for (let c = 0; c < snakeTailCorpses.length; c++) {
-    drawSnakeSegmentsBatched(snakeTailCorpses[c].segs, COL.enemy, COL.enemyOutline);
+function updateAndDrawSnakeDeathAnims(dt) {
+  if (!snakeDeathAnims.length) return;
+  const now = performance.now();
+  const er = ENEMY_R.snake || ENEMY_R.common || 10;
+  for (let c = snakeDeathAnims.length - 1; c >= 0; c--) {
+    const anim = snakeDeathAnims[c];
+    while (anim.nextIdx < anim.segs.length && now >= anim.nextAt) {
+      const s = anim.segs[anim.nextIdx];
+      emitAsteroidBurst(s.x, s.y, er, 'small', {
+        sfx: SFX.enemyExplosion,
+        vol: 0.35,
+        ambient: false,
+        noShake: true
+      });
+      anim.nextIdx++;
+      anim.nextAt += SNAKE_DEATH_SEG_DELAY_MS;
+    }
+    if (anim.nextIdx >= anim.segs.length) {
+      snakeDeathAnims.splice(c, 1);
+      continue;
+    }
+    // Draw whatever hasn't exploded yet (neck → tip).
+    drawSnakeSegmentsBatched(anim.segs.slice(anim.nextIdx), COL.enemy, COL.enemyOutline);
   }
 }
 
@@ -7934,7 +7958,7 @@ function emitAsteroidBurst(x, y, r, size, opts) {
   playSfxOverlap(src, { vol, pool: 4 });
   if (opts.ambient !== false) playAmbientExplosionEcho();
   // 30% of ship–asteroid collision shake (emitPlayerAsteroidHit).
-  triggerScreenShake(400, 11 * RES_SCALE * 0.3);
+  if (opts.noShake !== true) triggerScreenShake(400, 11 * RES_SCALE * 0.3);
   let boomR = Math.max(28 * RES_SCALE, (r || 10 * RES_SCALE) * 2.8);
   // Yellow/red grid paint: big 50% smaller, medium 20% smaller.
   if (size === 'big') boomR *= 0.5;
@@ -8311,7 +8335,7 @@ function drawSceneLines(dt) {
   drawCoins();
   drawShipDebris();
   drawEnemyCorpses(dt);
-  drawSnakeTailCorpses(dt);
+  updateAndDrawSnakeDeathAnims(dt);
 
   // Local ship (alive, or shaking corpse before boom)
   const drawMe = (player.hp > 0 || dyingId === myId) &&
@@ -18219,8 +18243,8 @@ function removeEnemy(id, x, y, silent) {
   shipSmokeLeaks.delete(enemySmokeLeakId(id));
   const e = enemies.get(id);
   enemies.delete(id);
-  if (e && e.kind === 'snake') spawnSnakeTailCorpse(e);
   if (!silent && e) {
+    if (e.kind === 'snake') spawnSnakeDeathAnim(e);
     const pose = enemyAt(e);
     const px = x != null ? x : pose.x;
     const py = y != null ? y : pose.y;
