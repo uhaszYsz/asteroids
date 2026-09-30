@@ -18484,7 +18484,7 @@ const SNAKE_PULSE_HOP_MS = 35;
 const SNAKE_PULSE_HOP_SEGS = 4;
 const SNAKE_PULSE_CYCLE_MS = 250;
 const SNAKE_SEG_SCALE_BASE = 0.6;
-const SNAKE_SEG_SCALE_PEAK = 1;
+const SNAKE_SEG_SCALE_PEAK = 0.8;
 
 function snakeSegmentScaleClient(index0) {
   return SNAKE_SEG_SCALE_BASE;
