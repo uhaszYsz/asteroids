@@ -5265,9 +5265,10 @@ function clearShipDebris() {
 
 /** Dead common-enemy hull sprites (no strip debris). */
 const enemyCorpses = [];
-/** Snake death: remaining body segs, popped one-by-one with delay. */
+/** Snake death: remaining body segs, popped in batches with delay. */
 const snakeDeathAnims = [];
 const SNAKE_DEATH_SEG_DELAY_MS = 300;
+const SNAKE_DEATH_SEGS_PER_BURST = 5;
 const ENEMY_CORPSE_MAX = 24;
 const ENEMY_CORPSE_VALUE = 0.7; // HSV V after grayscale
 /** Approx half-extents of common sprite (enemy_4 is 36×36). */
@@ -5440,14 +5441,17 @@ function updateAndDrawSnakeDeathAnims(dt) {
   for (let c = snakeDeathAnims.length - 1; c >= 0; c--) {
     const anim = snakeDeathAnims[c];
     while (anim.nextIdx < anim.segs.length && now >= anim.nextAt) {
-      const s = anim.segs[anim.nextIdx];
-      emitAsteroidBurst(s.x, s.y, er, 'small', {
-        sfx: SFX.enemyExplosion,
-        vol: 0.35,
-        ambient: false,
-        noShake: true
-      });
-      anim.nextIdx++;
+      const end = Math.min(anim.segs.length, anim.nextIdx + SNAKE_DEATH_SEGS_PER_BURST);
+      for (let i = anim.nextIdx; i < end; i++) {
+        const s = anim.segs[i];
+        emitAsteroidBurst(s.x, s.y, er, 'small', {
+          sfx: SFX.enemyExplosion,
+          vol: 0.35,
+          ambient: false,
+          noShake: true
+        });
+      }
+      anim.nextIdx = end;
       anim.nextAt += SNAKE_DEATH_SEG_DELAY_MS;
     }
     if (anim.nextIdx >= anim.segs.length) {
