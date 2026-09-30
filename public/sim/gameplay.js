@@ -1808,16 +1808,18 @@ function countCommonRailSlots(room) {
   return n;
 }
 
-/** Random common kind; caps common1 / commonRail at 2. World 2 adds void + rail commons. */
+/** Random common kind; caps common1 / commonRail at 2.
+ *  World 1: common + common1. World 2+: void / rail / volkano only (no common/common1). */
 function pickRandomCommonKind(room) {
   const world = (room && room.world) | 0;
-  const opts = ['common'];
-  if (countCommon1Slots(room) < MAX_COMMON1_ON_FIELD) opts.push('common1');
   if (world >= 2) {
-    opts.push('commonVoid');
+    const opts = ['commonVoid'];
     if (countCommonRailSlots(room) < MAX_COMMON_RAIL_ON_FIELD) opts.push('commonRail');
     if (roomHasAttachableAsteroid(room)) opts.push('volkano');
+    return opts[(Math.random() * opts.length) | 0];
   }
+  const opts = ['common'];
+  if (countCommon1Slots(room) < MAX_COMMON1_ON_FIELD) opts.push('common1');
   return opts[(Math.random() * opts.length) | 0];
 }
 
