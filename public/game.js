@@ -19594,10 +19594,15 @@ function drawEnemyCarrier(x, y, angle, weapon) {
   drawThickSegment(x, y, nx, ny, 2.2 * RES_SCALE, accent);
 }
 
-/** Snake boss: Craft 36 head + Craft 88 trailing segments (scales from net). */
+/** Snake boss: Craft 36 head + Craft 88 trailing segments.
+ *  Segments use last server poses (segment-to-segment follow is sim-side).
+ *  Do NOT re-resolve the chain toward the predicted head — one pass would
+ *  collapse the whole body into a straight rubber-band line. */
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
   ensureSnakeSegs(e, x, y, angle);
-  updateSnakeSegsToward(e, x, y);
+  // Keep server chain shape; slide with head prediction delta.
+  const ox = x - (e.x != null ? +e.x : x);
+  const oy = y - (e.y != null ? +e.y : y);
   const segOpt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
   if (segOpt && segOpt.kind === 'sprite' && e.snakeSegs) {
     // Tail first so head draws on top.
@@ -19608,7 +19613,7 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
       const sid = id * 64 + i + 1;
       const bank = enemyBankSmoothed(sid, s.angle || 0, dt);
       drawSpriteShipPlane(
-        s.x, s.y, s.angle || 0, 0, sid, dt, segOpt, true, color,
+        s.x + ox, s.y + oy, s.angle || 0, 0, sid, dt, segOpt, true, color,
         bank, sc, COL.enemyOutline
       );
     }
