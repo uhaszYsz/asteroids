@@ -9882,6 +9882,8 @@ const ENEMY_SPRITE_SPECS = [
   { id: 'enemy_376', name: 'Craft 376', file: 'Spaceship (376).png', fw: 73, fh: 39, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_377', name: 'Craft 377', file: 'Spaceship (377).png', fw: 78, fh: 47, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_378', name: 'Craft 378', file: 'Spaceship (378).png', fw: 72, fh: 57, states: ['idle'], frames: [1], single: true },
+  /** Gunship layered strip: 1×3 (hull | crystals A | crystals B), each frame rotated like other enemies. */
+  { id: 'enemy_378_gun', name: 'Craft 378 Gunship', file: 'Spaceship (378) strip.png', fw: 72, fh: 57, cols: 3, strip: true, rotateFramesCw90: true, states: ['idle'], frames: [1] },
   { id: 'enemy_379', name: 'Craft 379', file: 'Spaceship (379).png', fw: 72, fh: 46, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_380', name: 'Craft 380', file: 'Spaceship (380).png', fw: 84, fh: 52, states: ['idle'], frames: [1], single: true },
   { id: 'enemy_382', name: 'Craft 382', file: 'Spaceship (382).png', fw: 72, fh: 55, states: ['idle'], frames: [1], single: true },
@@ -9914,7 +9916,7 @@ const SHIP_OPTIONS = SHIP_MESHES.concat(SPRITE_SHIP_OPTIONS);
 function spriteShipDir(spec) {
   if (!spec) return TINY_SHIP_DIR;
   if (spec.dir) return spec.dir;
-  if (spec.single) return ENEMY_SHIP_DIR;
+  if (spec.single || spec.strip) return ENEMY_SHIP_DIR;
   return TINY_SHIP_DIR;
 }
 
@@ -9950,14 +9952,58 @@ function rotateImageCW90(src) {
   return cnv;
 }
 
+/** Rotate each strip cell 270° CW, pack into a horizontal atlas (nose along +X). */
+function packEnemyStripRotated(img, fw, fh, cols) {
+  const n = Math.max(1, cols | 0);
+  const cellW = fh; // after 270° CW: w/h swap
+  const cellH = fw;
+  const cnv = document.createElement('canvas');
+  cnv.width = cellW * n;
+  cnv.height = cellH;
+  const ctx = cnv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  for (let c = 0; c < n; c++) {
+    const tmp = document.createElement('canvas');
+    tmp.width = fw;
+    tmp.height = fh;
+    const tctx = tmp.getContext('2d');
+    tctx.imageSmoothingEnabled = false;
+    tctx.drawImage(img, c * fw, 0, fw, fh, 0, 0, fw, fh);
+    const rot = rotateImageCW90(tmp);
+    ctx.drawImage(rot, c * cellW, 0);
+  }
+  return { canvas: cnv, cellW, cellH };
+}
+
+function stripFrameUV(spec, sheetW, sheetH, frameIndex) {
+  const cols = Math.max(1, (spec && spec.cols) | 0);
+  const col = Math.max(0, Math.min(cols - 1, frameIndex | 0));
+  const cw = (spec && spec.cellW) || Math.max(1, ((sheetW / cols) | 0));
+  const u0 = (col * cw) / sheetW;
+  const u1 = ((col + 1) * cw) / sheetW;
+  // FLIP_Y upload: image top → v=1.
+  return { u0, v0: 1, u1, v1: 0 };
+}
+
 function loadSpriteShipTexture(spec) {
   if (spriteShipTexById.has(spec.id)) return spriteShipTexById.get(spec.id);
   const entry = { tex: null, img: null, w: 0, h: 0, ready: false };
   spriteShipTexById.set(spec.id, entry);
   const img = new Image();
   img.onload = () => {
-    // Enemy craft art faces "up" in the PNG; planes expect nose along +X — 270° CW.
-    const upload = (spec.single || spec.rotateCw90) ? rotateImageCW90(img) : img;
+    let upload = img;
+    if (spec.strip && spec.rotateFramesCw90 && (spec.cols | 0) > 0) {
+      const packed = packEnemyStripRotated(img, spec.fw | 0, spec.fh | 0, spec.cols | 0);
+      upload = packed.canvas;
+      spec.cellW = packed.cellW;
+      spec.cellH = packed.cellH;
+      // Plane size uses one rotated cell (same convention as single enemies).
+      spec.fw = packed.cellW;
+      spec.fh = packed.cellH;
+    } else if (spec.single || spec.rotateCw90) {
+      // Enemy craft art faces "up" in the PNG; planes expect nose along +X — 270° CW.
+      upload = rotateImageCW90(img);
+    }
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
@@ -9971,7 +10017,7 @@ function loadSpriteShipTexture(spec) {
     entry.w = (upload.naturalWidth || upload.width) | 0;
     entry.h = (upload.naturalHeight || upload.height) | 0;
     // Single-frame craft: use real pixel size after optional rotate (w/h swapped).
-    if (spec.single) {
+    if (spec.single && !spec.strip) {
       spec.fw = entry.w || spec.fw;
       spec.fh = entry.h || spec.fh;
     }
@@ -10968,7 +11014,8 @@ const SPRITE_SHIP_PX_SCALE = 1;
  *  opts.tiltXDeg: fixed roll around +X (degrees).
  *  opts.spinLeanYDeg: cone angle — tip of +Z circles at this lean from vertical.
  *  opts.yawSpinDegPerTick: how fast that tip circles (precession around Z).
- *  opts.spinRate: continuous roll around length (+X) in rad/s (added to bank). */
+ *  opts.frameIndex: strip column (0-based) when opt.sprite.strip.
+ *  opts.flipLocalY: mirror across ship length (keel) — vertical flip in strip space. */
 function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOverride, sizeScale, outlineColor, opts) {
   const spec = opt && opt.sprite;
   if (!spec) return;
@@ -10977,6 +11024,7 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
 
   const flat = !!(opts && opts.flat);
   const hexDome = !!(opts && opts.hexDome);
+  const flipLocalY = !!(opts && opts.flipLocalY);
   const tiltXDeg = opts && opts.tiltXDeg != null && Number.isFinite(+opts.tiltXDeg) ? +opts.tiltXDeg : 0;
   const spinLeanYDeg = opts && opts.spinLeanYDeg != null && Number.isFinite(+opts.spinLeanYDeg)
     ? +opts.spinLeanYDeg : 0;
@@ -11023,7 +11071,9 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
   const drop = halfW * sp;
 
   const state = tinyShipDesiredState(spec, !!moving, spriteShipAttacking(id));
-  const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
+  const uv = (spec.strip)
+    ? stripFrameUV(spec, entry.w, entry.h, (opts && opts.frameIndex != null) ? opts.frameIndex : 0)
+    : tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
   const uMid = (uv.u0 + uv.u1) * 0.5;
   const vMid = (uv.v0 + uv.v1) * 0.5;
   const uvsL = [
@@ -11159,6 +11209,16 @@ function drawSpriteShipPlane(x, y, angle, av, id, dt, opt, moving, color, bankOv
         uvs: uvsR
       }
     ];
+  }
+
+  // Vertical mirror in strip space → flip across ship keel (local Y).
+  if (flipLocalY) {
+    for (let p = 0; p < panels.length; p++) {
+      const verts = panels[p].verts;
+      for (let i = 0; i < verts.length; i++) {
+        verts[i] = [verts[i][0], -verts[i][1], verts[i][2]];
+      }
+    }
   }
 
   // Painter's algorithm when spinning / multi-sided (skip tube — uses Z-buffer).
@@ -18192,8 +18252,8 @@ const ENEMY_COMMON_MESH = (() => {
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_SPRITE_ID = 'enemy_370';
 const ENEMY_UFO_SPRITE_SCALE = 1;
-/** Gunship = Craft 378 (2 roof plates + sprite). */
-const ENEMY_GUNSHIP_SPRITE_ID = 'enemy_378';
+/** Gunship = Craft 378 layered strip (hull + crystal bits). */
+const ENEMY_GUNSHIP_SPRITE_ID = 'enemy_378_gun';
 /** Medium sheet last cell (row 3, col 2) — flat side mounts at mid-length. */
 const ENEMY_UFO_TURRET_SHEET = 'medium';
 const ENEMY_UFO_TURRET_COL = 2;
@@ -19339,20 +19399,35 @@ function drawGunshipMagnetDust() {
   drawPoints(gunshipMagnetDust, COL_MAGNET_DUST, 0.65);
 }
 
-/** Gunship: Craft 378 on default 2 roof plates (same path as commons / UFO body). */
+/** Gunship: Craft 378 strip — hull on top, crystals under, mirrored crystals below. */
 function drawEnemyGunship(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_GUNSHIP_SPRITE_ID);
-  // Force numeric scale — never fall through with a missing sizeScale.
   const sc = Number(ENEMY_GUNSHIP_SPRITE_SCALE);
   const sizeScale = (Number.isFinite(sc) && sc > 0) ? sc : 1;
-  if (opt && opt.kind === 'sprite') {
+  if (!(opt && opt.kind === 'sprite')) {
+    drawEnemyCommon(x, y, angle, color, id, dt);
+    return bank;
+  }
+  // Bottom → top: mirrored bits, then bits, then hull (frame 0).
+  const layers = [
+    { frameIndex: 1, flipLocalY: true, noOutline: true },
+    { frameIndex: 2, flipLocalY: true, noOutline: true },
+    { frameIndex: 1, flipLocalY: false, noOutline: true },
+    { frameIndex: 2, flipLocalY: false, noOutline: true },
+    { frameIndex: 0, flipLocalY: false, noOutline: false }
+  ];
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i];
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
-      bank, sizeScale, COL.enemyOutline
+      bank, sizeScale, COL.enemyOutline,
+      {
+        frameIndex: layer.frameIndex,
+        flipLocalY: layer.flipLocalY,
+        noOutline: layer.noOutline
+      }
     );
-  } else {
-    drawEnemyCommon(x, y, angle, color, id, dt);
   }
   return bank;
 }
