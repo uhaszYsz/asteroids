@@ -18074,6 +18074,10 @@ function applyEnemyUpdate(row) {
   const prev = enemies.get(id);
   const e = unpackEnemy(row);
   if (prev && prev.snakeSegs) e.snakeSegs = prev.snakeSegs;
+  if (prev && prev.snakeTrail) {
+    e.snakeTrail = prev.snakeTrail;
+    e.snakeTrailLen = prev.snakeTrailLen;
+  }
   rebaseEnemyPredictOrigin(e);
   enemies.set(id, e);
 }
