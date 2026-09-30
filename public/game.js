@@ -6700,7 +6700,7 @@ function enemyMaxHp(kind) {
   if (kind === 'worm') return 1000;
   if (kind === 'spinner') return 320;
   if (kind === 'gunship') return 1000;
-  if (kind === 'snake') return 1000;
+  if (kind === 'snake') return 3000;
   return 95;
 }
 
@@ -17827,7 +17827,16 @@ function enemyRectDims(e) {
 /** Circle enemies only. */
 function enemyHitCirclesAt(x, y, angle, e) {
   if (enemyUsesRectHit(e)) return [];
-  return [{ x, y, r: enemyHitR(e) }];
+  const r = enemyHitR(e);
+  if (e && e.kind === 'snake' && e.snakeSegs && e.snakeSegs.length) {
+    const out = [{ x, y, r }];
+    for (let i = 0; i < e.snakeSegs.length; i++) {
+      const s = e.snakeSegs[i];
+      out.push({ x: s.x, y: s.y, r });
+    }
+    return out;
+  }
+  return [{ x, y, r }];
 }
 
 /** Ray vs oriented AABB in local space; returns t or null. */

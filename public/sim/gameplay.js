@@ -1291,7 +1291,9 @@ function makeEnemy(kind, wave, weapon) {
     // common1 post-shot flank (deg peak, ticks remaining / duration).
     flankDeg: 0,
     flankLeft: 0,
-    flankDur: 0
+    flankDur: 0,
+    // Snake: head path stamps (every ENEMY_SNAKE_FOLLOW_DIST px) for tail hits.
+    snakeTrail: null
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -1303,7 +1305,38 @@ function makeEnemy(kind, wave, weapon) {
     e.shootAmmo = ENEMY_SPINNER.ammo;
     e.spinAng = Math.random() * Math.PI * 2;
   }
+  if (k === 'snake') {
+    e.snakeTrail = [{ x: e.x, y: e.y }];
+  }
   return e;
+}
+
+/** Stamp head pose every FOLLOW_DIST of travel; keep last SEGMENTS stamps (tail colliders). */
+function updateSnakeTrail(e) {
+  if (!e || e.kind !== 'snake') return;
+  if (!e.snakeTrail) e.snakeTrail = [];
+  const gap = ENEMY_SNAKE_FOLLOW_DIST;
+  const maxN = ENEMY_SNAKE_SEGMENTS;
+  if (!e.snakeTrail.length) {
+    e.snakeTrail.push({ x: e.x, y: e.y });
+    return;
+  }
+  const last = e.snakeTrail[e.snakeTrail.length - 1];
+  const dx = e.x - last.x;
+  const dy = e.y - last.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < gap) return;
+  const inv = 1 / dist;
+  let rem = dist;
+  let px = last.x;
+  let py = last.y;
+  while (rem >= gap) {
+    px += dx * inv * gap;
+    py += dy * inv * gap;
+    e.snakeTrail.push({ x: px, y: py });
+    rem -= gap;
+    while (e.snakeTrail.length > maxN) e.snakeTrail.shift();
+  }
 }
 
 /**
@@ -2733,6 +2766,7 @@ function updateEnemies(room) {
       if ((e.appearLeft | 0) <= 0) {
         // Fresh edge entry when the delay ends (queued or staggered commons).
         placeEnemyOffscreenEntry(e);
+        if (e.kind === 'snake') e.snakeTrail = [{ x: e.x, y: e.y }];
         emitEnemyFire(room, e);
       }
       continue;
@@ -2765,6 +2799,7 @@ function updateEnemies(room) {
         e.ty = target.y;
       }
       stepEnemyMovement(e);
+      if (e.kind === 'snake') updateSnakeTrail(e);
       if (e.kind === 'common1') enemyTryFire(room, e);
       chaseSnap = true;
       continue;
@@ -2842,10 +2877,22 @@ function enemyRectDims(e) {
   return { len: ENEMY_UFO_HIT_LEN, wid: ENEMY_UFO_HIT_WID };
 }
 
-/** Hit volumes (circle enemies only — rect kinds use enemyRectDims). */
+/** Hit volumes (circle enemies only — rect kinds use enemyRectDims).
+ *  Snake: head + path stamps (same radius) so tail hits damage the boss. */
 function enemyHitCircles(e) {
   if (!e || enemyUsesRectHit(e)) return [];
   const r = e.r || ENEMY_R[e.kind] || ENEMY_R.common || 10;
+  if (e.kind === 'snake') {
+    const out = [{ x: e.x, y: e.y, r }];
+    const trail = e.snakeTrail;
+    if (trail && trail.length) {
+      for (let i = 0; i < trail.length; i++) {
+        const s = trail[i];
+        out.push({ x: s.x, y: s.y, r });
+      }
+    }
+    return out;
+  }
   return [{ x: e.x, y: e.y, r }];
 }
 
@@ -5397,7 +5444,12 @@ function resolvePlayerShotEnemyHits(room) {
       if (!e || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
       const hit = enemyUsesRectHit(e)
         ? circleHitsEnemyRect(shot.x, shot.y, shot.r || 10, e)
-        : circleVsAsteroidPoly({ x: e.x, y: e.y, r: e.r || 10 }, shot);
+        : (() => {
+          for (const cir of enemyHitCircles(e)) {
+            if (circleVsAsteroidPoly({ x: cir.x, y: cir.y, r: cir.r }, shot)) return true;
+          }
+          return false;
+        })();
       if (!hit) continue;
       // Damage only — leave velocities alone (no push / stun).
       shot.enemyHitCd = 6;

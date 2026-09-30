@@ -375,9 +375,9 @@ const ENEMY_HP = {
   worm: 1000,
   spinner: 320,
   gunship: 1000,
-  snake: 1000
+  snake: 3000
 };
-/** Snake boss: head + trailing segments. FOLLOW_DIST = 5px dead zone. */
+/** Snake boss: head path stamps every FOLLOW_DIST px (cap SEGMENTS) for tail collision. */
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 /** Spinner: 2-way radial burst (180°); shoot angle advances `spin` degrees after each volley. */
