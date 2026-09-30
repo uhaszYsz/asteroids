@@ -385,8 +385,8 @@ const ENEMY_HP = {
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 const ENEMY_SNAKE_GROW_PER_EAT = 7;
-/** Snake tail shots: random trail stamp → player, every 0.5s. */
-const ENEMY_SNAKE_SHOT_INTERVAL = Math.round(0.5 * TPS);
+/** Snake tail shots: random trail stamp → player, every 1.5s. */
+const ENEMY_SNAKE_SHOT_INTERVAL = Math.round(1.5 * TPS);
 const ENEMY_SNAKE_SHOT_SPEED = 4;
 /** length tag 15 = common scale; 18 = +20%. */
 const ENEMY_SNAKE_SHOT_LENGTH = Math.round(15 * 1.2);

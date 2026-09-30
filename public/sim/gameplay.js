@@ -1431,7 +1431,7 @@ function snakeEatAsteroids(room, e) {
 }
 
 /**
- * Every 0.5s: one shot from a random trail stamp aimed at the player
+ * Every 1.5s: one shot from a random trail stamp aimed at the player
  * (speed 4, +20% common bullet size).
  */
 function snakeTryFire(room, e) {
