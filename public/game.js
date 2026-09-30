@@ -13426,7 +13426,7 @@ const loadoutXNameEl = document.getElementById('loadout-x-name');
 /** [1]/[2] loadout readout, top-left — active slot highlighted (Alt switches). */
 function updateLoadoutHud() {
   if (!loadoutHudEl) return;
-  const show = inGame && !campaignMapOpen;
+  const show = inGame && !campaignMapOpen && !consoleOpen;
   loadoutHudEl.classList.toggle('hidden', !show);
   if (!show) return;
   const rows = loadoutHudEl.querySelectorAll('.loadout-row');
@@ -26886,6 +26886,7 @@ function openConsole() {
   if (!conEl || !conInputEl) return;
   consoleOpen = true;
   conEl.classList.add('open');
+  updateLoadoutHud();
   // Clear stuck movement keys while typing.
   for (const k of Object.keys(keys)) keys[k] = false;
   spaceLatch = false;
@@ -26907,6 +26908,7 @@ function closeConsole() {
   conEl.classList.remove('open');
   conInputEl.blur();
   conClearSuggest();
+  updateLoadoutHud();
 }
 
 function toggleConsole() {
