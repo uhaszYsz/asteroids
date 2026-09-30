@@ -17877,16 +17877,10 @@ function parseEnemyKind(raw) {
   return 'common';
 }
 
-/** Flat [x,y,angle,scale, ...] → segment objects (unused — tail is local-only). */
-function applySnakeSegs(e, flat) {
-  if (!e || e.kind !== 'snake' || !flat || !flat.length) return;
-  // Tail is simulated locally; ignore any legacy segs from net.
-}
-
-/** Local tail init behind head (server only syncs the head). */
+/** Local path-trail tail (server only syncs the head). */
 function ensureSnakeSegs(e, headX, headY, headAng) {
   if (!e || e.kind !== 'snake') return;
-  if (e.snakeSegs && e.snakeSegs.length === ENEMY_SNAKE_SEGMENTS) return;
+  if (e.snakeSegs && e.snakeSegs.length === ENEMY_SNAKE_SEGMENTS && e.snakeTrail) return;
   const ang = headAng || 0;
   const back = ang + Math.PI;
   const gap = ENEMY_SNAKE_FOLLOW_DIST;
@@ -17901,33 +17895,95 @@ function ensureSnakeSegs(e, headX, headY, headAng) {
     });
   }
   e.snakeSegs = segs;
+  e.snakeTrail = [{ x: headX, y: headY, dist: 0 }];
+  e.snakeTrailLen = 0;
 }
 
 /**
- * Local segment-to-segment follow (15px dead zone).
- * Call once per frame with the *current drawn* head pose — head only moves a
- * few px/frame, so one pass keeps the chain curved. Do not jump the head far
- * ahead then resolve once (that rubber-bands into a straight line).
+ * Record head motion into a path buffer; park each segment at fixed spacing
+ * back along that path so the body replays the same route the head took.
  */
-function updateSnakeSegsToward(e, headX, headY) {
-  if (!e || !e.snakeSegs || !e.snakeSegs.length) return;
+function updateSnakeSegsToward(e, headX, headY, headAng) {
+  if (!e || e.kind !== 'snake') return;
+  ensureSnakeSegs(e, headX, headY, headAng || 0);
   const gap = ENEMY_SNAKE_FOLLOW_DIST;
-  let px = headX;
-  let py = headY;
+  const need = ENEMY_SNAKE_SEGMENTS * gap + gap;
+  let trail = e.snakeTrail;
+  if (!trail || !trail.length) {
+    e.snakeTrail = [{ x: headX, y: headY, dist: 0 }];
+    e.snakeTrailLen = 0;
+    trail = e.snakeTrail;
+  }
+
+  const last = trail[trail.length - 1];
+  const dx = headX - last.x;
+  const dy = headY - last.y;
+  const step = Math.hypot(dx, dy);
+  // Teleport / hard snap — rebuild trail behind new head.
+  if (step > gap * 4) {
+    const ang = headAng != null && Number.isFinite(headAng)
+      ? headAng
+      : (step > 1e-6 ? Math.atan2(dy, dx) : (e.angle || 0));
+    const back = ang + Math.PI;
+    e.snakeTrail = [{ x: headX, y: headY, dist: 0 }];
+    e.snakeTrailLen = 0;
+    for (let i = 0; i < e.snakeSegs.length; i++) {
+      const d = gap * (i + 1);
+      const s = e.snakeSegs[i];
+      s.x = headX + Math.cos(back) * d;
+      s.y = headY + Math.sin(back) * d;
+      s.angle = ang;
+      s.scale = snakeSegmentScaleClient(i);
+    }
+    return;
+  }
+  if (step >= 0.5) {
+    const dist = (last.dist || 0) + step;
+    trail.push({ x: headX, y: headY, dist });
+    e.snakeTrailLen = dist;
+    const minKeep = dist - need;
+    while (trail.length > 2 && trail[1].dist < minKeep) trail.shift();
+    if (trail[0].dist > 0) {
+      const base = trail[0].dist;
+      for (let i = 0; i < trail.length; i++) trail[i].dist -= base;
+      e.snakeTrailLen = trail[trail.length - 1].dist;
+    }
+  }
+
+  const headDist = trail[trail.length - 1].dist;
   for (let i = 0; i < e.snakeSegs.length; i++) {
     const s = e.snakeSegs[i];
     s.scale = snakeSegmentScaleClient(i);
-    const dx = px - s.x;
-    const dy = py - s.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist > 1e-6) s.angle = Math.atan2(dy, dx);
-    if (dist > gap && dist > 1e-6) {
-      const pull = dist - gap;
-      s.x += (dx / dist) * pull;
-      s.y += (dy / dist) * pull;
+    const target = headDist - gap * (i + 1);
+    let placed = false;
+    for (let t = trail.length - 1; t >= 1; t--) {
+      const a = trail[t - 1];
+      const b = trail[t];
+      if (target <= b.dist && target >= a.dist) {
+        const span = b.dist - a.dist;
+        const u = span > 1e-6 ? (target - a.dist) / span : 0;
+        s.x = a.x + (b.x - a.x) * u;
+        s.y = a.y + (b.y - a.y) * u;
+        const tx = b.x - a.x;
+        const ty = b.y - a.y;
+        if (Math.hypot(tx, ty) > 1e-6) s.angle = Math.atan2(ty, tx);
+        placed = true;
+        break;
+      }
     }
-    px = s.x;
-    py = s.y;
+    if (!placed) {
+      const a = trail[0];
+      s.x = a.x;
+      s.y = a.y;
+      if (trail.length > 1) {
+        const b = trail[1];
+        const tx = b.x - a.x;
+        const ty = b.y - a.y;
+        if (Math.hypot(tx, ty) > 1e-6) s.angle = Math.atan2(ty, tx);
+      } else if (headAng != null && Number.isFinite(headAng)) {
+        s.angle = headAng;
+      }
+    }
   }
 }
 
@@ -19574,10 +19630,9 @@ function drawEnemyCarrier(x, y, angle, weapon) {
   drawThickSegment(x, y, nx, ny, 2.2 * RES_SCALE, accent);
 }
 
-/** Snake boss: Craft 36 head (server) + Craft 88 tail (local follow). */
+/** Snake boss: Craft 36 head (server) + Craft 88 tail (local path trail). */
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
-  ensureSnakeSegs(e, x, y, angle);
-  updateSnakeSegsToward(e, x, y);
+  updateSnakeSegsToward(e, x, y, angle);
   const segOpt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
   if (segOpt && segOpt.kind === 'sprite' && e.snakeSegs) {
     // Tail first so head draws on top.
