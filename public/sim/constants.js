@@ -443,6 +443,8 @@ const ENEMY_UFO_ROCKET_ACCEL = 0.15;
 const ENEMY_COMMON_BULLET_SPEED = ENEMY_BULLET_SPEED * 0.5;
 const ENEMY_COMMON_BULLET_DMG = 45;
 const ENEMY_COMMON_RELOAD = Math.round(2.5 * TPS);
+/** commonVoid: half wander speed; voids fire in a random direction. */
+const ENEMY_COMMON_VOID_SPEED_MUL = 0.5;
 /** common1: single shot, ~26.5% faster than common spread pellets (was +15%, then +10%). */
 const ENEMY_COMMON1_BULLET_SPEED = ENEMY_COMMON_BULLET_SPEED * 1.15 * 1.1;
 /** common1: 40% shorter gap between shots. */

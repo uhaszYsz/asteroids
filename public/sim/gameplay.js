@@ -1331,9 +1331,12 @@ function makeEnemy(kind, wave, weapon) {
     lastLaserAng: null,
     enteredPlay: false,
     // common1/commonRail/snake: worm-rocket band ±10% per ship; snake base is 25% below common1.
+    // commonVoid: half normal wander speed.
     speed: chaseSpeed
       ? chaseBase * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
-      : randomEnemyWanderSpeed(),
+      : (k === 'commonVoid'
+        ? randomEnemyWanderSpeed() * ENEMY_COMMON_VOID_SPEED_MUL
+        : randomEnemyWanderSpeed()),
     // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
     // Gunship reuses wormPhase: 0 idle; 1 spray; 2 spray reload; 3 void hold; 4 magnet; 5 void cruise.
     // wormAtk cycles 0=laser/spray, 1=rockets/voids, 2=shotgun/magnet.
@@ -3034,8 +3037,9 @@ function applyEnemyRailSegment(room, e, ox, oy, dx, dy, range, opts) {
   }
 }
 
-/** Single void orb along facing (player void size/dmg/speed). */
-function fireEnemyVoidStream(room, e, ang) {
+/** Single void orb. opts: { keepFacing, noAsteroidDamage }. */
+function fireEnemyVoidStream(room, e, ang, opts) {
+  opts = opts || {};
   const w = WEAPONS.voidcannon;
   const spd = (w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE);
   const cfg = BULLET_TYPES.voidcannon;
@@ -3056,11 +3060,12 @@ function fireEnemyVoidStream(room, e, ang) {
     spawnY: y,
     vx: Math.cos(ang) * spd,
     vy: Math.sin(ang) * spd,
-    spawnSt: now
+    spawnSt: now,
+    noAsteroidDamage: !!opts.noAsteroidDamage
   };
   room.bullets.push(b);
   roomBroadcast(room, { t: 'bf', b: packBullet(b) });
-  e.angle = ang;
+  if (!opts.keepFacing) e.angle = ang;
 }
 
 /** commonRail: dump laser along current facing (no auto-aim). Asteroids block only. */
@@ -3425,7 +3430,11 @@ function enemyTryFire(room, e) {
     return;
   }
   if (e.kind === 'commonVoid') {
-    fireEnemyVoidStream(room, e, base);
+    // Random shot direction — ship keeps its wander facing.
+    fireEnemyVoidStream(room, e, Math.random() * Math.PI * 2, {
+      keepFacing: true,
+      noAsteroidDamage: true
+    });
     e.fireCd = ENEMY_COMMON_RELOAD;
     return;
   }
@@ -8517,6 +8526,7 @@ function updateBullets(room) {
         });
       }
       forEachAsteroidNear(room, b.x, b.y, bulletBroadR(b), (a) => {
+        if (b.noAsteroidDamage) return false;
         if (!hitBulletAsteroid(b, a)) return false;
         const key = 'a:' + a.id;
         active.add(key);
