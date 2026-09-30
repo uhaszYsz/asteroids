@@ -539,7 +539,7 @@ const HEALTH_PICKUP_HEAL = 30;
 const PICKUP_CODE_HEALTH = 99;
 const ASTEROID_HP = 50;
 /** Coins granted to the destroyer when a world asteroid is killed. */
-const ASTEROID_COIN_GRANT = 32;
+const ASTEROID_COIN_GRANT = 40;
 /** Coins granted for destroying UFO / spinner. */
 const ENEMY_ELITE_COIN_GRANT = 500;
 /** Coins granted for destroying the worm boss. */
@@ -553,7 +553,7 @@ const SPECIAL_ASTEROID_KINDS = ['meteor', 'golden'];
 /** Golden special rocks — tanky ore; coins drip on each damaging hit. */
 const GOLDEN_ASTEROID_HP = 400;
 /** Coins per point of HP damage dealt to a golden asteroid. */
-const GOLDEN_ASTEROID_COIN_PER_DMG = 0.6;
+const GOLDEN_ASTEROID_COIN_PER_DMG = 0.75;
 /** Base random speed spread used by normal asteroids (±half of this per axis). */
 const ASTEROID_SPEED_SPREAD = 2.4 * RES_SCALE;
 /** Normal speed magnitude band (px/tick). Min matches offscreen inward floor. */
