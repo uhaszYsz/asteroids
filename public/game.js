@@ -10977,9 +10977,31 @@ function bindSpriteColorRemap(src, dst, range) {
 const spriteShipBuf = gl.createBuffer();
 /** One roof panel, both windings: 12 verts × (xy + uv + depth + local). */
 const spriteShipMesh = new Float32Array(12 * 7); // x,y,u,v,depth,lx,ly
-/** Batched snake-tail mesh: segs × 2 roof panels × 12 verts × 7 floats. */
-const SNAKE_SEG_BATCH_MAX = 128;
+/** Batched snake-tail mesh: segs (+ edge wrap twins) × 2 roof panels × 12 verts × 7 floats. */
+const SNAKE_SEG_BATCH_MAX = 512;
 const snakeSegBatchMesh = new Float32Array(SNAKE_SEG_BATCH_MAX * 2 * 12 * 7);
+/** Scratch for toroidal draw copies when a sprite straddles a screen edge. */
+const _snakeWrapOff = [];
+
+/** Push (ox,oy) pairs so a sprite at (x,y) also draws across wrapped edges. */
+function snakeEdgeWrapOffsets(x, y, margin, out) {
+  out.length = 0;
+  out.push(0, 0);
+  const m = margin > 0 ? margin : 0;
+  const left = x < m;
+  const right = x > W - m;
+  const top = y < m;
+  const bot = y > H - m;
+  if (left) out.push(W, 0);
+  if (right) out.push(-W, 0);
+  if (top) out.push(0, H);
+  if (bot) out.push(0, -H);
+  if (left && top) out.push(W, H);
+  if (left && bot) out.push(W, -H);
+  if (right && top) out.push(-W, H);
+  if (right && bot) out.push(-W, -H);
+  return out;
+}
 /** Pitch of the two sprite halves (house-roof fold along nose→tail). */
 const SPRITE_ROOF_PITCH = 0.58;
 /** Screen lift so the ridge reads above the wing tips even at bank=0. */
@@ -18033,17 +18055,13 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
       }
     }
     if (!placed) {
+      // Beyond recorded path — keep spacing behind the oldest stamp (don't pile on head).
       const a = trail[0];
-      s.x = a.x;
-      s.y = a.y;
-      if (trail.length > 1) {
-        const b = trail[1];
-        const wdx = shortestWrapDelta(a.x, b.x, W);
-        const wdy = shortestWrapDelta(a.y, b.y, H);
-        if (Math.hypot(wdx, wdy) > 1e-6) s.angle = Math.atan2(wdy, wdx);
-      } else if (headAng != null && Number.isFinite(headAng)) {
-        s.angle = headAng;
-      }
+      const backAng = (headAng != null && Number.isFinite(headAng) ? headAng : (s.angle || 0)) + Math.PI;
+      const extra = Math.max(0, gap * (i + 1) - headDist);
+      s.x = wrapCoord(a.x + Math.cos(backAng) * extra, W);
+      s.y = wrapCoord(a.y + Math.sin(backAng) * extra, H);
+      if (headAng != null && Number.isFinite(headAng)) s.angle = headAng;
     }
   }
 }
@@ -18241,7 +18259,10 @@ function enemyAgeTicks(e) {
 function stepEnemyDestinationSmoothLocal(state, opts) {
   let dx;
   let dy;
-  if (state.kind === 'snake') {
+  // Match server: wrap chase only after the snake has entered the playfield.
+  // Wrapping while still off-screen teleports the head to the opposite edge.
+  const snakeWrap = state.kind === 'snake' && !!state.enteredPlay;
+  if (snakeWrap) {
     dx = shortestWrapDelta(state.x, state.tx, W);
     dy = shortestWrapDelta(state.y, state.ty, H);
   } else {
@@ -18270,12 +18291,15 @@ function stepEnemyDestinationSmoothLocal(state, opts) {
   state.y += state.vy;
   state.angle = state.dir;
   if (state.kind === 'snake') {
-    if (state.x < 0) state.x += W;
-    if (state.x > W) state.x -= W;
-    if (state.y < 0) state.y += H;
-    if (state.y > H) state.y -= H;
-    if (!state.enteredPlay && state.x >= 8 && state.x <= W - 8 && state.y >= 8 && state.y <= H - 8) {
-      state.enteredPlay = true;
+    if (!state.enteredPlay) {
+      if (state.x >= 8 && state.x <= W - 8 && state.y >= 8 && state.y <= H - 8) {
+        state.enteredPlay = true;
+      }
+    } else {
+      if (state.x < 0) state.x += W;
+      if (state.x > W) state.x -= W;
+      if (state.y < 0) state.y += H;
+      if (state.y > H) state.y -= H;
     }
   } else if (state.enteredPlay) {
     if (state.x < 8) state.x = 8;
@@ -19764,30 +19788,39 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor) {
   const windFwd = [0, 1, 2, 0, 2, 3];
   const windBack = [0, 2, 1, 0, 3, 2];
   const nSeg = Math.min(segs.length, SNAKE_SEG_BATCH_MAX);
+  const edgeM = Math.max(halfL, halfW) + 4;
   let o = 0;
+  let drawn = 0;
   // Tail → head so nearer segments overpaint (painter's).
   for (let si = nSeg - 1; si >= 0; si--) {
     const s = segs[si];
     const ang = s.angle || 0;
     const bank = 0;
-    for (let p = 0; p < panelLocal.length; p++) {
-      const panel = panelLocal[p];
-      const { xy, depth } = projectMesh3D(panel.verts, s.x, s.y, ang, bank, SPRITE_ROOF_LIFT);
-      const uvs = panel.uvs;
-      const verts = panel.verts;
-      for (let pass = 0; pass < 2; pass++) {
-        const idx = pass === 0 ? windFwd : windBack;
-        for (let v = 0; v < idx.length; v++) {
-          const i = idx[v];
-          snakeSegBatchMesh[o++] = xy[i * 2];
-          snakeSegBatchMesh[o++] = xy[i * 2 + 1];
-          snakeSegBatchMesh[o++] = uvs[i][0];
-          snakeSegBatchMesh[o++] = uvs[i][1];
-          snakeSegBatchMesh[o++] = spriteWorldZToClip(depth[i]);
-          snakeSegBatchMesh[o++] = verts[i][0] * invHalfL;
-          snakeSegBatchMesh[o++] = verts[i][1] * invHalfW;
+    snakeEdgeWrapOffsets(s.x, s.y, edgeM, _snakeWrapOff);
+    for (let wi = 0; wi < _snakeWrapOff.length; wi += 2) {
+      if (drawn >= SNAKE_SEG_BATCH_MAX) break;
+      const sx = s.x + _snakeWrapOff[wi];
+      const sy = s.y + _snakeWrapOff[wi + 1];
+      for (let p = 0; p < panelLocal.length; p++) {
+        const panel = panelLocal[p];
+        const { xy, depth } = projectMesh3D(panel.verts, sx, sy, ang, bank, SPRITE_ROOF_LIFT);
+        const uvs = panel.uvs;
+        const verts = panel.verts;
+        for (let pass = 0; pass < 2; pass++) {
+          const idx = pass === 0 ? windFwd : windBack;
+          for (let v = 0; v < idx.length; v++) {
+            const i = idx[v];
+            snakeSegBatchMesh[o++] = xy[i * 2];
+            snakeSegBatchMesh[o++] = xy[i * 2 + 1];
+            snakeSegBatchMesh[o++] = uvs[i][0];
+            snakeSegBatchMesh[o++] = uvs[i][1];
+            snakeSegBatchMesh[o++] = spriteWorldZToClip(depth[i]);
+            snakeSegBatchMesh[o++] = verts[i][0] * invHalfL;
+            snakeSegBatchMesh[o++] = verts[i][1] * invHalfW;
+          }
         }
       }
+      drawn++;
     }
   }
   if (o < 7) return;
@@ -19846,7 +19879,8 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor) {
   gl.disableVertexAttribArray(ssALocal);
 }
 
-/** Snake boss: Craft 274 head (server) + Craft 88 tail (local path trail, batched). */
+/** Snake boss: Craft 274 head (server) + Craft 88 tail (local path trail, batched).
+ *  Head/segs draw wrap twins near edges so the nose doesn't vanish mid-cross. */
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
   updateSnakeSegsToward(e, x, y, angle);
   if (e.snakeSegs && e.snakeSegs.length) {
@@ -19858,10 +19892,16 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
   const headOpt = getShipOptionById(ENEMY_SNAKE_HEAD_SPRITE_ID);
   const bank = enemyBankSmoothed(id, angle, dt);
   if (headOpt && headOpt.kind === 'sprite') {
-    drawSpriteShipPlane(
-      x, y, angle, 0, id, dt, headOpt, true, color,
-      bank, ENEMY_SNAKE_HEAD_SPRITE_SCALE, COL.enemyOutline
-    );
+    const headSpec = headOpt.sprite;
+    const headM = Math.max(1, headSpec.fh, headSpec.fw) * 0.5 * SPRITE_SHIP_PX_SCALE
+      * (ENEMY_SNAKE_HEAD_SPRITE_SCALE > 0 ? ENEMY_SNAKE_HEAD_SPRITE_SCALE : 1) + 4;
+    snakeEdgeWrapOffsets(x, y, headM, _snakeWrapOff);
+    for (let wi = 0; wi < _snakeWrapOff.length; wi += 2) {
+      drawSpriteShipPlane(
+        x + _snakeWrapOff[wi], y + _snakeWrapOff[wi + 1], angle, 0, id, dt, headOpt, true, color,
+        bank, ENEMY_SNAKE_HEAD_SPRITE_SCALE, COL.enemyOutline
+      );
+    }
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
   }

@@ -2715,7 +2715,9 @@ function clampEnemyPlayfield(e) {
 function stepEnemyMovement(e) {
   let dx;
   let dy;
-  if (e.kind === 'snake') {
+  // Snake wrap-chase only after entry — off-screen shortest-wrap aims the wrong way
+  // and flies the head into the void (never crosses into the playfield).
+  if (e.kind === 'snake' && e.enteredPlay) {
     dx = shortestWrapDelta(e.x, e.tx, W);
     dy = shortestWrapDelta(e.y, e.ty, H);
   } else {
