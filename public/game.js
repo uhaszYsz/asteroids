@@ -5260,10 +5260,13 @@ let debrisTexReady = false;
 function clearShipDebris() {
   shipDebris.length = 0;
   enemyCorpses.length = 0;
+  snakeTailCorpses.length = 0;
 }
 
 /** Dead common-enemy hull sprites (no strip debris). */
 const enemyCorpses = [];
+/** Frozen snake tails left behind after the head dies (client-only). */
+const snakeTailCorpses = [];
 const ENEMY_CORPSE_MAX = 24;
 const ENEMY_CORPSE_VALUE = 0.7; // HSV V after grayscale
 /** Approx half-extents of common sprite (enemy_4 is 36×36). */
@@ -5406,6 +5409,40 @@ function drawEnemyCorpses(dt) {
       c.bank, scale, null,
       { noOutline: true, gray: true, valueMul: ENEMY_CORPSE_VALUE, alpha }
     );
+  }
+}
+
+/** Freeze snake body in place when the head dies (client-only visual). */
+function spawnSnakeTailCorpse(e) {
+  if (!e || e.kind !== 'snake' || !e.snakeSegs || !e.snakeSegs.length) return;
+  const segs = [];
+  for (let i = 0; i < e.snakeSegs.length; i++) {
+    const s = e.snakeSegs[i];
+    segs.push({
+      x: +s.x,
+      y: +s.y,
+      angle: +s.angle || 0,
+      scale: snakeSegmentScaleClient(i)
+    });
+  }
+  snakeTailCorpses.push({ segs });
+}
+
+function drawSnakeTailCorpses(dt) {
+  if (!snakeTailCorpses.length) return;
+  const opt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
+  if (!opt || opt.kind !== 'sprite') return;
+  for (let c = 0; c < snakeTailCorpses.length; c++) {
+    const corpse = snakeTailCorpses[c];
+    const segs = corpse.segs;
+    for (let i = segs.length - 1; i >= 0; i--) {
+      const s = segs[i];
+      const sid = -(900000 + c * 256 + i);
+      drawSpriteShipPlane(
+        s.x, s.y, s.angle || 0, 0, sid, dt, opt, false, COL.enemy,
+        0, s.scale > 0 ? s.scale : 0.6, COL.enemyOutline
+      );
+    }
   }
 }
 
@@ -8285,6 +8322,7 @@ function drawSceneLines(dt) {
   drawCoins();
   drawShipDebris();
   drawEnemyCorpses(dt);
+  drawSnakeTailCorpses(dt);
 
   // Local ship (alive, or shaking corpse before boom)
   const drawMe = (player.hp > 0 || dyingId === myId) &&
@@ -18151,6 +18189,7 @@ function removeEnemy(id, x, y, silent) {
   shipSmokeLeaks.delete(enemySmokeLeakId(id));
   const e = enemies.get(id);
   enemies.delete(id);
+  if (e && e.kind === 'snake') spawnSnakeTailCorpse(e);
   if (!silent && e) {
     const pose = enemyAt(e);
     const px = x != null ? x : pose.x;
