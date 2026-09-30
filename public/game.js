@@ -13194,7 +13194,6 @@ function maybeShowFirstHelp() {
     pauseFreezeAt = serverNow();
     rebaseAsteroidsToTime(pauseFreezeAt);
     rebasePickupsToTime(pauseFreezeAt);
-    rebaseEnemiesToTime(pauseFreezeAt);
     player.vx = 0;
     player.vy = 0;
     player.av = 0;
@@ -16362,7 +16361,6 @@ function applyPausedMsg(msg) {
     pauseFreezeAt = serverNow();
     rebaseAsteroidsToTime(pauseFreezeAt);
     rebasePickupsToTime(pauseFreezeAt);
-    rebaseEnemiesToTime(pauseFreezeAt);
     player.vx = 0;
     player.vy = 0;
     player.av = 0;
@@ -17587,23 +17585,6 @@ function rebaseAsteroidsToTime(now) {
   }
 }
 
-/** Lock enemy predict origins to the freeze instant (keeps snake tail from rebuilding). */
-function rebaseEnemiesToTime(now) {
-  for (const e of enemies.values()) {
-    const p = enemyAt(e);
-    e.x = p.x;
-    e.y = p.y;
-    e.spawnX = p.x;
-    e.spawnY = p.y;
-    e.vx = p.vx || 0;
-    e.vy = p.vy || 0;
-    e.angle = p.angle;
-    e.dir = p.angle;
-    e.spawnSt = now;
-    e.travelDist = Math.hypot((e.tx || 0) - p.x, (e.ty || 0) - p.y);
-  }
-}
-
 function replaceAsteroidsFromRows(rows) {
   asteroids.clear();
   asteroidGhosts = [];
@@ -17982,8 +17963,7 @@ function ensureSnakeSegs(e, headX, headY, headAng) {
 /**
  * Record head motion into a path buffer; park each segment at fixed spacing
  * back along that path so the body replays the same route the head took.
- * While the world clock is frozen (player death / pause), leave the tail as-is —
- * head prediction snaps back to the last net pose and must not rebuild the trail.
+ * On player death / pause: do not touch the local trail (keep last pose).
  */
 function updateSnakeSegsToward(e, headX, headY, headAng) {
   if (!e || e.kind !== 'snake') return;
@@ -23653,10 +23633,9 @@ function handleWsMessage(e) {
       const shakeMs = msg.shakeMs != null ? msg.shakeMs : 1000;
       deathSpectating = true;
       deathFreezeAt = serverNow();
-      // Lock asteroid/pickup/enemy clocks to the freeze instant (server also pauses).
+      // Lock asteroid/pickup clocks to the freeze instant (server also pauses).
       rebaseAsteroidsToTime(deathFreezeAt);
       rebasePickupsToTime(deathFreezeAt);
-      rebaseEnemiesToTime(deathFreezeAt);
       player.vx = 0;
       player.vy = 0;
       player.av = 0;
@@ -25729,10 +25708,9 @@ function demoReplayEvent(ev) {
   }
   if (ev.t === 'die') {
     deathSpectating = true;
-    deathFreezeAt = serverNow();
-    rebaseAsteroidsToTime(deathFreezeAt);
-    rebasePickupsToTime(deathFreezeAt);
-    rebaseEnemiesToTime(deathFreezeAt);
+      deathFreezeAt = serverNow();
+      rebaseAsteroidsToTime(deathFreezeAt);
+      rebasePickupsToTime(deathFreezeAt);
     if ((ev.id | 0) === myId) player.hp = 0;
     return;
   }
