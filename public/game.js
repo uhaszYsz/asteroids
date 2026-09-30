@@ -23929,6 +23929,7 @@ function handleWsMessage(e) {
       const slot1Changed = msg.changed !== 2;
       if (msg.w) selectedWeapon = msg.w | 0;
       if (msg.weapon2 !== undefined) equippedWeapon2 = msg.weapon2 || null;
+      if ((activeWeaponSlot | 0) === 2 && !equippedWeapon2) activeWeaponSlot = 1;
       if (msg.levels) {
         weaponLevels = Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, msg.levels);
       } else if (msg.lvl != null && msg.weapon) {
@@ -24099,6 +24100,7 @@ function handleWsMessage(e) {
       if (msg.asteroids) replaceAsteroidsFromRows(msg.asteroids);
       selectedWeapon = msg.w != null ? (msg.w | 0) : 1;
       if (msg.weapon2 !== undefined) equippedWeapon2 = msg.weapon2 || null;
+      if ((activeWeaponSlot | 0) === 2 && !equippedWeapon2) activeWeaponSlot = 1;
       if (msg.levels) {
         weaponLevels = Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, msg.levels);
       }
