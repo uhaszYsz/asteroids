@@ -1718,11 +1718,13 @@ const MAX_COMMON1_ON_FIELD = 2;
 const MAX_COMMON_RAIL_ON_FIELD = 2;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
 const SOLO_BOSS_KINDS = ['worm', 'gunship', 'snake'];
+/** Waves in world 1 before world 2 starts (boss is the last of these). */
+const SOLO_WORLD1_WAVE_COUNT = 6;
 
 /** World-1 boss wave is always worm (first boss). */
 function rollSoloBossPlan() {
   return {
-    6: ['worm']
+    [SOLO_WORLD1_WAVE_COUNT]: ['worm']
   };
 }
 
@@ -1735,8 +1737,19 @@ function ensureSoloBossPlan(room) {
 function isSoloBossWave(wave, world) {
   const n = wave | 0;
   const w = world | 0;
-  // World 1: boss on wave 6. World 2+: no boss yet (extend later).
-  return w <= 1 && n === 6;
+  // World 1: boss on last W1 wave. World 2+: no boss yet (extend later).
+  return w <= 1 && n === SOLO_WORLD1_WAVE_COUNT;
+}
+
+/**
+ * Map absolute admin wave index → { world, wave }.
+ * 1–6 = world 1 waves 1–6; 7 = world 2 wave 1; 8 = world 2 wave 2; …
+ */
+function absoluteWaveToWorldWave(absWave) {
+  const n = Math.max(1, absWave | 0);
+  const w1 = SOLO_WORLD1_WAVE_COUNT;
+  if (n <= w1) return { world: 1, wave: n };
+  return { world: 2, wave: n - w1 };
 }
 
 function soloBossKindsForWave(room, wave) {
@@ -5159,8 +5172,8 @@ function handleAdminGive(ws, itemRaw) {
 }
 
 /**
- * Admin `sv_wave N` — wipe field (asteroids/enemies/bullets) and begin wave N
- * as a normal solo/coop wave start (banner, godmode, center spawn in solo).
+ * Admin `sv_wave N` — wipe field (asteroids/enemies/bullets) and begin wave N.
+ * Absolute index spans worlds: 1–6 = W1, 7 = W2 wave 1, 8 = W2 wave 2, …
  * Pickups are kept across the wave jump.
  */
 function handleAdminWave(ws, waveRaw) {
@@ -5169,8 +5182,9 @@ function handleAdminWave(ws, waveRaw) {
   if (!room || !room.matchLive) return { ok: 0, err: 'not in a live match' };
   if (!room.practice) return { ok: 0, err: 'waves only in solo/coop wave rooms' };
 
-  const wave = Math.max(1, Math.min(9999, waveRaw | 0));
-  if ((waveRaw | 0) < 1) return { ok: 0, err: 'usage: sv_wave <n> (n >= 1)' };
+  if ((waveRaw | 0) < 1) return { ok: 0, err: 'usage: sv_wave <n> (n >= 1; 7 = world 2 wave 1)' };
+  const abs = Math.max(1, Math.min(9999, waveRaw | 0));
+  const mapped = absoluteWaveToWorldWave(abs);
 
   if (room.shopOpen) {
     room.shopOpen = false;
@@ -5183,8 +5197,14 @@ function handleAdminWave(ws, waveRaw) {
   room.deathBoomed = false;
   room.deathVictimId = null;
 
-  beginSoloWave(room, wave, { center: true });
-  return { ok: 1, wave: room.wave | 0 };
+  room.world = mapped.world;
+  beginSoloWave(room, mapped.wave, { center: true });
+  return {
+    ok: 1,
+    wave: room.wave | 0,
+    world: room.world | 0,
+    abs
+  };
 }
 
 function applyTurn(p, l, r, sh) {

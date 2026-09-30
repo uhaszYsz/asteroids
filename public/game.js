@@ -1143,7 +1143,7 @@ const CVARS = {
   sv_wave: {
     value: 0,
     def: 0,
-    help: 'Admin debug: wipe field and start wave N now (solo/coop). e.g. sv_wave 10. Resets to 0.'
+    help: 'Admin: wipe field and jump to absolute wave N (1–6 = W1; 7 = W2-1). Resets to 0.'
   },
   cl_grid: {
     value: 1,
@@ -1243,12 +1243,12 @@ const CVARS = {
   cl_bg: {
     value: 0,
     def: 0,
-    help: 'Impulse: cl_bg = new random space nebula. Optional 0–3 = force strip frame.'
+    help: 'Impulse: cl_bg N forces strip frame 0–3 (or random if N≥4). Solo worlds lock W1=3 / W2=2.'
   },
   cl_bg_auto: {
     value: 0,
     def: 0,
-    help: '1 = pick a new random space nebula each wave. Off by default.'
+    help: 'Ignored in solo — worlds lock fixed strip frames. Elsewhere: 1 = random nebula each wave.'
   },
   cl_grid_alpha: {
     value: 0.3,
@@ -1402,8 +1402,13 @@ function setCvar(name, raw) {
     return true;
   }
   if (name === 'cl_bg') {
-    // Impulse cvar: any non-zero set picks a new random nebula (console can pass a frame).
-    if (n !== 0) rerollNebulaBackground(-1);
+    // Impulse: 1–4 → frames 0–3; other non-zero → random (debug). Solo waves re-lock next banner.
+    if (n !== 0) {
+      const frames = Math.max(1, GRID_NEBULA_FRAMES | 0);
+      if (n >= 1 && n <= frames) rerollNebulaBackground((n | 0) - 1);
+      else if (n >= 0 && n < frames) rerollNebulaBackground(n | 0);
+      else rerollNebulaBackground(-1);
+    }
     c.value = 0;
     return true;
   }
@@ -1463,7 +1468,7 @@ function setCvar(name, raw) {
     const wave = n | 0;
     c.value = 0;
     if (wave < 1) {
-      conPrint('usage: sv_wave <n> (n >= 1)', 'err');
+      conPrint('usage: sv_wave <n> (n >= 1; 7 = world 2 wave 1)', 'err');
       return true;
     }
     if (!consoleAdmin) return false;
@@ -1472,7 +1477,9 @@ function setCvar(name, raw) {
       return true;
     }
     ws.send(JSON.stringify({ t: 'adminWave', n: wave }));
-    conPrint('jump to wave ' + wave, 'info');
+    const w1 = 6;
+    if (wave <= w1) conPrint('jump to world 1 wave ' + wave, 'info');
+    else conPrint('jump to world 2 wave ' + (wave - w1), 'info');
     return true;
   }
   if (name === 'cl_background_bake' || name === 'cl_background_bake_quality') {
@@ -3643,8 +3650,9 @@ function tickNebulaScroll(dt) {
   const img = new Image();
   img.onload = () => {
     gridNebulaStripImg = img;
-    // Default to world-1 lock (last strip frame) until a wave sets soloWorld.
-    const frame = nebulaFrameForWorld(1);
+    const world = pendingNebulaWorld != null ? pendingNebulaWorld : 1;
+    pendingNebulaWorld = null;
+    const frame = nebulaFrameForWorld(world);
     gridNebulaFrame = frame;
     // One native frame — world tile (GRID_NEBULA_TILE) + NEAREST stretch/loop.
     gridNebulaImg = sliceNebulaFrame(img, frame);
@@ -23912,8 +23920,13 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'adminWave') {
-      if (msg.ok) conPrint('started wave ' + (msg.wave | 0), 'info');
-      else conPrint(msg.err || 'sv_wave failed', 'err');
+      if (msg.ok) {
+        const world = Math.max(1, msg.world | 0 || 1);
+        const wave = msg.wave | 0;
+        if (world > 1) soloWorld = world;
+        conPrint('started W' + world + '-' + wave
+          + (msg.abs != null ? (' (abs ' + (msg.abs | 0) + ')') : ''), 'info');
+      } else conPrint(msg.err || 'sv_wave failed', 'err');
       return;
     }
     if (msg.t === 'adminPw') {
