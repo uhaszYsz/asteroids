@@ -17662,10 +17662,10 @@ const ENEMY_UFO_HIT_LEN = 84;
 const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
-/** Gunship (Craft 224) after 270° CW: fw=75, fh=138 — match server OBB × sprite scale. */
+/** Gunship (Worm 184) after 270° CW: fw=39, fh=81 — match server OBB × sprite scale. */
 const ENEMY_GUNSHIP_SPRITE_SCALE = 1;
-const ENEMY_GUNSHIP_HIT_LEN = Math.round(138 * ENEMY_GUNSHIP_SPRITE_SCALE);
-const ENEMY_GUNSHIP_HIT_WID = Math.round((75 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
+const ENEMY_GUNSHIP_HIT_LEN = Math.round(81 * ENEMY_GUNSHIP_SPRITE_SCALE);
+const ENEMY_GUNSHIP_HIT_WID = Math.round((39 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
 const ENEMY_GUNSHIP_HIT_R = Math.hypot(ENEMY_GUNSHIP_HIT_LEN * 0.5, ENEMY_GUNSHIP_HIT_WID * 0.5);
 ENEMY_R.gunship = ENEMY_GUNSHIP_HIT_R;
 /** Worm: oriented hit box — length 4× circle-R; width 70% of both tube planes. */
@@ -18192,8 +18192,8 @@ const ENEMY_COMMON_MESH = (() => {
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_SPRITE_ID = 'enemy_370';
 const ENEMY_UFO_SPRITE_SCALE = 1;
-/** Gunship = Craft 224 (2 roof plates + sprite). */
-const ENEMY_GUNSHIP_SPRITE_ID = 'enemy_224';
+/** Gunship = Worm 184 (2 roof plates + sprite). */
+const ENEMY_GUNSHIP_SPRITE_ID = 'enemy_184';
 /** Medium sheet last cell (row 3, col 2) — flat side mounts at mid-length. */
 const ENEMY_UFO_TURRET_SHEET = 'medium';
 const ENEMY_UFO_TURRET_COL = 2;
@@ -19339,7 +19339,7 @@ function drawGunshipMagnetDust() {
   drawPoints(gunshipMagnetDust, COL_MAGNET_DUST, 0.65);
 }
 
-/** Gunship: craft 224 on default 2 roof plates (same path as commons / UFO body). */
+/** Gunship: Worm 184 on default 2 roof plates (same path as commons / UFO body). */
 function drawEnemyGunship(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_GUNSHIP_SPRITE_ID);

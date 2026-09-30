@@ -344,12 +344,12 @@ const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 /**
- * Gunship (Craft 224) after 270° CW: fw=75, fh=138. Drawn at ENEMY_GUNSHIP_SPRITE_SCALE.
+ * Gunship (Worm 184) after 270° CW: fw=39, fh=81. Drawn at ENEMY_GUNSHIP_SPRITE_SCALE.
  * OBB = full length × one roof-plane width (fw/2), then × sprite scale.
  */
 const ENEMY_GUNSHIP_SPRITE_SCALE = 1;
-const ENEMY_GUNSHIP_HIT_LEN = Math.round(138 * ENEMY_GUNSHIP_SPRITE_SCALE);
-const ENEMY_GUNSHIP_HIT_WID = Math.round((75 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
+const ENEMY_GUNSHIP_HIT_LEN = Math.round(81 * ENEMY_GUNSHIP_SPRITE_SCALE);
+const ENEMY_GUNSHIP_HIT_WID = Math.round((39 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
 const ENEMY_GUNSHIP_HIT_R = Math.hypot(ENEMY_GUNSHIP_HIT_LEN * 0.5, ENEMY_GUNSHIP_HIT_WID * 0.5);
 ENEMY_R.gunship = ENEMY_GUNSHIP_HIT_R;
 /**
