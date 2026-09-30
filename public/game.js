@@ -16697,11 +16697,7 @@ function enemyShotTypeScale(type, length, width) {
     const Ww = width != null && Number.isFinite(+width) ? +width : 15;
     return Math.max(L, Ww) / 15;
   }
-  // Common enemy shots: half base scale; optional length scales vs default tag 15.
-  if (type === 'enemy') {
-    const L = length != null && Number.isFinite(+length) ? +length : 15;
-    return 0.5 * (L / 15);
-  }
+  // Common enemy shots: half base scale.
   return 0.5;
 }
 
@@ -16802,9 +16798,6 @@ function drawBulletVisual(type, x, y, ang, vx, vy, defaultTrail, bulletId, owner
       const L = sizeOpts && sizeOpts.length != null ? +sizeOpts.length : 15;
       const Ww = sizeOpts && sizeOpts.width != null ? +sizeOpts.width : 15;
       scale = Math.max(L, Ww) / 15;
-    } else if (type === 'enemy') {
-      const L = sizeOpts && sizeOpts.length != null ? +sizeOpts.length : 15;
-      scale = 0.5 * (L / 15);
     }
     drawEnemyCommonShot(x, y, ang, scale);
     return null;
@@ -16889,11 +16882,9 @@ function unpackBullet(row) {
     b.homing = row[10] != null ? +row[10] : 0;
     b.hp = row[11] != null ? (row[11] | 0) : 180;
     if (row[12] != null && Number.isFinite(+row[12])) b.flightAng = +row[12];
-  } else if (b.type === 'enemyWorm' || b.type === 'enemy') {
-    if (row[8] != null || b.type === 'enemyWorm') {
-      b.length = row[8] != null ? +row[8] : 15;
-      b.width = row[9] != null ? +row[9] : 15;
-    }
+  } else if (b.type === 'enemyWorm') {
+    b.length = row[8] != null ? +row[8] : 15;
+    b.width = row[9] != null ? +row[9] : 15;
   } else if (
     (b.type === 'default' || b.type === 'voidcannon' || !row[7])
     && row[8] != null && +row[8] > 0

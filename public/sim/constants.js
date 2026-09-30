@@ -136,11 +136,7 @@ function enemyShotTypeScale(type, length, width) {
     const Ww = width != null && Number.isFinite(+width) ? +width : 15;
     return Math.max(L, Ww) / 15;
   }
-  // Common enemy shots: half base scale; optional length scales vs default tag 15.
-  if (type === 'enemy') {
-    const L = length != null && Number.isFinite(+length) ? +length : 15;
-    return 0.5 * (L / 15);
-  }
+  // Common enemy shots: half base scale.
   return 0.5;
 }
 
@@ -385,11 +381,6 @@ const ENEMY_HP = {
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 const ENEMY_SNAKE_GROW_PER_EAT = 7;
-/** Snake tail shots: random trail stamp → player, every 1.5s. */
-const ENEMY_SNAKE_SHOT_INTERVAL = Math.round(1.5 * TPS);
-const ENEMY_SNAKE_SHOT_SPEED = 4;
-/** length tag 15 = common scale; 18 = +20%. */
-const ENEMY_SNAKE_SHOT_LENGTH = Math.round(15 * 1.2);
 /** Snake field event: drip smalls / mediums while the boss lives. */
 const SNAKE_FIELD_SMALL_INTERVAL = Math.round(2 * TPS);
 const SNAKE_FIELD_MEDIUM_INTERVAL = Math.round(5 * TPS);
