@@ -17662,11 +17662,10 @@ const ENEMY_UFO_HIT_LEN = 84;
 const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
-/** Gunship (Worm 184) after 270° CW: fw=39, fh=81 — match server OBB × sprite scale.
- *  3.4 ≈ 2× old Craft 224 length (this PNG is much smaller than 224). */
-const ENEMY_GUNSHIP_SPRITE_SCALE = 3.4;
-const ENEMY_GUNSHIP_HIT_LEN = Math.round(81 * ENEMY_GUNSHIP_SPRITE_SCALE);
-const ENEMY_GUNSHIP_HIT_WID = Math.round((39 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
+/** Gunship (Craft 378) after 270° CW: fw=57, fh=72 — match server OBB × sprite scale. */
+const ENEMY_GUNSHIP_SPRITE_SCALE = 2;
+const ENEMY_GUNSHIP_HIT_LEN = Math.round(72 * ENEMY_GUNSHIP_SPRITE_SCALE);
+const ENEMY_GUNSHIP_HIT_WID = Math.round((57 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
 const ENEMY_GUNSHIP_HIT_R = Math.hypot(ENEMY_GUNSHIP_HIT_LEN * 0.5, ENEMY_GUNSHIP_HIT_WID * 0.5);
 ENEMY_R.gunship = ENEMY_GUNSHIP_HIT_R;
 /** Worm: oriented hit box — length 4× circle-R; width 70% of both tube planes. */
@@ -18193,8 +18192,8 @@ const ENEMY_COMMON_MESH = (() => {
 const ENEMY_UFO_SCALE = 1.05;
 const ENEMY_UFO_SPRITE_ID = 'enemy_370';
 const ENEMY_UFO_SPRITE_SCALE = 1;
-/** Gunship = Worm 184 (2 roof plates + sprite). */
-const ENEMY_GUNSHIP_SPRITE_ID = 'enemy_184';
+/** Gunship = Craft 378 (2 roof plates + sprite). */
+const ENEMY_GUNSHIP_SPRITE_ID = 'enemy_378';
 /** Medium sheet last cell (row 3, col 2) — flat side mounts at mid-length. */
 const ENEMY_UFO_TURRET_SHEET = 'medium';
 const ENEMY_UFO_TURRET_COL = 2;
@@ -19340,7 +19339,7 @@ function drawGunshipMagnetDust() {
   drawPoints(gunshipMagnetDust, COL_MAGNET_DUST, 0.65);
 }
 
-/** Gunship: Worm 184 on default 2 roof plates (same path as commons / UFO body). */
+/** Gunship: Craft 378 on default 2 roof plates (same path as commons / UFO body). */
 function drawEnemyGunship(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_GUNSHIP_SPRITE_ID);
