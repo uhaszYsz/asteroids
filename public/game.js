@@ -17663,7 +17663,7 @@ const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
 /** Gunship (Craft 224) after 270° CW: fw=75, fh=138 — match server OBB × sprite scale. */
-const ENEMY_GUNSHIP_SPRITE_SCALE = 0.85;
+const ENEMY_GUNSHIP_SPRITE_SCALE = 1;
 const ENEMY_GUNSHIP_HIT_LEN = Math.round(138 * ENEMY_GUNSHIP_SPRITE_SCALE);
 const ENEMY_GUNSHIP_HIT_WID = Math.round((75 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
 const ENEMY_GUNSHIP_HIT_R = Math.hypot(ENEMY_GUNSHIP_HIT_LEN * 0.5, ENEMY_GUNSHIP_HIT_WID * 0.5);
@@ -18137,9 +18137,9 @@ function pickForwardGunLocals(mesh) {
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
-/** common1 = Craft 10, scaled down 35%. */
+/** common1 = Craft 10. */
 const ENEMY_COMMON1_SPRITE_ID = 'enemy_10';
-const ENEMY_COMMON1_SPRITE_SCALE = 0.65;
+const ENEMY_COMMON1_SPRITE_SCALE = 1;
 /** Craft 10 base half-extents (fh×fw / 2) before scale. */
 const ENEMY_COMMON1_HALF_L0 = 62 * 0.5;
 const ENEMY_COMMON1_HALF_W0 = 67 * 0.5;
