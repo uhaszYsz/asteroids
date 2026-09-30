@@ -3063,19 +3063,12 @@ function fireEnemyVoidStream(room, e, ang) {
   e.angle = ang;
 }
 
-/** commonRail: continuous player-style laser (½ dmg), asteroids block only. */
-function updateCommonRailLaserWeapon(room, e, target) {
+/** commonRail: dump laser along current facing (no auto-aim). Asteroids block only. */
+function updateCommonRailLaserWeapon(room, e) {
   if ((e.shootCd | 0) > 0) e.shootCd--;
   if ((e.reloadLeft | 0) > 0) {
     e.reloadLeft--;
     if (e.reloadLeft === 0) e.shootAmmo = ENEMY_COMMON_LASER.ammo;
-    e.bursting = false;
-    return;
-  }
-  if (!target) return;
-  const los = enemyHasLosToPlayer(room, e, target);
-  if (!los) {
-    // Drop mid-burst if LOS breaks (ammo already spent stays spent).
     e.bursting = false;
     return;
   }
@@ -3086,7 +3079,8 @@ function updateCommonRailLaserWeapon(room, e, target) {
   }
   if ((e.shootCd | 0) > 0) return;
   e.bursting = true;
-  const ang = Math.atan2(target.y - e.y, target.x - e.x);
+  const ang = Number.isFinite(e.angle) ? e.angle
+    : (Number.isFinite(e.dir) ? e.dir : 0);
   fireEnemyLaserBeam(room, e, ang, {
     range: ENEMY_COMMON_LASER.range,
     dmg: ENEMY_COMMON_LASER.dmg,
@@ -3380,7 +3374,7 @@ function enemyTryFire(room, e) {
   }
 
   if (e.kind === 'commonRail') {
-    updateCommonRailLaserWeapon(room, e, target);
+    updateCommonRailLaserWeapon(room, e);
     return;
   }
 
@@ -3524,22 +3518,26 @@ function stepEnemyMovement(e) {
   }
 
   const carrierLocked = e.kind === 'carrier' && (e.bursting || (e.railChargeLeft | 0) > 0);
+  // Hold facing while dumping laser — no chase-turn auto-aim mid-burst.
+  const laserLocked = e.kind === 'commonRail' && !!e.bursting;
+  const aimLocked = carrierLocked || laserLocked;
 
   if (enemyMoveType(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
     if (e.dir == null || !Number.isFinite(e.dir)) e.dir = e.angle || 0;
-    e.dir = turnAngleToward(e.dir, desired, enemyTurnMax(e));
+    if (!aimLocked) e.dir = turnAngleToward(e.dir, desired, enemyTurnMax(e));
     e.vx = Math.cos(e.dir) * enemySpeed(e);
     e.vy = Math.sin(e.dir) * enemySpeed(e);
     e.x += e.vx;
     e.y += e.vy;
-    if (!carrierLocked) e.angle = e.dir;
+    if (!aimLocked) e.angle = e.dir;
   } else {
-    if (!carrierLocked) {
+    if (!aimLocked) {
       e.angle = desired;
       e.dir = desired;
     }
-    e.vx = Math.cos(desired) * enemySpeed(e);
-    e.vy = Math.sin(desired) * enemySpeed(e);
+    const fly = Number.isFinite(e.dir) ? e.dir : (e.angle || 0);
+    e.vx = Math.cos(fly) * enemySpeed(e);
+    e.vy = Math.sin(fly) * enemySpeed(e);
     e.x += e.vx;
     e.y += e.vy;
   }
