@@ -18170,6 +18170,10 @@ function applyEnemyUpdate(row) {
     e.snakeTrail = prev.snakeTrail;
     e.snakeTrailLen = prev.snakeTrailLen;
   }
+  if (prev && prev.snakePulseWaves) {
+    e.snakePulseWaves = prev.snakePulseWaves;
+    e.snakePulseNext = prev.snakePulseNext;
+  }
   rebaseEnemyPredictOrigin(e);
   enemies.set(id, e);
 }
@@ -18437,9 +18441,47 @@ const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
+/** Tail pulse: impulse every 0.5s, hops seg→seg every 0.15s, each does one 0.6s grow cycle. */
+const SNAKE_PULSE_INTERVAL_MS = 500;
+const SNAKE_PULSE_HOP_MS = 150;
+const SNAKE_PULSE_CYCLE_MS = 600;
+const SNAKE_SEG_SCALE_BASE = 0.6;
+const SNAKE_SEG_SCALE_PEAK = 1;
 
 function snakeSegmentScaleClient(index0) {
-  return 0.6;
+  return SNAKE_SEG_SCALE_BASE;
+}
+
+/** Queue pulse waves on the local snake (visual only). */
+function tickSnakePulseWaves(e, now) {
+  if (!e) return;
+  if (!e.snakePulseWaves) e.snakePulseWaves = [];
+  if (e.snakePulseNext == null) e.snakePulseNext = now;
+  let guard = 0;
+  while (now >= e.snakePulseNext && guard++ < 8) {
+    e.snakePulseWaves.push(e.snakePulseNext);
+    e.snakePulseNext += SNAKE_PULSE_INTERVAL_MS;
+  }
+  const maxLife = ENEMY_SNAKE_SEGMENTS * SNAKE_PULSE_HOP_MS + SNAKE_PULSE_CYCLE_MS + 50;
+  while (e.snakePulseWaves.length && now - e.snakePulseWaves[0] > maxLife) {
+    e.snakePulseWaves.shift();
+  }
+}
+
+/** Base 0.6 → peak 1 → 0.6 over one CYCLE after this seg's hop time. */
+function snakeSegmentPulseScale(e, index0, now) {
+  const base = SNAKE_SEG_SCALE_BASE;
+  const waves = e && e.snakePulseWaves;
+  if (!waves || !waves.length) return base;
+  let best = base;
+  for (let i = 0; i < waves.length; i++) {
+    const t = now - (waves[i] + index0 * SNAKE_PULSE_HOP_MS);
+    if (t < 0 || t >= SNAKE_PULSE_CYCLE_MS) continue;
+    const amp = Math.sin(Math.PI * (t / SNAKE_PULSE_CYCLE_MS));
+    const s = base + (SNAKE_SEG_SCALE_PEAK - base) * amp;
+    if (s > best) best = s;
+  }
+  return best;
 }
 /** common1 = Craft 10. */
 const ENEMY_COMMON1_SPRITE_ID = 'enemy_10';
@@ -19766,53 +19808,58 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor, opts) {
 
   const tint = color || COL.enemy;
   const outlineTint = outlineColor || COL.enemyOutline || tint;
-  const scale = 0.6;
-  const sc = SPRITE_SHIP_PX_SCALE * scale;
-  const halfL = Math.max(1, spec.fh) * 0.5 * sc;
-  const halfW = Math.max(1, spec.fw) * 0.5 * sc;
   const pitch = SPRITE_ROOF_PITCH;
-  const wingY = halfW * Math.cos(pitch);
-  const drop = halfW * Math.sin(pitch);
-  const invHalfL = 1 / Math.max(1e-3, halfL);
-  const invHalfW = 1 / Math.max(1e-3, halfW);
   const allowTwins = !opts || opts.wrapTwins !== false;
+  const baseHalfL = Math.max(1, spec.fh) * 0.5 * SPRITE_SHIP_PX_SCALE;
+  const baseHalfW = Math.max(1, spec.fw) * 0.5 * SPRITE_SHIP_PX_SCALE;
 
   const state = tinyShipDesiredState(spec, true, false);
   const uv = tinyShipFrameUV(spec, entry.w, entry.h, state, performance.now() * 0.001);
   const uMid = (uv.u0 + uv.u1) * 0.5;
   const uvsL = [[uMid, uv.v0], [uv.u0, uv.v0], [uv.u0, uv.v1], [uMid, uv.v1]];
   const uvsR = [[uMid, uv.v0], [uv.u1, uv.v0], [uv.u1, uv.v1], [uMid, uv.v1]];
-  const panelLocal = [
-    {
-      verts: [
-        [halfL, 0, 0],
-        [halfL, -wingY, -drop],
-        [-halfL, -wingY, -drop],
-        [-halfL, 0, 0]
-      ],
-      uvs: uvsL
-    },
-    {
-      verts: [
-        [halfL, 0, 0],
-        [halfL, wingY, -drop],
-        [-halfL, wingY, -drop],
-        [-halfL, 0, 0]
-      ],
-      uvs: uvsR
-    }
-  ];
   const windFwd = [0, 1, 2, 0, 2, 3];
   const windBack = [0, 2, 1, 0, 3, 2];
   const nSeg = Math.min(segs.length, SNAKE_SEG_BATCH_MAX);
-  const edgeM = Math.max(halfL, halfW) + 4;
   let o = 0;
   let drawn = 0;
+  let tipHalfL = baseHalfL * SNAKE_SEG_SCALE_BASE;
+  let tipHalfW = baseHalfW * SNAKE_SEG_SCALE_BASE;
   // Tail → head so nearer segments overpaint (painter's).
   for (let si = nSeg - 1; si >= 0; si--) {
     const s = segs[si];
     const ang = s.angle || 0;
     const bank = 0;
+    const scale = s.scale > 0 ? s.scale : SNAKE_SEG_SCALE_BASE;
+    const halfL = baseHalfL * scale;
+    const halfW = baseHalfW * scale;
+    tipHalfL = halfL;
+    tipHalfW = halfW;
+    const wingY = halfW * Math.cos(pitch);
+    const drop = halfW * Math.sin(pitch);
+    const invHalfL = 1 / Math.max(1e-3, halfL);
+    const invHalfW = 1 / Math.max(1e-3, halfW);
+    const panelLocal = [
+      {
+        verts: [
+          [halfL, 0, 0],
+          [halfL, -wingY, -drop],
+          [-halfL, -wingY, -drop],
+          [-halfL, 0, 0]
+        ],
+        uvs: uvsL
+      },
+      {
+        verts: [
+          [halfL, 0, 0],
+          [halfL, wingY, -drop],
+          [-halfL, wingY, -drop],
+          [-halfL, 0, 0]
+        ],
+        uvs: uvsR
+      }
+    ];
+    const edgeM = Math.max(halfL, halfW) + 4;
     if (allowTwins) snakeEdgeWrapOffsets(s.x, s.y, edgeM, _snakeWrapOff);
     else {
       _snakeWrapOff.length = 0;
@@ -19863,7 +19910,7 @@ function drawSnakeSegmentsBatched(segs, color, outlineColor, opts) {
   gl.uniform1f(ssUTintPow, 0);
   gl.uniform1f(ssUEmit, Math.max(0, Number(cv('cl_ship_emit')) || 0));
   bindSpriteDeadLook(false, 1);
-  bindSpriteTipHeat(0, halfL, halfW);
+  bindSpriteTipHeat(0, tipHalfL, tipHalfW);
   if (ssUHitAge) gl.uniform1f(ssUHitAge, 1);
   bindSpriteColorRemap(null, null, 0);
   gl.activeTexture(gl.TEXTURE0);
@@ -19906,8 +19953,10 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
   updateSnakeSegsToward(e, x, y, angle);
   const wrapTwins = !!e.enteredPlay;
   if (e.snakeSegs && e.snakeSegs.length) {
+    const now = performance.now();
+    tickSnakePulseWaves(e, now);
     for (let i = 0; i < e.snakeSegs.length; i++) {
-      e.snakeSegs[i].scale = snakeSegmentScaleClient(i);
+      e.snakeSegs[i].scale = snakeSegmentPulseScale(e, i, now);
     }
     drawSnakeSegmentsBatched(e.snakeSegs, color || COL.enemy, COL.enemyOutline, { wrapTwins });
   }
