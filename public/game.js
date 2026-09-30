@@ -18486,8 +18486,9 @@ const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
-/** Hit pulse: hops both ways from hit chain index every 0.035s; each seg one 0.6s grow cycle. */
+/** Hit pulse: hops both ways every 0.035s, advancing 2 segs per hop (both pulse); each does 0.25s grow 0.6→1. */
 const SNAKE_PULSE_HOP_MS = 35;
+const SNAKE_PULSE_HOP_SEGS = 2;
 const SNAKE_PULSE_CYCLE_MS = 250;
 const SNAKE_PULSE_HIT_DEBOUNCE_MS = 100;
 const SNAKE_SEG_SCALE_BASE = 0.6;
@@ -18504,7 +18505,8 @@ function snakeChainLen(e) {
 /** Drop finished hit waves (visual only). */
 function pruneSnakePulseWaves(e, now) {
   if (!e || !e.snakePulseWaves || !e.snakePulseWaves.length) return;
-  const maxLife = snakeChainLen(e) * SNAKE_PULSE_HOP_MS + SNAKE_PULSE_CYCLE_MS + 50;
+  const hopSteps = Math.ceil(snakeChainLen(e) / SNAKE_PULSE_HOP_SEGS);
+  const maxLife = hopSteps * SNAKE_PULSE_HOP_MS + SNAKE_PULSE_CYCLE_MS + 50;
   while (e.snakePulseWaves.length && now - e.snakePulseWaves[0].start > maxLife) {
     e.snakePulseWaves.shift();
   }
@@ -18574,15 +18576,16 @@ function trySnakeHitPulseAt(x, y, hitR) {
   }
 }
 
-/** Base 0.6 → peak → 0.6; hops outward both ways from wave.originIdx. */
+/** Base 0.6 → peak → 0.6; hops outward both ways, 2 segs per hop (pair shares delay). */
 function snakeSegmentPulseScale(e, chainIdx, now) {
   const base = SNAKE_SEG_SCALE_BASE;
   const waves = e && e.snakePulseWaves;
   if (!waves || !waves.length) return base;
   let best = base;
   for (let i = 0; i < waves.length; i++) {
-    const hops = Math.abs(chainIdx - (waves[i].originIdx | 0));
-    const t = now - (waves[i].start + hops * SNAKE_PULSE_HOP_MS);
+    const dist = Math.abs(chainIdx - (waves[i].originIdx | 0));
+    const hopSteps = dist === 0 ? 0 : Math.ceil(dist / SNAKE_PULSE_HOP_SEGS);
+    const t = now - (waves[i].start + hopSteps * SNAKE_PULSE_HOP_MS);
     if (t < 0 || t >= SNAKE_PULSE_CYCLE_MS) continue;
     const amp = Math.sin(Math.PI * (t / SNAKE_PULSE_CYCLE_MS));
     const s = base + (SNAKE_SEG_SCALE_PEAK - base) * amp;
