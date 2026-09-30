@@ -18283,7 +18283,7 @@ const ENEMY_SNAKE_SEGMENTS = 15;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 
 function snakeSegmentScaleClient(index0) {
-  return ((index0 + 1) % 3 === 0) ? 0.6 : 0.3;
+  return 0.6;
 }
 /** common1 = Craft 10. */
 const ENEMY_COMMON1_SPRITE_ID = 'enemy_10';

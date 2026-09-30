@@ -1330,14 +1330,14 @@ function packSnakeSegs(e) {
   const out = [];
   for (let i = 0; i < e.snakeSegs.length; i++) {
     const s = e.snakeSegs[i];
-    out.push(+s.x, +s.y, +s.angle || 0, +s.scale || 0.3);
+    out.push(+s.x, +s.y, +s.angle || 0, +s.scale || 0.6);
   }
   return out;
 }
 
-/** Every 3rd segment (1-based 3,6,9…) is 0.6; others 0.3. */
+/** All segments scale 0.6. */
 function snakeSegmentScale(index0) {
-  return ((index0 + 1) % 3 === 0) ? 0.6 : 0.3;
+  return 0.6;
 }
 
 function initSnakeSegments(e) {
