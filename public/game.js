@@ -17977,10 +17977,10 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
   }
 
   const last = trail[trail.length - 1];
-  const dx = headX - last.x;
-  const dy = headY - last.y;
+  const dx = shortestWrapDelta(last.x, headX, W);
+  const dy = shortestWrapDelta(last.y, headY, H);
   const step = Math.hypot(dx, dy);
-  // Teleport / hard snap — rebuild trail behind new head.
+  // Teleport / hard snap — rebuild trail behind new head (not edge wrap).
   if (step > gap * 4) {
     const ang = headAng != null && Number.isFinite(headAng)
       ? headAng
@@ -17991,8 +17991,8 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
     for (let i = 0; i < e.snakeSegs.length; i++) {
       const d = gap * (i + 1);
       const s = e.snakeSegs[i];
-      s.x = headX + Math.cos(back) * d;
-      s.y = headY + Math.sin(back) * d;
+      s.x = wrapCoord(headX + Math.cos(back) * d, W);
+      s.y = wrapCoord(headY + Math.sin(back) * d, H);
       s.angle = ang;
       s.scale = snakeSegmentScaleClient(i);
     }
@@ -18023,11 +18023,11 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
       if (target <= b.dist && target >= a.dist) {
         const span = b.dist - a.dist;
         const u = span > 1e-6 ? (target - a.dist) / span : 0;
-        s.x = a.x + (b.x - a.x) * u;
-        s.y = a.y + (b.y - a.y) * u;
-        const tx = b.x - a.x;
-        const ty = b.y - a.y;
-        if (Math.hypot(tx, ty) > 1e-6) s.angle = Math.atan2(ty, tx);
+        const wdx = shortestWrapDelta(a.x, b.x, W);
+        const wdy = shortestWrapDelta(a.y, b.y, H);
+        s.x = wrapCoord(a.x + wdx * u, W);
+        s.y = wrapCoord(a.y + wdy * u, H);
+        if (Math.hypot(wdx, wdy) > 1e-6) s.angle = Math.atan2(wdy, wdx);
         placed = true;
         break;
       }
@@ -18038,9 +18038,9 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
       s.y = a.y;
       if (trail.length > 1) {
         const b = trail[1];
-        const tx = b.x - a.x;
-        const ty = b.y - a.y;
-        if (Math.hypot(tx, ty) > 1e-6) s.angle = Math.atan2(ty, tx);
+        const wdx = shortestWrapDelta(a.x, b.x, W);
+        const wdy = shortestWrapDelta(a.y, b.y, H);
+        if (Math.hypot(wdx, wdy) > 1e-6) s.angle = Math.atan2(wdy, wdx);
       } else if (headAng != null && Number.isFinite(headAng)) {
         s.angle = headAng;
       }
@@ -18239,8 +18239,15 @@ function enemyAgeTicks(e) {
  *  opts.noArriveSnap: match server stepEnemyMovement — no teleport onto tx/ty.
  *  opts.noStop: keep flying at speed even inside arrive radius (common1). */
 function stepEnemyDestinationSmoothLocal(state, opts) {
-  const dx = state.tx - state.x;
-  const dy = state.ty - state.y;
+  let dx;
+  let dy;
+  if (state.kind === 'snake') {
+    dx = shortestWrapDelta(state.x, state.tx, W);
+    dy = shortestWrapDelta(state.y, state.ty, H);
+  } else {
+    dx = state.tx - state.x;
+    dy = state.ty - state.y;
+  }
   const dist = Math.hypot(dx, dy);
   const noStop = !!(opts && opts.noStop);
   if (dist <= ENEMY_ARRIVE_R && !noStop) {
@@ -18262,7 +18269,15 @@ function stepEnemyDestinationSmoothLocal(state, opts) {
   state.x += state.vx;
   state.y += state.vy;
   state.angle = state.dir;
-  if (state.enteredPlay) {
+  if (state.kind === 'snake') {
+    if (state.x < 0) state.x += W;
+    if (state.x > W) state.x -= W;
+    if (state.y < 0) state.y += H;
+    if (state.y > H) state.y -= H;
+    if (!state.enteredPlay && state.x >= 8 && state.x <= W - 8 && state.y >= 8 && state.y <= H - 8) {
+      state.enteredPlay = true;
+    }
+  } else if (state.enteredPlay) {
     if (state.x < 8) state.x = 8;
     if (state.x > W - 8) state.x = W - 8;
     if (state.y < 8) state.y = 8;

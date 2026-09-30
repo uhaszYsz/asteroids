@@ -1311,7 +1311,8 @@ function makeEnemy(kind, wave, weapon) {
   return e;
 }
 
-/** Stamp head pose every FOLLOW_DIST of travel; keep last SEGMENTS stamps (tail colliders). */
+/** Stamp head pose every FOLLOW_DIST of travel; keep last SEGMENTS stamps (tail colliders).
+ *  Uses wrap-shortest distance so edge crossings don't wipe the trail. */
 function updateSnakeTrail(e) {
   if (!e || e.kind !== 'snake') return;
   if (!e.snakeTrail) e.snakeTrail = [];
@@ -1322,8 +1323,8 @@ function updateSnakeTrail(e) {
     return;
   }
   const last = e.snakeTrail[e.snakeTrail.length - 1];
-  const dx = e.x - last.x;
-  const dy = e.y - last.y;
+  const dx = shortestWrapDelta(last.x, e.x, W);
+  const dy = shortestWrapDelta(last.y, e.y, H);
   const dist = Math.hypot(dx, dy);
   if (dist < gap) return;
   const inv = 1 / dist;
@@ -1333,7 +1334,13 @@ function updateSnakeTrail(e) {
   while (rem >= gap) {
     px += dx * inv * gap;
     py += dy * inv * gap;
-    e.snakeTrail.push({ x: px, y: py });
+    let sx = px;
+    let sy = py;
+    while (sx < 0) sx += W;
+    while (sx > W) sx -= W;
+    while (sy < 0) sy += H;
+    while (sy > H) sy -= H;
+    e.snakeTrail.push({ x: sx, y: sy });
     rem -= gap;
     while (e.snakeTrail.length > maxN) e.snakeTrail.shift();
   }
@@ -2693,6 +2700,11 @@ function clampEnemyPlayfield(e) {
     }
     return;
   }
+  // Snake wraps through edges; other enemies stay in-bounds.
+  if (e.kind === 'snake') {
+    wrap(e);
+    return;
+  }
   if (e.x < 8) e.x = 8;
   if (e.x > W - 8) e.x = W - 8;
   if (e.y < 8) e.y = 8;
@@ -2701,8 +2713,15 @@ function clampEnemyPlayfield(e) {
 
 /** One sim tick of movement. Returns true if arrived at wander target. */
 function stepEnemyMovement(e) {
-  const dx = e.tx - e.x;
-  const dy = e.ty - e.y;
+  let dx;
+  let dy;
+  if (e.kind === 'snake') {
+    dx = shortestWrapDelta(e.x, e.tx, W);
+    dy = shortestWrapDelta(e.y, e.ty, H);
+  } else {
+    dx = e.tx - e.x;
+    dy = e.ty - e.y;
+  }
   const dist = Math.hypot(dx, dy);
   // common1 / snake never stop — keep flying even when overlapping the chase point.
   const chaseNoStop = e.kind === 'common1' || e.kind === 'snake';
