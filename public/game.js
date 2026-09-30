@@ -17609,6 +17609,27 @@ function rebaseAsteroidsToTime(now) {
   }
 }
 
+/**
+ * Call while deathFreezeAt is still set so enemyAt uses the freeze clock.
+ * Locks snake head predict to the frozen pose without touching snakeSegs/trail.
+ */
+function rebaseSnakesToTime(now) {
+  for (const e of enemies.values()) {
+    if (!e || e.kind !== 'snake') continue;
+    const p = enemyAt(e);
+    e.x = p.x;
+    e.y = p.y;
+    e.spawnX = p.x;
+    e.spawnY = p.y;
+    e.vx = p.vx || 0;
+    e.vy = p.vy || 0;
+    e.angle = p.angle;
+    e.dir = p.angle;
+    e.spawnSt = now;
+    e.travelDist = Math.hypot((e.tx || 0) - p.x, (e.ty || 0) - p.y);
+  }
+}
+
 function replaceAsteroidsFromRows(rows) {
   asteroids.clear();
   asteroidGhosts = [];
@@ -23805,6 +23826,8 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'round' && inGame) {
+      // Unfreeze without a predict time-jump — keep local snake trail intact.
+      if (deathFreezeAt) rebaseSnakesToTime(serverNow());
       deathSpectating = false;
       deathSeq = null;
       deathFreezeAt = 0;
@@ -25789,6 +25812,7 @@ function demoReplayEvent(ev) {
     return;
   }
   if (ev.t === 'round' || ev.t === 'go') {
+    if (deathFreezeAt) rebaseSnakesToTime(serverNow());
     deathSpectating = false;
     deathSeq = null;
     deathFreezeAt = 0;
