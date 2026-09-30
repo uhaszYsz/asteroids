@@ -2979,6 +2979,31 @@ function playerGunshipHit(p, e) {
   return null;
 }
 
+/** Circle vs circle (toroidal) → { cir, nx, ny, overlap } for applyShipCrash. */
+function circleHitsEnemyCircleInfo(cir, ex, ey, er) {
+  if (!cir) return null;
+  let dx = cir.x - ex;
+  let dy = cir.y - ey;
+  ({ dx, dy } = wrapDelta(dx, dy));
+  const dist = Math.hypot(dx, dy);
+  const sum = (cir.r || 0) + (er || 0);
+  if (dist >= sum) return null;
+  if (dist < 1e-6) return { cir, nx: 1, ny: 0, overlap: sum };
+  return { cir, nx: dx / dist, ny: dy / dist, overlap: sum - dist };
+}
+
+/** First ship hit-circle overlapping snake head or path-stamp, or null. */
+function playerSnakeHit(p, e) {
+  if (!p || !e || e.kind !== 'snake' || (e.hp | 0) <= 0) return null;
+  for (const cir of playerHitCircles(p)) {
+    for (const ec of enemyHitCircles(e)) {
+      const hit = circleHitsEnemyCircleInfo(cir, ec.x, ec.y, ec.r);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
 /** Ray vs oriented rect; returns distance t along ray or null. */
 function raycastOrientedRect(ox, oy, dx, dy, cx, cy, angle, hl, hw, maxDist) {
   const c = Math.cos(angle || 0);
@@ -5271,6 +5296,20 @@ function hitPlayerGunship(room, p, e, hit) {
   notifyShipHit(room, p);
 }
 
+/** Snake body/head — same applyShipCrash path as asteroids. */
+function hitPlayerSnake(room, p, e, hit) {
+  hit = hit || playerSnakeHit(p, e);
+  if (!hit) return;
+  if (p.godLeft > 0) return;
+  if (p.bot && !(room && room.perfTest)) return;
+  if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) return;
+  const dmg = asteroidCollideDamage(p, e, 0.5);
+  applyShipCrash(room, p, hit.nx, hit.ny, hit.overlap, dmg, 0.5);
+  separatePlayerFromSnakes(p, room, 8);
+  if (room && room.campaign) clearCampaignJump(p, room);
+  notifyShipHit(room, p);
+}
+
 /** Position-only eject from overlapping gunships (iframe / post-hit). */
 function separatePlayerFromGunships(p, room, maxIters) {
   if (!room || !room.practice || !room.enemies || !p) return;
@@ -5282,6 +5321,32 @@ function separatePlayerFromGunships(p, room, maxIters) {
       if (!e || e.kind !== 'gunship' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
       if (!gunshipPlayerCollideActive(e)) continue;
       const hit = playerGunshipHit(p, e);
+      if (!hit) continue;
+      const pad = 2;
+      p.x += hit.nx * (hit.overlap + pad);
+      p.y += hit.ny * (hit.overlap + pad);
+      wrap(p);
+      const vn = p.vx * hit.nx + p.vy * hit.ny;
+      if (vn < 0) {
+        p.vx -= vn * hit.nx;
+        p.vy -= vn * hit.ny;
+      }
+      moved = true;
+    }
+    if (!moved) break;
+  }
+}
+
+/** Position-only eject from overlapping snake head/stamps (iframe / post-hit). */
+function separatePlayerFromSnakes(p, room, maxIters) {
+  if (!room || !room.practice || !room.enemies || !p) return;
+  const iters = maxIters == null ? 6 : maxIters;
+  for (let n = 0; n < iters; n++) {
+    let moved = false;
+    for (let i = 0; i < room.enemies.length; i++) {
+      const e = room.enemies[i];
+      if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
+      const hit = playerSnakeHit(p, e);
       if (!hit) continue;
       const pad = 2;
       p.x += hit.nx * (hit.overlap + pad);
@@ -5335,6 +5400,7 @@ function resolvePlayerAsteroidCollisions(room) {
     if (p.collideCd > 0) {
       separatePlayerFromAsteroids(p, room, 4);
       separatePlayerFromGunships(p, room, 4);
+      separatePlayerFromSnakes(p, room, 4);
       continue;
     }
     forEachAsteroidNear(room, p.x, p.y, PLAYER_AST_QUERY_R, (a) => {
@@ -5360,6 +5426,23 @@ function resolvePlayerGunshipCollisions(room) {
       const hit = playerGunshipHit(p, e);
       if (!hit) continue;
       hitPlayerGunship(room, p, e, hit);
+      break;
+    }
+  }
+}
+
+/** Player hull vs snake head + path stamps — same applyShipCrash as asteroids. */
+function resolvePlayerSnakeCollisions(room) {
+  if (!room || !room.practice || !room.enemies || !room.enemies.length) return;
+  for (const p of room.players.values()) {
+    if (p.hp <= 0 || p.godLeft > 0) continue;
+    if (p.collideCd > 0) continue;
+    for (let i = 0; i < room.enemies.length; i++) {
+      const e = room.enemies[i];
+      if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
+      const hit = playerSnakeHit(p, e);
+      if (!hit) continue;
+      hitPlayerSnake(room, p, e, hit);
       break;
     }
   }

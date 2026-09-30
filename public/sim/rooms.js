@@ -839,6 +839,7 @@ function stepRoom(room) {
   resolvePlayerShotEnemyHits(room);
   resolvePlayerAsteroidCollisions(room);
   resolvePlayerGunshipCollisions(room);
+  resolvePlayerSnakeCollisions(room);
   resolvePlayerPlayerCollisions(room);
   tickSoloWaves(room);
   tickCampaignStageClearJump(room);

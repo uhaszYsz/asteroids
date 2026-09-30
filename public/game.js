@@ -21048,7 +21048,7 @@ function hitPlayerShipLocal(p, other, hit) {
   emitPlayerAsteroidHit(cir.x, cir.y);
 }
 
-/** Local-only asteroid contact FX (shake/sfx). No stun / bounce / HP — server owns those. */
+/** Local-only asteroid / snake contact FX (shake/sfx). No stun / bounce / HP — server owns those. */
 function predictLocalAsteroidHitFx(p) {
   if (!p || p.hp <= 0 || p.godLeft > 0) return;
   if (p.collideCd > 0) return;
@@ -21075,6 +21075,31 @@ function predictLocalAsteroidHitFx(p) {
       p.collideCd = COLLIDE_IFRAME_TICKS;
       emitPlayerAsteroidHit(cir.x, cir.y);
       return;
+    }
+  }
+  // Snake head + local path segments (same FX gate as rocks).
+  const er = ENEMY_R.snake || ENEMY_R.common || 10;
+  for (const e of enemies.values()) {
+    if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0) continue;
+    const pose = enemyAt(e);
+    const circles = [{ x: pose.x, y: pose.y, r: er }];
+    if (e.snakeSegs) {
+      for (let i = 0; i < e.snakeSegs.length; i++) {
+        const s = e.snakeSegs[i];
+        circles.push({ x: s.x, y: s.y, r: er });
+      }
+    }
+    for (const cir of localPlayerHitCircles(p)) {
+      for (let i = 0; i < circles.length; i++) {
+        const ec = circles[i];
+        const dx = shortestWrapDelta(ec.x, cir.x, W);
+        const dy = shortestWrapDelta(ec.y, cir.y, H);
+        const rr = cir.r + ec.r;
+        if (dx * dx + dy * dy >= rr * rr) continue;
+        p.collideCd = COLLIDE_IFRAME_TICKS;
+        emitPlayerAsteroidHit(cir.x, cir.y);
+        return;
+      }
     }
   }
 }
