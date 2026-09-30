@@ -398,7 +398,10 @@ function mediumAsteroidCap(room) {
  *   big = medium = wave + 1
  *   always 3 smalls
  */
-function soloWaveCounts(wave) {
+function soloWaveCounts(wave, world) {
+  if ((world | 0) >= 2) {
+    return { big: 5, medium: 1, small: 3 };
+  }
   const n = Math.max(1, wave | 0);
   return {
     big: n + 1,
@@ -407,10 +410,10 @@ function soloWaveCounts(wave) {
   };
 }
 
-function createSoloWaveAsteroids(wave) {
-  const c = soloWaveCounts(wave);
+function createSoloWaveAsteroids(wave, world) {
+  const c = soloWaveCounts(wave, world);
   const list = [];
-  const allowSpecial = wave > 1;
+  const allowSpecial = (world | 0) >= 2 || wave > 1;
   for (let i = 0; i < c.big; i++) {
     list.push(makeAsteroid({ size: 'big', offscreen: true, allowSpecial }));
   }
@@ -969,7 +972,8 @@ function broadcastSoloWave(room, opts) {
   roomBroadcast(room, {
     t: 'wave',
     n: room.wave | 0,
-    counts: soloWaveCounts(room.wave | 0),
+    world: room.world | 0 || 1,
+    counts: soloWaveCounts(room.wave | 0, room.world | 0),
     // Solo waves: always spawn in the middle.
     center: (!!room.practice && !room.coop) ? 1 : 0
   });
@@ -990,8 +994,9 @@ function randomEnemyWanderSpeed() {
 function enemySpeed(e) {
   const s = e && +e.speed;
   let base = (Number.isFinite(s) && s > 0) ? s : ENEMY_WANDER_SPEED;
-  // Spinner crawls at half speed while its magazine is live (not reloading).
-  if (e && e.kind === 'spinner' && (e.reloadLeft | 0) <= 0 && (e.shootAmmo | 0) > 0) {
+  // Spinner / laserSpin crawl at half speed while magazine is live (not reloading).
+  if (e && (e.kind === 'spinner' || e.kind === 'laserSpin')
+      && (e.reloadLeft | 0) <= 0 && (e.shootAmmo | 0) > 0) {
     base *= 0.5;
   }
   // Worm attack 3 (360° shotgun, phases 6–7): dash at 2× wander speed.
@@ -1002,8 +1007,8 @@ function enemySpeed(e) {
 }
 
 function enemyTurnMax(e) {
-  // common1: worm-rocket homing +30% (°/tick → rad/tick). Snake: half of that.
-  if (e && e.kind === 'common1') {
+  // common1 / commonRail: worm-rocket homing +30% (°/tick → rad/tick). Snake: half of that.
+  if (e && (e.kind === 'common1' || e.kind === 'commonRail')) {
     return (ENEMY_COMMON1_HOMING * Math.PI) / 180;
   }
   if (e && e.kind === 'snake') {
@@ -1015,7 +1020,7 @@ function enemyTurnMax(e) {
 }
 
 function isCommonKind(kind) {
-  return kind === 'common' || kind === 'common1';
+  return kind === 'common' || kind === 'common1' || kind === 'commonRail' || kind === 'commonVoid';
 }
 
 function enemyMoveType(e) {
@@ -1256,18 +1261,26 @@ function placeEnemyOffscreenEntry(e) {
 function makeEnemy(kind, wave, weapon) {
   let k = 'common';
   if (kind === 'common1') k = 'common1';
+  else if (kind === 'commonRail') k = 'commonRail';
+  else if (kind === 'commonVoid') k = 'commonVoid';
   else if (kind === 'ufo') k = 'ufo';
   else if (kind === 'carrier') k = 'carrier';
   else if (kind === 'worm') k = 'worm';
   else if (kind === 'spinner') k = 'spinner';
+  else if (kind === 'railBounce') k = 'railBounce';
+  else if (kind === 'laserSpin') k = 'laserSpin';
   else if (kind === 'gunship') k = 'gunship';
   else if (kind === 'snake') k = 'snake';
   // Random 4–6s before first shot (reuse fireCd / shootCd — no extra timer).
   const firstShotCd = Math.round(
     (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
   );
-  const chaseSpeed = k === 'common1' || k === 'snake';
-  const chaseBase = k === 'snake' ? ENEMY_SNAKE_SPEED : ENEMY_COMMON1_SPEED;
+  const chaseSpeed = k === 'common1' || k === 'commonRail' || k === 'snake';
+  const chaseBase = k === 'snake'
+    ? ENEMY_SNAKE_SPEED
+    : (k === 'commonRail'
+      ? ENEMY_COMMON1_SPEED * ENEMY_COMMON_RAIL_SPEED_MUL
+      : ENEMY_COMMON1_SPEED);
   const e = {
     id: 0,
     kind: k,
@@ -1289,14 +1302,15 @@ function makeEnemy(kind, wave, weapon) {
     ty: 0,
     fireCd: firstShotCd,
     shootAmmo: 0,
-    // Carriers / spinners gate on shootCd; commons/UFOs use fireCd.
-    shootCd: (k === 'carrier' || k === 'spinner') ? firstShotCd : 0,
+    // Carriers / spinners / laserSpin gate on shootCd; commons/UFOs use fireCd.
+    shootCd: (k === 'carrier' || k === 'spinner' || k === 'laserSpin' || k === 'railBounce' || k === 'commonRail')
+      ? firstShotCd : 0,
     reloadLeft: 0,
     bursting: false,
     railChargeLeft: 0,
     lastLaserAng: null,
     enteredPlay: false,
-    // common1/snake: worm-rocket band ±10% per ship; snake base is 25% below common1.
+    // common1/commonRail/snake: worm-rocket band ±10% per ship; snake base is 25% below common1.
     speed: chaseSpeed
       ? chaseBase * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
       : randomEnemyWanderSpeed(),
@@ -1335,6 +1349,15 @@ function makeEnemy(kind, wave, weapon) {
   if (k === 'spinner') {
     e.shootAmmo = ENEMY_SPINNER.ammo;
     e.spinAng = Math.random() * Math.PI * 2;
+  }
+  if (k === 'laserSpin') {
+    e.shootAmmo = ENEMY_LASER_SPIN.ammo;
+    e.spinAng = Math.random() * Math.PI * 2;
+    e.shootCd = firstShotCd;
+  }
+  if (k === 'railBounce' || k === 'commonRail') {
+    e.shootAmmo = 1;
+    e.shootCd = firstShotCd;
   }
   if (k === 'snake') {
     e.snakeTrail = [{ x: e.x, y: e.y }];
@@ -1664,14 +1687,14 @@ function snakeEatAsteroids(room, e) {
  */
 const MAX_COMMON_ON_FIELD = 6;
 const MAX_COMMON1_ON_FIELD = 2;
+const MAX_COMMON_RAIL_ON_FIELD = 2;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
 const SOLO_BOSS_KINDS = ['worm', 'gunship', 'snake'];
 
-/** Roll once per match: wave 6 gets one random boss. */
+/** World-1 boss wave is always worm (first boss). */
 function rollSoloBossPlan() {
-  const kind = SOLO_BOSS_KINDS[(Math.random() * SOLO_BOSS_KINDS.length) | 0];
   return {
-    6: [kind]
+    6: ['worm']
   };
 }
 
@@ -1681,20 +1704,23 @@ function ensureSoloBossPlan(room) {
   return room.bossPlan;
 }
 
-function isSoloBossWave(wave) {
+function isSoloBossWave(wave, world) {
   const n = wave | 0;
-  return n === 6;
+  const w = world | 0;
+  // World 1: boss on wave 6. World 2+: no boss yet (extend later).
+  return w <= 1 && n === 6;
 }
 
 function soloBossKindsForWave(room, wave) {
+  if (!isSoloBossWave(wave, room && room.world)) return null;
   const plan = ensureSoloBossPlan(room);
   const list = plan && plan[wave | 0];
   return Array.isArray(list) && list.length ? list : null;
 }
 
-function soloEnemyCounts(wave) {
+function soloEnemyCounts(wave, world) {
   const n = Math.max(1, wave | 0);
-  if (isSoloBossWave(n)) return { common: 0, ufo: 0, carrier: 0 };
+  if (isSoloBossWave(n, world)) return { common: 0, ufo: 0, carrier: 0 };
   return {
     common: Math.min(MAX_COMMON_ON_FIELD, n),
     ufo: 0,
@@ -1702,7 +1728,7 @@ function soloEnemyCounts(wave) {
   };
 }
 
-/** Wave 3: one special (UFO/spinner) + half the commons. */
+/** Wave 3 each world: one special + half the commons. */
 function isSpecialEnemyWave(wave) {
   const n = Math.max(1, wave | 0);
   return n === 3;
@@ -1732,10 +1758,25 @@ function countCommon1Slots(room) {
   return n;
 }
 
-/** Random common vs common1; common1 capped at MAX_COMMON1_ON_FIELD. */
+function countCommonRailSlots(room) {
+  let n = 0;
+  for (const e of room.enemies || []) {
+    if (e.kind !== 'commonRail' || e.queued) continue;
+    n++;
+  }
+  return n;
+}
+
+/** Random common kind; caps common1 / commonRail at 2. World 2 adds void + rail commons. */
 function pickRandomCommonKind(room) {
-  if (countCommon1Slots(room) >= MAX_COMMON1_ON_FIELD) return 'common';
-  return Math.random() < 0.5 ? 'common1' : 'common';
+  const world = (room && room.world) | 0;
+  const opts = ['common'];
+  if (countCommon1Slots(room) < MAX_COMMON1_ON_FIELD) opts.push('common1');
+  if (world >= 2) {
+    opts.push('commonVoid');
+    if (countCommonRailSlots(room) < MAX_COMMON_RAIL_ON_FIELD) opts.push('commonRail');
+  }
+  return opts[(Math.random() * opts.length) | 0];
 }
 
 /** When a slot frees, pull the next queued common in with a 2s delay. */
@@ -1745,6 +1786,7 @@ function tryPromoteQueuedCommons(room) {
     const next = room.enemies.find(e => {
       if (!isCommonKind(e.kind) || !e.queued) return false;
       if (e.kind === 'common1' && countCommon1Slots(room) >= MAX_COMMON1_ON_FIELD) return false;
+      if (e.kind === 'commonRail' && countCommonRailSlots(room) >= MAX_COMMON_RAIL_ON_FIELD) return false;
       return true;
     });
     if (!next) break;
@@ -1815,11 +1857,12 @@ function spawnSoloWaveEnemies(room, wave) {
   if (!room.enemies) room.enemies = [];
   if (!room.nextEnemyId) room.nextEnemyId = 1;
   ensureSoloBossPlan(room);
-  const c = soloEnemyCounts(wave);
+  const world = room.world | 0;
+  const c = soloEnemyCounts(wave, world);
   let commonN = c.common | 0;
   const n = Math.max(1, wave | 0);
 
-  // Boss wave 6 — roster from room.bossPlan (no commons / specials).
+  // Boss wave (world 1 wave 6) — roster from room.bossPlan (no commons / specials).
   const bosses = soloBossKindsForWave(room, n);
   if (bosses) {
     for (let i = 0; i < bosses.length; i++) {
@@ -1839,9 +1882,11 @@ function spawnSoloWaveEnemies(room, wave) {
 
   if (commonN <= 0) return;
 
-  // Every 2nd enemy wave: one special + half commons.
+  // Wave 3 each world: one special + half commons.
   if (isSpecialEnemyWave(n)) {
-    const specialKind = Math.random() < 0.5 ? 'spinner' : 'ufo';
+    const specialKind = world >= 2
+      ? (Math.random() < 0.5 ? 'railBounce' : 'laserSpin')
+      : (Math.random() < 0.5 ? 'spinner' : 'ufo');
     const e = makeEnemy(specialKind, wave);
     e.id = room.nextEnemyId++;
     e.appearLeft = 0;
@@ -1905,8 +1950,10 @@ function enemyHasLosToPlayer(room, e, target) {
 }
 
 function fireEnemyLaserBeam(room, e, ang) {
-  const range = ENEMY_LASER.range;
-  const dmg = ENEMY_LASER.dmg;
+  const range = (e && e.kind === 'laserSpin' && ENEMY_LASER_SPIN.range) || ENEMY_LASER.range;
+  const dmg = (e && e.kind === 'laserSpin' && ENEMY_LASER_SPIN.dmg != null)
+    ? ENEMY_LASER_SPIN.dmg
+    : ENEMY_LASER.dmg;
   const ox = e.x + Math.cos(ang) * (e.r + 4);
   const oy = e.y + Math.sin(ang) * (e.r + 4);
   const dx = Math.cos(ang);
@@ -2688,31 +2735,197 @@ function updateWormAttack(room, e, target) {
   }
 }
 
-function fireEnemyRailBeam(room, e, target) {
-  const ang = Math.atan2(target.y - e.y, target.x - e.x);
+/**
+ * Enemy rail hitscan. opts: { dmg, col, stun, bouncesLeft, bounceDelay }.
+ * Stun uses applyShipCrash with beam-forward kick (asteroid-style).
+ */
+function fireEnemyRailBeam(room, e, target, opts) {
+  opts = opts || {};
+  const dmg = opts.dmg != null ? +opts.dmg : ENEMY_RAIL_DMG;
+  const col = opts.col || null;
+  const stun = !!opts.stun;
+  const ang = target
+    ? Math.atan2(target.y - e.y, target.x - e.x)
+    : (Number.isFinite(e.angle) ? e.angle : 0);
   const range = Math.hypot(W, H);
   const ox = e.x + Math.cos(ang) * (e.r + 4);
   const oy = e.y + Math.sin(ang) * (e.r + 4);
   const dx = Math.cos(ang);
   const dy = Math.sin(ang);
+  const bouncesLeft = opts.bouncesLeft | 0;
+
+  if (bouncesLeft > 0) {
+    const edge = raycastWorldEdge(ox, oy, dx, dy, range + 2);
+    const segLen = edge ? edge.t : range;
+    applyEnemyRailSegment(room, e, ox, oy, dx, dy, segLen, {
+      dmg, col, stun, toroidal: false
+    });
+    if (edge) {
+      const reflected = reflectRailDir(dx, dy, edge.nx, edge.ny);
+      const eps = 0.75;
+      if (!room.pendingRailBounces) room.pendingRailBounces = [];
+      room.pendingRailBounces.push({
+        tick: (room.tick | 0) + 2,
+        enemyId: e.id | 0,
+        ox: edge.x + edge.nx * eps,
+        oy: edge.y + edge.ny * eps,
+        dx: reflected.dx,
+        dy: reflected.dy,
+        range,
+        left: bouncesLeft - 1,
+        dmg,
+        col,
+        stun
+      });
+    }
+    e.angle = ang;
+    return;
+  }
+
+  applyEnemyRailSegment(room, e, ox, oy, dx, dy, range, {
+    dmg, col, stun, toroidal: true
+  });
+  e.angle = ang;
+}
+
+function applyEnemyRailSegment(room, e, ox, oy, dx, dy, range, opts) {
+  opts = opts || {};
+  const dmg = opts.dmg != null ? +opts.dmg : ENEMY_RAIL_DMG;
+  const col = opts.col || null;
+  const stun = !!opts.stun;
   const width = 4 * RES_SCALE;
   const now = Date.now();
   const owner = enemyFxOwner(e);
-  const hit = raycastFirst(room, 0, ox, oy, dx, dy, range);
-  const x1 = hit ? hit.x : ox + dx * range;
-  const y1 = hit ? hit.y : oy + dy * range;
+  const maxDist = Math.max(0, range);
+  const hit = raycastFirst(room, 0, ox, oy, dx, dy, maxDist);
+  const x1 = hit ? hit.x : ox + dx * maxDist;
+  const y1 = hit ? hit.y : oy + dy * maxDist;
   const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : 2;
-  roomBroadcast(room, {
+  const msg = {
     t: 'rf',
     l: [room.nextBulletId++, ox, oy, x1, y1, width, now, owner],
     hit: hitKind
-  });
+  };
+  if (col) msg.col = col;
+  if (opts.bounce) msg.bounce = 1;
   if (hit) {
-    if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, ENEMY_RAIL_DMG);
-    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, ENEMY_RAIL_DMG, 0);
-    else if (hit.kind === 'rocket') damageRocket(room, hit.target, ENEMY_RAIL_DMG);
+    msg.ix = hit.x;
+    msg.iy = hit.y;
   }
+  roomBroadcast(room, msg);
+  if (!hit) return;
+  if (hit.kind === 'player') {
+    const p = hit.target;
+    if (stun) {
+      applyShipCrash(room, p, dx, dy, 0, dmg, 0.5);
+      notifyShipHit(room, p);
+    } else {
+      dealDamageToPlayer(room, p, dmg);
+    }
+  } else if (hit.kind === 'asteroid') {
+    damageAsteroid(room, hit.target, dmg, 0);
+  } else if (hit.kind === 'rocket') {
+    damageRocket(room, hit.target, dmg);
+  }
+}
+
+/** Single void orb along facing (player void size/dmg/speed). */
+function fireEnemyVoidStream(room, e, ang) {
+  const w = WEAPONS.voidcannon;
+  const spd = (w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE);
+  const cfg = BULLET_TYPES.voidcannon;
+  const dmg = (cfg && cfg.dmg) || 5;
+  const size = (cfg && cfg.size) || (27 * RES_SCALE);
+  const x = e.x + Math.cos(ang) * ((e.r || 10) + 6);
+  const y = e.y + Math.sin(ang) * ((e.r || 10) + 6);
+  const now = Date.now();
+  const b = {
+    id: room.nextBulletId++,
+    owner: 0,
+    enemyOwner: e.id | 0,
+    type: 'voidcannon',
+    dmg,
+    size,
+    x, y,
+    spawnX: x,
+    spawnY: y,
+    vx: Math.cos(ang) * spd,
+    vy: Math.sin(ang) * spd,
+    spawnSt: now
+  };
+  room.bullets.push(b);
+  roomBroadcast(room, { t: 'bf', b: packBullet(b) });
   e.angle = ang;
+}
+
+/** Player-style rail charge then fire (commonRail / railBounce). */
+function updateEnemyRailChargeWeapon(room, e, target, opts) {
+  opts = opts || {};
+  const chargeTicks = opts.chargeTicks != null ? opts.chargeTicks : ENEMY_COMMON_RAIL_CHARGE;
+  const reloadTicks = opts.reloadTicks != null ? opts.reloadTicks : ENEMY_COMMON_RAIL_RELOAD;
+  const dmg = opts.dmg != null ? opts.dmg : ENEMY_COMMON_RAIL_DMG;
+  const col = opts.col || ENEMY_RAIL_COL_YELLOW;
+  const stun = opts.stun !== false;
+  const bounces = opts.bounces | 0;
+
+  if ((e.shootCd | 0) > 0) {
+    e.shootCd--;
+    return;
+  }
+  if (!target) return;
+  const los = enemyHasLosToPlayer(room, e, target);
+  if (!los) {
+    if ((e.railChargeLeft | 0) > 0) {
+      e.railChargeLeft = 0;
+      e.bursting = false;
+    }
+    return;
+  }
+
+  if ((e.railChargeLeft | 0) <= 0 && !e.bursting) {
+    e.bursting = true;
+    e.railChargeLeft = chargeTicks;
+    const msg = {
+      t: 'rc',
+      id: enemyFxOwner(e),
+      ms: Math.round(chargeTicks * (1000 / TPS)),
+      st: Date.now(),
+      bounce: bounces > 0 ? bounces : 0,
+      col
+    };
+    roomBroadcast(room, msg);
+  }
+  if ((e.railChargeLeft | 0) <= 0) return;
+  e.railChargeLeft--;
+  e.angle = Math.atan2(target.y - e.y, target.x - e.x);
+  if (e.railChargeLeft > 0) return;
+  fireEnemyRailBeam(room, e, target, { dmg, col, stun, bouncesLeft: bounces });
+  e.bursting = false;
+  e.shootCd = reloadTicks;
+  e.shootAmmo = 1;
+}
+
+function updateLaserSpinWeapon(room, e) {
+  const wasFiring = (e.reloadLeft | 0) <= 0 && (e.shootAmmo | 0) > 0;
+  if ((e.shootCd | 0) > 0) e.shootCd--;
+  if ((e.reloadLeft | 0) > 0) {
+    e.reloadLeft--;
+    if (e.reloadLeft === 0) e.shootAmmo = ENEMY_LASER_SPIN.ammo;
+  } else if ((e.shootCd | 0) <= 0 && (e.shootAmmo | 0) > 0) {
+    const base = Number.isFinite(e.spinAng) ? e.spinAng : 0;
+    const step = (Math.PI * 2) / ENEMY_LASER_SPIN.streams;
+    for (let i = 0; i < ENEMY_LASER_SPIN.streams; i++) {
+      fireEnemyLaserBeam(room, e, base + i * step);
+    }
+    e.spinAng = base + (ENEMY_LASER_SPIN.spinDeg * Math.PI) / 180;
+    e.shootAmmo--;
+    e.shootCd = ENEMY_LASER_SPIN.cooldown;
+    if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_LASER_SPIN.reload;
+  } else if ((e.shootAmmo | 0) <= 0) {
+    e.reloadLeft = ENEMY_LASER_SPIN.reload;
+  }
+  const nowFiring = (e.reloadLeft | 0) <= 0 && (e.shootAmmo | 0) > 0;
+  if (nowFiring !== wasFiring) emitEnemyUpdate(room, e);
 }
 
 function fireEnemyPlasmaBolt(room, e, ang) {
@@ -2917,6 +3130,35 @@ function enemyTryFire(room, e) {
     return;
   }
 
+  if (e.kind === 'laserSpin') {
+    updateLaserSpinWeapon(room, e);
+    return;
+  }
+
+  if (e.kind === 'commonRail') {
+    updateEnemyRailChargeWeapon(room, e, target, {
+      chargeTicks: ENEMY_COMMON_RAIL_CHARGE,
+      reloadTicks: ENEMY_COMMON_RAIL_RELOAD,
+      dmg: ENEMY_COMMON_RAIL_DMG,
+      col: ENEMY_RAIL_COL_YELLOW,
+      stun: true,
+      bounces: 0
+    });
+    return;
+  }
+
+  if (e.kind === 'railBounce') {
+    updateEnemyRailChargeWeapon(room, e, target, {
+      chargeTicks: ENEMY_RAIL_BOUNCE_CHARGE,
+      reloadTicks: ENEMY_RAIL_BOUNCE_RELOAD,
+      dmg: ENEMY_RAIL_DMG,
+      col: ENEMY_RAIL_COL_FUCHSIA,
+      stun: false,
+      bounces: ENEMY_RAIL_BOUNCE_COUNT
+    });
+    return;
+  }
+
   if ((e.fireCd | 0) > 0) return;
 
   if (e.kind === 'ufo') {
@@ -2949,6 +3191,11 @@ function enemyTryFire(room, e) {
     e.flankDeg = -ENEMY_COMMON1_FLANK_DEG + Math.random() * (ENEMY_COMMON1_FLANK_DEG * 2);
     e.flankDur = Math.max(1, Math.round(ENEMY_COMMON1_RELOAD * ENEMY_COMMON1_FLANK_RELOAD_FRAC));
     e.flankLeft = e.flankDur;
+    return;
+  }
+  if (e.kind === 'commonVoid') {
+    fireEnemyVoidStream(room, e, base);
+    e.fireCd = ENEMY_COMMON_RELOAD;
     return;
   }
   const spread = (15 * Math.PI) / 180;
@@ -3016,8 +3263,8 @@ function stepEnemyMovement(e) {
     dy = e.ty - e.y;
   }
   const dist = Math.hypot(dx, dy);
-  // common1 / snake never stop — keep flying even when overlapping the chase point.
-  const chaseNoStop = e.kind === 'common1' || e.kind === 'snake';
+  // common1 / commonRail / snake never stop — keep flying even when overlapping the chase point.
+  const chaseNoStop = e.kind === 'common1' || e.kind === 'commonRail' || e.kind === 'snake';
   if (!chaseNoStop && dist <= ENEMY_ARRIVE_R) return true;
 
   let desired = dist > 1e-6
@@ -3104,7 +3351,7 @@ function updateEnemies(room) {
       continue;
     }
 
-    if (e.kind === 'common1' || e.kind === 'snake') {
+    if (e.kind === 'common1' || e.kind === 'commonRail' || e.kind === 'snake') {
       // Chase the player every tick (no wander waypoints).
       if (target) {
         e.tx = target.x;
@@ -3117,7 +3364,7 @@ function updateEnemies(room) {
         snakeEatAsteroids(room, e);
         tickSnakeTurrets(room, e);
       }
-      if (e.kind === 'common1') enemyTryFire(room, e);
+      if (e.kind === 'common1' || e.kind === 'commonRail') enemyTryFire(room, e);
       chaseSnap = true;
       continue;
     }
@@ -3441,7 +3688,7 @@ function beginSoloWave(room, wave, opts) {
   for (const a of room.asteroids) {
     emitAsteroidDead(room, a.aid, true);
   }
-  setAsteroidsList(room, createSoloWaveAsteroids(room.wave));
+  setAsteroidsList(room, createSoloWaveAsteroids(room.wave, room.world | 0));
   for (const a of room.asteroids) emitAsteroidFire(room, a);
   clearSoloEnemies(room, true);
   spawnSoloWaveEnemies(room, room.wave);
@@ -3493,7 +3740,15 @@ function tickSoloWaves(room) {
   if ((room.waveClearLeft | 0) > 0) {
     room.waveClearLeft--;
     if (room.waveClearLeft <= 0) {
-      const next = (room.wave | 0) + 1;
+      const cur = room.wave | 0;
+      const world = room.world | 0;
+      // After world-1 boss (worm): start world 2 wave 1 — never jump to wave 7.
+      if (world <= 1 && isSoloBossWave(cur, world)) {
+        room.world = 2;
+        beginSoloWave(room, 1);
+        return;
+      }
+      const next = cur + 1;
       if (next % 2 === 0) {
         openSoloShop(room, next);
       } else {
@@ -4647,7 +4902,7 @@ function handleAdminSpawn(ws, kindRaw) {
     emitAsteroidFire(room, a);
     return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
   }
-  if (kind === 'common' || kind === 'common1' || kind === 'ufo' || kind === 'worm' || kind === 'spinner' || kind === 'gunship' || kind === 'snake') {
+  if (kind === 'common' || kind === 'common1' || kind === 'commonRail' || kind === 'commonVoid' || kind === 'ufo' || kind === 'worm' || kind === 'spinner' || kind === 'railBounce' || kind === 'laserSpin' || kind === 'gunship' || kind === 'snake') {
     if (!room.practice) return { ok: 0, err: 'enemies only in solo/coop wave rooms' };
     if (!room.enemies) room.enemies = [];
     if (!room.nextEnemyId) room.nextEnemyId = 1;
@@ -4662,7 +4917,7 @@ function handleAdminSpawn(ws, kindRaw) {
   }
   return {
     ok: 0,
-    err: 'usage: spawn big|medium|small|meteor|common|common1|ufo|worm|spinner|gunship|snake'
+    err: 'usage: spawn big|medium|small|meteor|common|common1|commonRail|commonVoid|ufo|worm|spinner|railBounce|laserSpin|gunship|snake'
   };
 }
 
@@ -7378,6 +7633,47 @@ function processPendingRailBounces(room) {
     const job = q[i];
     if ((room.tick | 0) < (job.tick | 0)) continue;
     q.splice(i, 1);
+
+    // Enemy bounce rails (world-2 special).
+    if (job.enemyId != null) {
+      let e = null;
+      for (let ei = 0; ei < (room.enemies || []).length; ei++) {
+        if ((room.enemies[ei].id | 0) === (job.enemyId | 0)) {
+          e = room.enemies[ei];
+          break;
+        }
+      }
+      if (!e || (e.hp | 0) <= 0) continue;
+      const fullRange = job.range > 0 ? +job.range : Math.hypot(W, H);
+      const edge = raycastWorldEdge(job.ox, job.oy, job.dx, job.dy, fullRange + 2);
+      const segLen = edge ? edge.t : fullRange;
+      applyEnemyRailSegment(room, e, job.ox, job.oy, job.dx, job.dy, segLen, {
+        dmg: job.dmg,
+        col: job.col,
+        stun: !!job.stun,
+        bounce: true,
+        toroidal: false
+      });
+      const left = job.left | 0;
+      if (left <= 0 || !edge) continue;
+      const reflected = reflectRailDir(job.dx, job.dy, edge.nx, edge.ny);
+      const eps = 0.75;
+      q.push({
+        tick: (room.tick | 0) + 2,
+        enemyId: job.enemyId | 0,
+        ox: edge.x + edge.nx * eps,
+        oy: edge.y + edge.ny * eps,
+        dx: reflected.dx,
+        dy: reflected.dy,
+        range: fullRange,
+        left: left - 1,
+        dmg: job.dmg,
+        col: job.col,
+        stun: !!job.stun
+      });
+      continue;
+    }
+
     const p = room.players.get(job.ownerId);
     if (!p || (p.hp | 0) <= 0) continue;
     const fullRange = job.range > 0 ? +job.range : Math.hypot(W, H);

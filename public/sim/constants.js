@@ -475,10 +475,14 @@ const ENEMY_SNAP_INTERVAL = Math.round(0.5 * TPS);
 const ENEMY_R = {
   common: 6 * RES_SCALE,
   common1: 6 * RES_SCALE,
+  commonRail: 6 * RES_SCALE * 0.7,
+  commonVoid: 6 * RES_SCALE * 0.7,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
   spinner: 8 * RES_SCALE,
+  railBounce: 8 * RES_SCALE * 0.8,
+  laserSpin: 8 * RES_SCALE,
   gunship: 10 * RES_SCALE,
   snake: 6 * RES_SCALE
 };
@@ -516,10 +520,14 @@ ENEMY_R.worm = Math.hypot(ENEMY_WORM_HIT_LEN * 0.5, ENEMY_WORM_HIT_WID * 0.5);
 const ENEMY_HP = {
   common: 95,
   common1: 95,
+  commonRail: 95,
+  commonVoid: 95,
   ufo: 300,
   carrier: 90,
   worm: 1000,
   spinner: 320,
+  railBounce: 320,
+  laserSpin: 320,
   gunship: 1000,
   snake: 3500
 };
@@ -553,6 +561,28 @@ const ENEMY_SPINNER = {
   speed: ENEMY_COMMON_BULLET_SPEED,
   dmg: 12
 };
+/** World-2 special: 4 level-0 lasers, full spin every 10s, 7s fire / 12s reload. */
+const ENEMY_LASER_SPIN = {
+  streams: 4,
+  /** Degrees advanced per sim tick (360° / 10s). */
+  spinDeg: 360 / (10 * TPS),
+  ammo: Math.round(7 * TPS),
+  cooldown: 1,
+  reload: Math.round(12 * TPS),
+  dmg: 7,
+  range: Math.hypot(W, H)
+};
+/** commonRail: chase like common1 at 85% speed; player-style rail every 4s. */
+const ENEMY_COMMON_RAIL_SPEED_MUL = 0.85;
+const ENEMY_COMMON_RAIL_RELOAD = Math.round(4 * TPS);
+const ENEMY_COMMON_RAIL_DMG = 60;
+const ENEMY_COMMON_RAIL_CHARGE = Math.round(0.5 * TPS);
+/** World-2 special: bouncing fuchsia rail every 8s (6 edge bounces). */
+const ENEMY_RAIL_BOUNCE_RELOAD = Math.round(8 * TPS);
+const ENEMY_RAIL_BOUNCE_COUNT = 6;
+const ENEMY_RAIL_BOUNCE_CHARGE = Math.round(0.5 * TPS);
+const ENEMY_RAIL_COL_YELLOW = [1.0, 0.92, 0.15];
+const ENEMY_RAIL_COL_FUCHSIA = [1.0, 0.2, 0.85];
 const ENEMY_CARRIER_WEAPONS = ['laser', 'plasma', 'rail'];
 const ENEMY_LASER_AIM_DELAY = 12; // frames
 const ENEMY_RAIL_CHARGE = Math.round(1.5 * TPS);

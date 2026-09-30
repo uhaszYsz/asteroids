@@ -128,6 +128,7 @@ function createRoom(opts) {
     pendingBigSpawns: [],
     /** Deferred L2+ rail bounce segments: { tick, ownerId, ox, oy, dx, dy, range }. */
     pendingRailBounces: [],
+    world: 1,
     wave: 0,
     waveClearLeft: 0,
     /** Solo/coop boss roster for waves 10/20/30 — rolled once at match start. */
@@ -978,6 +979,7 @@ function captureWaitingSnapshot(ws) {
   const snap = {
     v: 1,
     wave: room.wave | 0,
+    world: room.world | 0 || 1,
     waveClearLeft: room.waveClearLeft | 0,
     shopOpen: !!room.shopOpen,
     shopWave: room.shopWave | 0,
@@ -1086,6 +1088,7 @@ function applySnapshotToRoom(room, p, snap) {
   p.godLeft = GODMODE_TICKS;
 
   room.wave = Math.max(1, snap.wave | 0);
+  room.world = Math.max(1, snap.world | 0 || 1);
   room.waveClearLeft = snap.waveClearLeft | 0;
   room.shopOpen = false;
   room.shopWave = 0;
@@ -1288,7 +1291,8 @@ function startPractice(ws, queueKind, opts) {
     waiting,
     need: queueKind ? PLAYERS_PER_MATCH : 1,
     wave: room.wave,
-    waveCounts: soloWaveCounts(room.wave),
+    world: room.world | 0 || 1,
+    waveCounts: soloWaveCounts(room.wave, room.world | 0),
     lives: p.lives,
     soloOnly: room.soloOnly ? 1 : 0,
     // Never send mode:'coop'/'pvp' here — that flags a real online room on the client.
@@ -1367,7 +1371,8 @@ function startCoop(members) {
       waiting: 0,
       need: 2,
       wave: room.wave,
-      waveCounts: soloWaveCounts(room.wave),
+      world: room.world | 0 || 1,
+      waveCounts: soloWaveCounts(room.wave, room.world | 0),
       lives: p.lives,
       coop: 1,
       mode: 'coop'

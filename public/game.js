@@ -5299,7 +5299,9 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
     life: 2.4 + Math.random() * 1.2, // 2.4–3.6 s (40% shorter than 4–6)
     age: 0,
     decelTick: 0.025,
-    kind: e.kind === 'common1' ? 'common1' : 'common'
+    kind: (e.kind === 'common1' || e.kind === 'commonRail' || e.kind === 'commonVoid')
+      ? e.kind
+      : 'common'
   });
 }
 
@@ -5311,7 +5313,9 @@ function emitCorpseBurn(c, intensity) {
   const ca = Math.cos(ang);
   const sa = Math.sin(ang);
   const is1 = c.kind === 'common1';
-  const sc = is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
+  const sc = c.kind === 'commonRail' ? ENEMY_COMMON_RAIL_SPRITE_SCALE
+    : c.kind === 'commonVoid' ? ENEMY_COMMON_VOID_SPRITE_SCALE
+    : is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
   const hl = (is1 ? ENEMY_COMMON1_HALF_L0 : ENEMY_CORPSE_HALF_L) * sc;
   const hw = (is1 ? ENEMY_COMMON1_HALF_W0 : ENEMY_CORPSE_HALF_W) * sc;
   const n = 2 + ((Math.random() * (1 + t * 3)) | 0); // 2–5 sites
@@ -5403,9 +5407,14 @@ function drawEnemyCorpses(dt) {
   for (let i = 0; i < enemyCorpses.length; i++) {
     const c = enemyCorpses[i];
     const is1 = c.kind === 'common1';
-    const opt = getShipOptionById(is1 ? ENEMY_COMMON1_SPRITE_ID : ENEMY_COMMON_SPRITE_ID);
+    const spriteId = c.kind === 'commonRail' ? ENEMY_COMMON_RAIL_SPRITE_ID
+      : c.kind === 'commonVoid' ? ENEMY_COMMON_VOID_SPRITE_ID
+      : is1 ? ENEMY_COMMON1_SPRITE_ID : ENEMY_COMMON_SPRITE_ID;
+    const opt = getShipOptionById(spriteId);
     if (!opt || opt.kind !== 'sprite') continue;
-    const scale = is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
+    const scale = c.kind === 'commonRail' ? ENEMY_COMMON_RAIL_SPRITE_SCALE
+      : c.kind === 'commonVoid' ? ENEMY_COMMON_VOID_SPRITE_SCALE
+      : is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
     const t = c.age / Math.max(1e-3, c.life);
     const alpha = t > 0.9 ? Math.max(0, 1 - (t - 0.9) / 0.1) : 1;
     drawSpriteShipPlane(
@@ -5925,6 +5934,7 @@ function clearFxLabels() {
 /** Top-of-screen shiny WAVE banner (solo mode). */
 let waveBanner = null;
 let soloWave = 0;
+let soloWorld = 1;
 /** Solo / practice remaining lives (server authoritative). */
 let soloLives = 3;
 
@@ -5940,18 +5950,21 @@ function clearWaveBanner() {
   waveBanner = null;
 }
 
-function startWaveBanner(n) {
+function startWaveBanner(n, world) {
   clearWaveBanner();
   const wave = Math.max(1, n | 0);
+  const w = Math.max(1, world != null ? (world | 0) : (soloWorld | 0) || 1);
   soloWave = wave;
+  soloWorld = w;
   if ((cv('cl_bg_auto') | 0) !== 0) rerollNebulaBackground(-1);
   const titleCol = [1.0, 0.92, 0.45];
   const subCol = [0.55, 0.95, 1.0];
+  const title = w > 1 ? ('WORLD ' + w + ' · WAVE ' + wave) : ('WAVE ' + wave);
   waveBanner = {
     n: wave,
     born: performance.now(),
     life: 3400,
-    title: bakeFxLabelTexture('WAVE ' + wave, titleCol),
+    title: bakeFxLabelTexture(title, titleCol),
     sub: bakeFxLabelTexture('CLEAR THE FIELD', subCol)
   };
   syncSoloWaitBanner();
@@ -5963,9 +5976,11 @@ function syncSoloWaitBanner() {
   waitBannerEl.style.top = '5px';
   waitBannerEl.style.bottom = 'auto';
   const w = soloWave > 0 ? soloWave : 1;
-  // Waves HUD: lives / gold / wave only (no Singleplayer / Coop labels).
+  const world = soloWorld > 0 ? soloWorld : 1;
+  // Waves HUD: lives / gold / world · wave.
   waitBannerEl.textContent =
-    'Lives: ' + soloLives + ' · Gold: ' + (localCoins | 0) + ' · Wave: ' + w;
+    'Lives: ' + soloLives + ' · Gold: ' + (localCoins | 0) +
+    ' · W' + world + '-' + w;
 }
 
 function drawWaveBanner(now) {
@@ -12038,7 +12053,7 @@ function startLocalLaserClip(range, color, hum, beamWidth) {
  * Prefer server wall-clock `serverSt` (NTP via clockOffset) so charge 0→1 and fire
  * land on the same instant for everyone, independent of packet arrival lag.
  */
-function armRailCharge(ownerId, ms, serverSt, bounce) {
+function armRailCharge(ownerId, ms, serverSt, bounce, col) {
   if (ownerId == null) return;
   const dur = Math.max(50, ms | 0);
   const now = performance.now();
@@ -12064,6 +12079,8 @@ function armRailCharge(ownerId, ms, serverSt, bounce) {
     ms: dur,
     st: serverSt != null ? +serverSt : null,
     bounce: wantBounce,
+    bounceN: bounce | 0,
+    col: Array.isArray(col) && col.length >= 3 ? [+col[0], +col[1], +col[2]] : null,
     predictedFire: false
   });
   if (alreadyCharging) return;
@@ -12146,14 +12163,21 @@ function applyRailFireMsg(msg) {
   if (!hadPredicted) {
     playSfx(SFX.railFire, { vol: ownerId === myId ? 0.85 : 0.55 });
     pulseSpriteShipAttack(ownerId);
-    emitRailBeamParticles(x0, y0, x1, y1, ownerShootColor(ownerId));
+    const beamCol = Array.isArray(msg.col) && msg.col.length >= 3
+      ? [+msg.col[0], +msg.col[1], +msg.col[2]]
+      : null;
+    emitRailBeamParticles(x0, y0, x1, y1, beamCol || ownerShootColor(ownerId));
     pushGridShock(x0, y0, gridBlastRailOpts(x0, y0, x1, y1));
   }
   railCharges.delete(ownerId);
   const firePerf = perfFromServerSt(fireSt);
+  const beamCol = Array.isArray(msg.col) && msg.col.length >= 3
+    ? [+msg.col[0], +msg.col[1], +msg.col[2]]
+    : null;
   railBeams.push({
     x0, y0, x1, y1, width,
     owner: ownerId,
+    col: beamCol,
     until: Math.max(performance.now(), firePerf) + 280,
     predicted: false
   });
@@ -17855,27 +17879,31 @@ function reflectRailDirLocal(dx, dy, nx, ny) {
   return { dx: dx - 2 * dot * nx, dy: dy - 2 * dot * ny };
 }
 
-/** Primary + optional L2 bounce aim segments from muzzle. */
+/** Primary + optional multi-bounce aim segments from muzzle. */
 function railAimSegments(mx, my, c, s, bounce) {
   const fullRange = Math.hypot(W, H);
   const segs = [];
-  if (!bounce) {
+  const bounceN = typeof bounce === 'number' ? Math.max(0, bounce | 0) : (bounce ? 1 : 0);
+  if (bounceN <= 0) {
     segs.push([mx, my, mx + c * fullRange, my + s * fullRange]);
     return segs;
   }
-  const edge = raycastWorldEdgeLocal(mx, my, c, s, fullRange + 2);
-  if (!edge) {
-    segs.push([mx, my, mx + c * fullRange, my + s * fullRange]);
-    return segs;
+  let ox = mx, oy = my, dx = c, dy = s;
+  for (let b = 0; b <= bounceN; b++) {
+    const edge = raycastWorldEdgeLocal(ox, oy, dx, dy, fullRange + 2);
+    if (!edge) {
+      segs.push([ox, oy, ox + dx * fullRange, oy + dy * fullRange]);
+      break;
+    }
+    segs.push([ox, oy, edge.x, edge.y]);
+    if (b >= bounceN) break;
+    const reflected = reflectRailDirLocal(dx, dy, edge.nx, edge.ny);
+    const eps = 0.75;
+    ox = edge.x + edge.nx * eps;
+    oy = edge.y + edge.ny * eps;
+    dx = reflected.dx;
+    dy = reflected.dy;
   }
-  segs.push([mx, my, edge.x, edge.y]);
-  const reflected = reflectRailDirLocal(c, s, edge.nx, edge.ny);
-  const eps = 0.75;
-  const bx = edge.x + edge.nx * eps;
-  const by = edge.y + edge.ny * eps;
-  const next = raycastWorldEdgeLocal(bx, by, reflected.dx, reflected.dy, fullRange + 2);
-  const br = next ? next.t : fullRange;
-  segs.push([bx, by, bx + reflected.dx * br, by + reflected.dy * br]);
   return segs;
 }
 
@@ -17896,8 +17924,8 @@ function drawRailCharges() {
     // Width 7 → 0 over the charge; at 0 the shot lands.
     const width = Math.max(0, Math.round(7 * (1 - t)));
 
-    // Aim telegraph: blend toward the owner's shoot color as charge completes.
-    const base = ownerShootColor(owner);
+    // Aim telegraph: blend toward the owner's shoot color (or override) as charge completes.
+    const base = (ch && ch.col) ? ch.col : ownerShootColor(owner);
     const col = [
       0.45 + (base[0] - 0.45) * t,
       0.85 + (base[1] - 0.85) * t,
@@ -17909,7 +17937,8 @@ function drawRailCharges() {
     drawFilledPoly(circleVerts(m.x, m.y, discR, 28), col, 1);
 
     if (width > 0) {
-      const segs = railAimSegments(m.x, m.y, m.c, m.s, !!(ch && ch.bounce));
+      const bounceArg = (ch && (ch.bounceN | 0) > 0) ? (ch.bounceN | 0) : !!(ch && ch.bounce);
+      const segs = railAimSegments(m.x, m.y, m.c, m.s, bounceArg);
       for (let i = 0; i < segs.length; i++) {
         const sg = segs[i];
         drawThickSegment(sg[0], sg[1], sg[2], sg[3], width, col);
@@ -17920,7 +17949,8 @@ function drawRailCharges() {
 
 function drawRailBeams() {
   for (const b of railBeams) {
-    const col = ownerHasDamagePowerup(b.owner) ? damageRainbowColor() : ownerShootColor(b.owner);
+    const col = b.col
+      || (ownerHasDamagePowerup(b.owner) ? damageRainbowColor() : ownerShootColor(b.owner));
     drawThickSegment(b.x0, b.y0, b.x1, b.y1, b.width || 4 * RES_SCALE, col);
   }
 }
@@ -18328,10 +18358,14 @@ const ENEMY_MOVE_DESTINATION_SMOOTH = 'destinationSmooth';
 const ENEMY_R = {
   common: 6 * RES_SCALE,
   common1: 6 * RES_SCALE,
+  commonRail: 6 * RES_SCALE * 0.7,
+  commonVoid: 6 * RES_SCALE * 0.7,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
   spinner: 8 * RES_SCALE,
+  railBounce: 8 * RES_SCALE * 0.8,
+  laserSpin: 8 * RES_SCALE,
   gunship: 10 * RES_SCALE,
   snake: 6 * RES_SCALE
 };
@@ -18376,7 +18410,7 @@ function enemyWanderSpeedOf(e) {
 
 function enemyTurnMaxOf(e) {
   // Match server: common1 worm-rocket homing +30%; snake half of that.
-  if (e && e.kind === 'common1') return (2 * 1.3 * Math.PI) / 180;
+  if (e && (e.kind === 'common1' || e.kind === 'commonRail')) return (2 * 1.3 * Math.PI) / 180;
   if (e && e.kind === 'snake') return (2 * 1.3 * 0.5 * Math.PI) / 180;
   let t = ENEMY_TURN_MAX;
   if (e && e.kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) {
@@ -18501,8 +18535,12 @@ function parseEnemyKind(raw) {
   if (raw === 'carrier') return 'carrier';
   if (raw === 'worm') return 'worm';
   if (raw === 'spinner') return 'spinner';
+  if (raw === 'railBounce') return 'railBounce';
+  if (raw === 'laserSpin') return 'laserSpin';
   if (raw === 'gunship') return 'gunship';
   if (raw === 'common1') return 'common1';
+  if (raw === 'commonRail') return 'commonRail';
+  if (raw === 'commonVoid') return 'commonVoid';
   if (raw === 'snake') return 'snake';
   return 'common';
 }
@@ -18640,7 +18678,7 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
 }
 
 function isCommonKind(kind) {
-  return kind === 'common' || kind === 'common1';
+  return kind === 'common' || kind === 'common1' || kind === 'commonRail' || kind === 'commonVoid';
 }
 
 function unpackEnemy(row) {
@@ -18866,7 +18904,7 @@ function removeEnemy(id, x, y, silent) {
     const py = y != null ? y : pose.y;
     const r = enemyHitR(e);
     const size = e.kind === 'carrier' ? 'medium' : 'small';
-    if ((e.kind || 'common') === 'common' || e.kind === 'common1') spawnCommonEnemyCorpse(e, px, py, deathBank);
+    if (isCommonKind(e.kind || 'common')) spawnCommonEnemyCorpse(e, px, py, deathBank);
     spawnEnemyDebris(e, px, py);
     emitAsteroidBurst(px, py, r, size, {
       sfx: SFX.enemyExplosion,
@@ -18959,7 +18997,7 @@ function enemyAt(e) {
       wormPhase: e.wormPhase | 0,
       enteredPlay: !!e.enteredPlay
     };
-    const chase = e.kind === 'common1' || e.kind === 'snake';
+    const chase = e.kind === 'common1' || e.kind === 'commonRail' || e.kind === 'snake';
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));
     const stepOpts = chase ? { noArriveSnap: true, noStop: true } : null;
     for (let i = 0; i < steps; i++) stepEnemyDestinationSmoothLocal(state, stepOpts);
@@ -19127,6 +19165,16 @@ const ENEMY_COMMON1_SPRITE_SCALE = 0.65;
 /** Craft 10 base half-extents (fh×fw / 2) before scale. */
 const ENEMY_COMMON1_HALF_L0 = 62 * 0.5;
 const ENEMY_COMMON1_HALF_W0 = 67 * 0.5;
+/** World-2 commons. */
+const ENEMY_COMMON_RAIL_SPRITE_ID = 'enemy_218';
+const ENEMY_COMMON_RAIL_SPRITE_SCALE = 0.7;
+const ENEMY_COMMON_VOID_SPRITE_ID = 'enemy_281';
+const ENEMY_COMMON_VOID_SPRITE_SCALE = 0.7;
+/** World-2 specials. */
+const ENEMY_RAIL_BOUNCE_SPRITE_ID = 'enemy_378';
+const ENEMY_RAIL_BOUNCE_SPRITE_SCALE = 0.8;
+const ENEMY_LASER_SPIN_SPRITE_ID = 'enemy_282';
+const ENEMY_LASER_SPIN_SPRITE_SCALE = 1;
 const ENEMY_WORM_SPRITE_ID = 'enemy_367';
 const ENEMY_WORM_SPRITE_SCALE = 1.6;
 /** Continuous roll around nose / length axis (rad/s) while wandering. */
@@ -19327,9 +19375,19 @@ function clearEnemyBank(id) {
 function drawEnemyCommon(x, y, angle, color, id, dt, kind) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const vib = hitVibrationRoll('e', id);
-  const is1 = kind === 'common1';
-  const spriteId = is1 ? ENEMY_COMMON1_SPRITE_ID : ENEMY_COMMON_SPRITE_ID;
-  const scale = is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
+  const k = kind || 'common';
+  let spriteId = ENEMY_COMMON_SPRITE_ID;
+  let scale = ENEMY_COMMON_SPRITE_SCALE;
+  if (k === 'common1') {
+    spriteId = ENEMY_COMMON1_SPRITE_ID;
+    scale = ENEMY_COMMON1_SPRITE_SCALE;
+  } else if (k === 'commonRail') {
+    spriteId = ENEMY_COMMON_RAIL_SPRITE_ID;
+    scale = ENEMY_COMMON_RAIL_SPRITE_SCALE;
+  } else if (k === 'commonVoid') {
+    spriteId = ENEMY_COMMON_VOID_SPRITE_ID;
+    scale = ENEMY_COMMON_VOID_SPRITE_SCALE;
+  }
   const opt = getShipOptionById(spriteId);
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
@@ -19432,6 +19490,34 @@ function drawEnemySpinner(x, y, angle, color, id, dt) {
       x, y, angle, 0, id, dt, opt, true, color,
       0, ENEMY_SPINNER_SPRITE_SCALE, COL.enemyOutline,
       { hexDome: true, domeZ: 22, spinLeanYDeg: 20, yawSpinDegPerTick: 4 }
+    );
+  } else {
+    drawEnemyCommon(x, y, angle, color, id, dt);
+  }
+  return bank;
+}
+
+function drawEnemyRailBounce(x, y, angle, color, id, dt) {
+  const bank = enemyBankSmoothed(id, angle, dt);
+  const opt = getShipOptionById(ENEMY_RAIL_BOUNCE_SPRITE_ID);
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(
+      x, y, angle, 0, id, dt, opt, true, color,
+      bank, ENEMY_RAIL_BOUNCE_SPRITE_SCALE, COL.enemyOutline
+    );
+  } else {
+    drawEnemyCommon(x, y, angle, color, id, dt);
+  }
+  return bank;
+}
+
+function drawEnemyLaserSpin(x, y, angle, color, id, dt) {
+  const bank = enemyBankSmoothed(id, angle, dt);
+  const opt = getShipOptionById(ENEMY_LASER_SPIN_SPRITE_ID);
+  if (opt && opt.kind === 'sprite') {
+    drawSpriteShipPlane(
+      x, y, angle, 0, id, dt, opt, true, color,
+      bank, ENEMY_LASER_SPIN_SPRITE_SCALE, COL.enemyOutline
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);
@@ -20716,6 +20802,12 @@ function drawEnemies(dt) {
       enemyDrawBank.set(id, bank);
     } else if (p.kind === 'spinner') {
       const bank = drawEnemySpinner(x, y, p.angle, COL.enemy, id, dt);
+      enemyDrawBank.set(id, bank);
+    } else if (p.kind === 'railBounce') {
+      const bank = drawEnemyRailBounce(x, y, p.angle, COL.enemy, id, dt);
+      enemyDrawBank.set(id, bank);
+    } else if (p.kind === 'laserSpin') {
+      const bank = drawEnemyLaserSpin(x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
     } else {
       const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt, p.kind || e.kind);
@@ -23460,7 +23552,8 @@ function enterGameFromWelcome(msg) {
   else setSoloLives(0);
   if (msg.wave != null && !msg.campaign) {
     soloWave = msg.wave | 0;
-    startWaveBanner(soloWave);
+    if (msg.world != null) soloWorld = Math.max(1, msg.world | 0);
+    startWaveBanner(soloWave, soloWorld);
   } else if (msg.campaign && msg.wave != null) {
     soloWave = msg.wave | 0;
     clearWaveBanner();
@@ -23558,7 +23651,8 @@ function enterGameFromWelcome(msg) {
     applyPausedMsg(typeof msg.paused === 'object' ? msg.paused : { reason: 'manual', budgets: {}, ready: [], need: 1, countdown: 0 });
   }
   if (msg.practice) {
-    startWaveBanner(msg.wave != null ? msg.wave : 1);
+    if (msg.world != null) soloWorld = Math.max(1, msg.world | 0);
+    startWaveBanner(msg.wave != null ? msg.wave : 1, soloWorld);
   } else if (!(msg.paused || msg.pause || msg.rejoin)) {
     clearWaveBanner();
     playMatchMusic();
@@ -24075,7 +24169,7 @@ function handleWsMessage(e) {
         railBeams.length = 0;
         thrustBeams.length = 0;
       }
-      startWaveBanner(msg.n != null ? msg.n : (soloWave + 1));
+      startWaveBanner(msg.n != null ? msg.n : (soloWave + 1), msg.world);
       // Solo waves: always snap to world center (server does the same).
       if (practiceMode && !coopMode && player.hp > 0 && myId != null) {
         player.x = W * 0.5;
@@ -24350,7 +24444,7 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'rc' && inGame) {
-      armRailCharge(msg.id, msg.ms != null ? msg.ms : 500, msg.st, msg.bounce);
+      armRailCharge(msg.id, msg.ms != null ? msg.ms : 500, msg.st, msg.bounce, msg.col);
       if ((msg.id | 0) === (myId | 0)) {
         const ch = railCharges.get(myId);
         if (ch) {
