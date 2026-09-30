@@ -91,6 +91,14 @@ function asteroidSpeedBand(special) {
   return { min: ASTEROID_SPEED_MIN, max: ASTEROID_SPEED_MAX };
 }
 
+function asteroidMaxSpeed(a) {
+  const { max } = asteroidSpeedBand(a && a.special);
+  if (a && (a.size === 'big' || a.big) && a.special !== 'meteor') {
+    return Math.min(max, BIG_ASTEROID_MAX_SPEED);
+  }
+  return max;
+}
+
 /** Clamp/resample |v| into the special's speed band (keeps direction). */
 function fitAsteroidSpeed(vx, vy, special) {
   const { min, max } = asteroidSpeedBand(special);
@@ -216,6 +224,7 @@ function makeAsteroid(opts) {
       : (special === 'golden' ? 0.13 : asteroidHueFromShape(o.shapeId != null ? (o.shapeId | 0) : shapeIdFromPos(x, y)))
   };
   refreshAsteroidCollisionPts(a);
+  clampAsteroidVelMax(a);
   return a;
 }
 
@@ -1875,7 +1884,7 @@ function applyGunshipMagnetToPlayer(room, p) {
 
 function clampAsteroidVelMax(a) {
   if (!a) return;
-  const { max } = asteroidSpeedBand(a.special);
+  const max = asteroidMaxSpeed(a);
   const s = Math.hypot(a.vx || 0, a.vy || 0);
   if (s > max && s > 1e-8) {
     const k = max / s;
@@ -1915,7 +1924,7 @@ function gunshipMagnetArmAsteroid(room, e, a) {
   a.magnetAx = (dx / dist) * accel;
   a.magnetAy = (dy / dist) * accel;
   a.magnetUntil = (e.magnetStartedAt | 0) + Math.round((ENEMY_GUNSHIP_MAGNET_TICKS * 1000) / TPS);
-  a.magnetSpdMax = asteroidSpeedBand(a.special).max;
+  a.magnetSpdMax = asteroidMaxSpeed(a);
   resyncAsteroidSpawn(a);
   emitAsteroidWrap(room, a);
 }
@@ -5119,12 +5128,14 @@ function teleportAsteroidSpawnClear(room, a) {
   dy /= dist;
   let spd = Math.hypot(a.vx, a.vy);
   const band = asteroidSpeedBand(a.special);
+  const maxSpd = asteroidMaxSpeed(a);
   if (!(spd >= band.min)) {
-    spd = band.min + Math.random() * Math.max(0, band.max - band.min);
+    spd = band.min + Math.random() * Math.max(0, maxSpd - band.min);
   }
   const fitted = fitAsteroidSpeed(dx * spd, dy * spd, a.special);
   a.vx = fitted.vx;
   a.vy = fitted.vy;
+  clampAsteroidVelMax(a);
 
   a.entered = false;
   a.portalArmed = false;

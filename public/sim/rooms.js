@@ -672,6 +672,7 @@ function stepRoom(room) {
       removePortalTwin(room, a);
     }
     tickAsteroidMagnetAccel(a);
+    clampAsteroidVelMax(a);
     a.x += a.vx;
     a.y += a.vy;
     a.angle += a.spin;
