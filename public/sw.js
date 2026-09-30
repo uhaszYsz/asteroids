@@ -1,14 +1,23 @@
 /* Asteroids asset service worker: hash-keyed forever cache, origin-first + CDN fallback. */
 /* eslint-disable no-restricted-globals */
 
-const META_CACHE = 'asteroids-meta-v4';
-const ASSET_CACHE = 'asteroids-assets-v4';
-const OLD_CACHES = ['asteroids-meta-v1', 'asteroids-assets-v1', 'asteroids-meta-v2', 'asteroids-assets-v2', 'asteroids-meta-v3', 'asteroids-assets-v3'];
-/** sw.js / the manifest itself must always be fresh so hashes are trustworthy.
- *  game.js/music.js/config.js/sim/local-server.js used to be force-network too (a stale
- *  git-computed hash once poisoned the cached game.js) — the manifest now hashes the real
- *  file on disk, so they're safe to hash-cache like every other asset. */
-const NETWORK_ONLY = new Set(['sw.js', 'asset-manifest.json']);
+const META_CACHE = 'asteroids-meta-v5';
+const ASSET_CACHE = 'asteroids-assets-v5';
+const OLD_CACHES = [
+  'asteroids-meta-v1', 'asteroids-assets-v1',
+  'asteroids-meta-v2', 'asteroids-assets-v2',
+  'asteroids-meta-v3', 'asteroids-assets-v3',
+  'asteroids-meta-v4', 'asteroids-assets-v4'
+];
+/** Always network: SW/manifest, plus critical JS so ?v= cache-bust cannot lose to a stale hash. */
+const NETWORK_ONLY = new Set([
+  'sw.js',
+  'asset-manifest.json',
+  'game.js',
+  'music.js',
+  'config.js',
+  'sim/local-server.js'
+]);
 /** Repo path prefix for client files (browser URLs omit this; CDN needs it). */
 const REPO_PUBLIC = 'public';
 const MANIFEST_URLS = (repo, ref, originManifest) => ([

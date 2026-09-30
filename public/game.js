@@ -19344,10 +19344,13 @@ function drawGunshipMagnetDust() {
 function drawEnemyGunship(x, y, angle, color, id, dt) {
   const bank = enemyBankSmoothed(id, angle, dt);
   const opt = getShipOptionById(ENEMY_GUNSHIP_SPRITE_ID);
+  // Force numeric scale — never fall through with a missing sizeScale.
+  const sc = Number(ENEMY_GUNSHIP_SPRITE_SCALE);
+  const sizeScale = (Number.isFinite(sc) && sc > 0) ? sc : 1;
   if (opt && opt.kind === 'sprite') {
     drawSpriteShipPlane(
       x, y, angle, 0, id, dt, opt, true, color,
-      bank, ENEMY_GUNSHIP_SPRITE_SCALE, COL.enemyOutline
+      bank, sizeScale, COL.enemyOutline
     );
   } else {
     drawEnemyCommon(x, y, angle, color, id, dt);

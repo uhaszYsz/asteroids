@@ -2448,7 +2448,7 @@
 </div>
 <script>
 (function () {
-  var PURGE_FLAG = 'aa_sw_purge_v6';
+  var PURGE_FLAG = 'aa_sw_purge_v7';
   var path = location.pathname;
   var dir = /\/[^/]+\.[a-zA-Z0-9]+$/.test(path)
     ? path.replace(/\/[^/]+$/, '/')
@@ -2466,7 +2466,7 @@
 
   function registerSw() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register(dir + 'sw.js?v=6', { scope: dir }).then(function (reg) {
+    navigator.serviceWorker.register(dir + 'sw.js?v=7', { scope: dir }).then(function (reg) {
       function sync() {
         var w = navigator.serviceWorker.controller || reg.active;
         if (w) w.postMessage({ type: 'SYNC_ASSETS' });
@@ -2500,7 +2500,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=95');
-      await loadScript('game.js?v=1077');
+      await loadScript('game.js?v=1078');
     } catch (err) {
       console.error(err);
     }
