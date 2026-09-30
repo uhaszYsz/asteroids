@@ -13719,6 +13719,13 @@ function renderSoloShop() {
           weaponRow.push({
             el: row,
             activate: (key) => {
+              // Already equipped → upgrade that slot immediately (no menu).
+              if (slotHere === 1 || slotHere === 2) {
+                shopBuySlot = slotHere;
+                updateShopSlotBadge();
+                sendShopBuy('weapon', name, slotHere);
+                return;
+              }
               if (key === 'z' || key === 'x') {
                 const s = key === 'x' ? 2 : 1;
                 shopBuySlot = s;
@@ -13726,7 +13733,7 @@ function renderSoloShop() {
                 sendShopBuy('weapon', name, s);
                 return;
               }
-              // Space / default: open slot picker menu on the focused row.
+              // New / other weapon: Space opens slot picker.
               openShopWeaponSlotMenuForEl(name, row);
             }
           });
