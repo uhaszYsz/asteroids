@@ -574,10 +574,19 @@ const ENEMY_LASER_SPIN = {
   dmg: 7,
   range: Math.hypot(W, H)
 };
-/** commonRail: chase like common1 at 85% speed; player-style rail every 4s. */
+/** commonRail: chase like common1 at 85% speed; player-style laser (½ dmg), 1.2s dump / 5s reload.
+ *  Asteroids block the beam but take no damage. */
 const ENEMY_COMMON_RAIL_SPEED_MUL = 0.85;
-const ENEMY_COMMON_RAIL_RELOAD = Math.round(4 * TPS);
-const ENEMY_COMMON_RAIL_DMG = 60;
+const ENEMY_COMMON_LASER = {
+  ammo: Math.round(1.2 * TPS),
+  cooldown: WEAPONS.laser.cooldown,
+  reload: Math.round(5 * TPS),
+  range: WEAPONS.laser.range || Math.hypot(W, H),
+  dmg: BULLET_TYPES.laser.dmg * 0.5
+};
+/** Legacy aliases kept so older call sites still resolve. */
+const ENEMY_COMMON_RAIL_RELOAD = ENEMY_COMMON_LASER.reload;
+const ENEMY_COMMON_RAIL_DMG = ENEMY_COMMON_LASER.dmg;
 const ENEMY_COMMON_RAIL_CHARGE = Math.round(0.5 * TPS);
 /** Volkano: sits on an asteroid edge; short red laser (50% of player laser dmg). */
 const ENEMY_VOLKANO_LASER = {

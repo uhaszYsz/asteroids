@@ -1383,7 +1383,12 @@ function makeEnemy(kind, wave, weapon) {
     e.spinAng = Math.random() * Math.PI * 2;
     e.shootCd = firstShotCd;
   }
-  if (k === 'railBounce' || k === 'commonRail') {
+  if (k === 'commonRail') {
+    e.shootAmmo = ENEMY_COMMON_LASER.ammo;
+    e.shootCd = firstShotCd;
+    e.reloadLeft = 0;
+  }
+  if (k === 'railBounce') {
     e.shootAmmo = 1;
     e.shootCd = firstShotCd;
   }
@@ -1709,7 +1714,7 @@ function snakeEatAsteroids(room, e) {
 
 /**
  * Every wave spawns commons = wave number (capped at MAX_COMMON_ON_FIELD).
- * Wave 3 is special: one UFO/spinner + half the commons.
+ * Wave 3 is special: W1 UFO/spinner, W2 railBounce/laserSpin + half the commons.
  * Wave 6 is the boss wave (room.bossPlan — no commons/specials).
  * Wave ends only when asteroids and enemies are all cleared.
  */
@@ -2069,7 +2074,8 @@ function spawnSoloWaveEnemies(room, wave) {
 
   if (commonN <= 0) return;
 
-  // Wave 3 each world: one special + half commons.
+  // Wave 3 each world: one world-appropriate special + half commons.
+  // W1: spinner/ufo. W2: railBounce/laserSpin only (no W1 specials).
   if (isSpecialEnemyWave(n)) {
     const specialKind = world >= 2
       ? (Math.random() < 0.5 ? 'railBounce' : 'laserSpin')
@@ -2139,16 +2145,21 @@ function enemyHasLosToPlayer(room, e, target) {
   return !asteroidBlocksRay(room, e.x, e.y, ang, dist + 4);
 }
 
-function fireEnemyLaserBeam(room, e, ang) {
-  const range = (e && e.kind === 'laserSpin' && ENEMY_LASER_SPIN.range) || ENEMY_LASER.range;
-  const dmg = (e && e.kind === 'laserSpin' && ENEMY_LASER_SPIN.dmg != null)
-    ? ENEMY_LASER_SPIN.dmg
-    : ENEMY_LASER.dmg;
+function fireEnemyLaserBeam(room, e, ang, opts) {
+  opts = opts || {};
+  const range = opts.range != null ? +opts.range
+    : ((e && e.kind === 'laserSpin' && ENEMY_LASER_SPIN.range) || ENEMY_LASER.range);
+  const dmg = opts.dmg != null ? +opts.dmg
+    : ((e && e.kind === 'laserSpin' && ENEMY_LASER_SPIN.dmg != null)
+      ? ENEMY_LASER_SPIN.dmg
+      : ENEMY_LASER.dmg);
+  const noAstDmg = !!opts.noAsteroidDamage;
+  const dmgEnemies = !!opts.damageEnemies;
   const ox = e.x + Math.cos(ang) * (e.r + 4);
   const oy = e.y + Math.sin(ang) * (e.r + 4);
   const dx = Math.cos(ang);
   const dy = Math.sin(ang);
-  const width = 2 + (Math.random() * 4 | 0);
+  const width = opts.width != null ? +opts.width : (2 + (Math.random() * 4 | 0));
   const now = Date.now();
   const owner = enemyFxOwner(e);
   const hit = raycastFirst(room, 0, ox, oy, dx, dy, range);
@@ -2160,7 +2171,8 @@ function fireEnemyLaserBeam(room, e, ang) {
       w: 'laser'
     });
   } else {
-    const hitKind = hit.kind === 'player' || hit.kind === 'rocket' ? 1 : 2;
+    const hitKind = hit.kind === 'player' || hit.kind === 'rocket' ? 1
+      : hit.kind === 'enemy' ? 3 : 2;
     roomBroadcast(room, {
       t: 'lf',
       l: [room.nextBulletId++, ox, oy, hit.x, hit.y, width, now, owner],
@@ -2168,8 +2180,11 @@ function fireEnemyLaserBeam(room, e, ang) {
       w: 'laser'
     });
     if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg);
-    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, 0);
-    else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
+    else if (hit.kind === 'asteroid') {
+      if (!noAstDmg) damageAsteroid(room, hit.target, dmg, 0);
+    } else if (hit.kind === 'enemy') {
+      if (dmgEnemies) damageSnakePreferTurret(room, hit.target, dmg, 0, hit.x, hit.y, 6);
+    } else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
   }
   e.angle = ang;
   e.lastLaserAng = ang;
@@ -3048,7 +3063,46 @@ function fireEnemyVoidStream(room, e, ang) {
   e.angle = ang;
 }
 
-/** Player-style rail charge then fire (commonRail / railBounce). */
+/** commonRail: continuous player-style laser (½ dmg), asteroids block only. */
+function updateCommonRailLaserWeapon(room, e, target) {
+  if ((e.shootCd | 0) > 0) e.shootCd--;
+  if ((e.reloadLeft | 0) > 0) {
+    e.reloadLeft--;
+    if (e.reloadLeft === 0) e.shootAmmo = ENEMY_COMMON_LASER.ammo;
+    e.bursting = false;
+    return;
+  }
+  if (!target) return;
+  const los = enemyHasLosToPlayer(room, e, target);
+  if (!los) {
+    // Drop mid-burst if LOS breaks (ammo already spent stays spent).
+    e.bursting = false;
+    return;
+  }
+  if ((e.shootAmmo | 0) <= 0) {
+    e.reloadLeft = ENEMY_COMMON_LASER.reload;
+    e.bursting = false;
+    return;
+  }
+  if ((e.shootCd | 0) > 0) return;
+  e.bursting = true;
+  const ang = Math.atan2(target.y - e.y, target.x - e.x);
+  fireEnemyLaserBeam(room, e, ang, {
+    range: ENEMY_COMMON_LASER.range,
+    dmg: ENEMY_COMMON_LASER.dmg,
+    noAsteroidDamage: true,
+    damageEnemies: true,
+    width: (2 + (Math.random() * 4 | 0)) * RES_SCALE
+  });
+  e.shootAmmo--;
+  e.shootCd = ENEMY_COMMON_LASER.cooldown;
+  if ((e.shootAmmo | 0) <= 0) {
+    e.bursting = false;
+    e.reloadLeft = ENEMY_COMMON_LASER.reload;
+  }
+}
+
+/** Player-style rail charge then fire (railBounce). */
 function updateEnemyRailChargeWeapon(room, e, target, opts) {
   opts = opts || {};
   const chargeTicks = opts.chargeTicks != null ? opts.chargeTicks : ENEMY_COMMON_RAIL_CHARGE;
@@ -3326,14 +3380,7 @@ function enemyTryFire(room, e) {
   }
 
   if (e.kind === 'commonRail') {
-    updateEnemyRailChargeWeapon(room, e, target, {
-      chargeTicks: ENEMY_COMMON_RAIL_CHARGE,
-      reloadTicks: ENEMY_COMMON_RAIL_RELOAD,
-      dmg: ENEMY_COMMON_RAIL_DMG,
-      col: ENEMY_RAIL_COL_YELLOW,
-      stun: true,
-      bounces: 0
-    });
+    updateCommonRailLaserWeapon(room, e, target);
     return;
   }
 
