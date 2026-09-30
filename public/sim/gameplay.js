@@ -3556,16 +3556,16 @@ function ensureUnlockedWeapons(p) {
 /** Exactly one owned weapon in slot 1 (Z); slot 2 (X) wiped empty. */
 function ownOnlyWeapon(p, name, level) {
   if (!name || WEAPON_SLOTS.indexOf(name) < 0) name = 'default';
-  const lvl = Math.max(1, Math.min(WEAPON_MAX_LEVEL, level != null ? (level | 0) : 1));
-  if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+  ensureWeaponUpgrades(p);
   p.unlockedWeapons = {};
   for (let i = 0; i < WEAPON_SLOTS.length; i++) {
     const k = WEAPON_SLOTS[i];
     p.unlockedWeapons[k] = k === name;
-    p.weaponLevels[k] = k === name ? lvl : 1;
+    p.weaponUpgrades[k] = freshWeaponUpgradeRanks(k);
   }
   p.weapon = name;
   p.weapon2 = null;
+  syncWeaponLevelsFromUpgrades(p);
   p.shootAmmo2 = 0;
   p.shootCd2 = 0;
   p.reloadLeft2 = 0;
@@ -3594,84 +3594,81 @@ function resetWeaponSlotRuntime(p, slot) {
 
 /**
  * What acquiring `name` (pickup or shop buy) does to a dual-gun loadout:
- *  - already equipped in slot 1 or 2 → upgrade that slot.
+ *  - already equipped in slot 1 or 2 → already owned (shop opens upgrade menu).
  *  - slot 2 (X) empty → mount there as the second weapon.
  *  - both slots full with a different type → replace slot 1 (Z / "current").
  */
 function classifyWeaponAcquire(p, name) {
-  if (p.weapon === name) return { kind: 'upgrade', slot: 1 };
-  if (p.weapon2 === name) return { kind: 'upgrade', slot: 2 };
+  if (p.weapon === name) return { kind: 'owned', slot: 1 };
+  if (p.weapon2 === name) return { kind: 'owned', slot: 2 };
   if (!p.weapon2) return { kind: 'mount', slot: 2 };
   return { kind: 'replace', slot: 1 };
 }
 
-/** Field-pickup rule: always affects slot 1 (Z) — slot 2 (X) is shop-only, never
- *  auto-mounted by a pickup even when it's empty. Already in slot 1 → upgrade it;
- *  anything else → slot 1 gets replaced with it. */
+/** Field-pickup rule: always affects slot 1 (Z) — slot 2 (X) is shop-only.
+ *  Already in slot 1 → no auto-upgrade (shop-only options); else replace slot 1. */
 function classifyWeaponPickup(p, name) {
-  if (p.weapon === name) return { kind: 'upgrade', slot: 1 };
+  if (p.weapon === name) return { kind: 'owned', slot: 1 };
   return { kind: 'replace', slot: 1 };
 }
 
 function equipWeaponAcquire(p, name) {
   if (!name || WEAPON_SLOTS.indexOf(name) < 0) return null;
   ensureUnlockedWeapons(p);
-  if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+  ensureWeaponUpgrades(p);
   const info = classifyWeaponPickup(p, name);
 
-  if (info.kind === 'upgrade') {
-    p.weaponLevels[name] = Math.min(WEAPON_MAX_LEVEL, (getWeaponLevel(p, name) | 0 || 1) + 1);
-  } else {
-    // replace slot 1 — drop the old slot-1 weapon's unlock unless slot 2 also holds it.
-    if (p.weapon && p.weapon !== p.weapon2) p.unlockedWeapons[p.weapon] = false;
-    p.weapon = name;
-    p.weaponLevels[name] = 1;
-    p.unlockedWeapons[name] = true;
+  if (info.kind === 'owned') {
+    // Pickups no longer auto-upgrade — shop buys options.
+    info.name = name;
+    info.lvl = weaponUpgradeCount(p, name);
+    return info;
   }
+  if (p.weapon && p.weapon !== p.weapon2) p.unlockedWeapons[p.weapon] = false;
+  p.weapon = name;
+  p.weaponUpgrades[name] = freshWeaponUpgradeRanks(name);
+  p.unlockedWeapons[name] = true;
+  syncWeaponLevelsFromUpgrades(p);
   resetWeaponSlotRuntime(p, info.slot);
   info.name = name;
-  info.lvl = getWeaponLevel(p, name);
+  info.lvl = weaponUpgradeCount(p, name);
   return info;
 }
 
 function shopWeaponCost(p, weaponName) {
   ensureUnlockedWeapons(p);
   const info = classifyWeaponAcquire(p, weaponName);
-  if (info.kind !== 'upgrade') return 800;
-  const lvl = getWeaponLevel(p, weaponName);
-  if (lvl >= WEAPON_MAX_LEVEL) return -1;
-  return 800 + 200 * (lvl + 1);
+  if (info.kind === 'owned') return shopUpgradeCost(p, weaponName);
+  return 800;
 }
 
 /**
- * Shop-only: buy `name` directly into slot 1 (Z) or slot 2 (X), player's explicit choice —
- * no auto mount/upgrade/replace guessing. Same weapon already in that slot → upgrade it;
- * anything else → that slot now holds `name` at level 1 (the other slot is untouched).
+ * Shop-only: buy `name` directly into slot 1 (Z) or slot 2 (X).
+ * Same weapon already in that slot → not used for upgrades (use applyWeaponUpgrade).
+ * Anything else → that slot now holds `name` at 0 upgrades.
  */
 function equipWeaponIntoSlot(p, name, slot) {
   if (!name || WEAPON_SLOTS.indexOf(name) < 0) return null;
   ensureUnlockedWeapons(p);
-  if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+  ensureWeaponUpgrades(p);
   const s = slot === 2 ? 2 : 1;
   const curName = s === 2 ? p.weapon2 : p.weapon;
-  let kind;
   if (curName === name) {
-    kind = 'upgrade';
-    p.weaponLevels[name] = Math.min(WEAPON_MAX_LEVEL, (getWeaponLevel(p, name) | 0 || 1) + 1);
-  } else {
-    kind = curName ? 'replace' : 'mount';
-    if (s === 1) {
-      if (p.weapon && p.weapon !== p.weapon2) p.unlockedWeapons[p.weapon] = false;
-      p.weapon = name;
-    } else {
-      if (p.weapon2 && p.weapon2 !== p.weapon) p.unlockedWeapons[p.weapon2] = false;
-      p.weapon2 = name;
-    }
-    p.weaponLevels[name] = 1;
-    p.unlockedWeapons[name] = true;
+    return { kind: 'owned', slot: s, name, lvl: weaponUpgradeCount(p, name) };
   }
+  const kind = curName ? 'replace' : 'mount';
+  if (s === 1) {
+    if (p.weapon && p.weapon !== p.weapon2) p.unlockedWeapons[p.weapon] = false;
+    p.weapon = name;
+  } else {
+    if (p.weapon2 && p.weapon2 !== p.weapon) p.unlockedWeapons[p.weapon2] = false;
+    p.weapon2 = name;
+  }
+  p.weaponUpgrades[name] = freshWeaponUpgradeRanks(name);
+  p.unlockedWeapons[name] = true;
+  syncWeaponLevelsFromUpgrades(p);
   resetWeaponSlotRuntime(p, s);
-  return { kind, slot: s, name, lvl: getWeaponLevel(p, name) };
+  return { kind, slot: s, name, lvl: weaponUpgradeCount(p, name) };
 }
 
 function shopWeaponCostForSlot(p, name, slot) {
@@ -3679,12 +3676,26 @@ function shopWeaponCostForSlot(p, name, slot) {
   const s = slot === 2 ? 2 : 1;
   const curName = s === 2 ? p.weapon2 : p.weapon;
   if (curName !== name) return 800;
-  const lvl = getWeaponLevel(p, name);
-  if (lvl >= WEAPON_MAX_LEVEL) return -1;
-  return 800 + 200 * (lvl + 1);
+  return shopUpgradeCost(p, name);
+}
+
+/** Apply one shop upgrade option. Returns { ok, err? } fields via caller. */
+function applyWeaponUpgrade(p, name, optId) {
+  if (!name || WEAPON_SLOTS.indexOf(name) < 0) return { ok: 0, err: 'item' };
+  if (p.weapon !== name && p.weapon2 !== name) return { ok: 0, err: 'owned' };
+  ensureWeaponUpgrades(p);
+  if (!canBuyWeaponUpgrade(p, name, optId)) return { ok: 0, err: 'max' };
+  const ranks = p.weaponUpgrades[name] || freshWeaponUpgradeRanks(name);
+  p.weaponUpgrades[name] = ranks;
+  ranks[optId] = (ranks[optId] | 0) + 1;
+  syncWeaponLevelsFromUpgrades(p);
+  const slot = p.weapon2 === name ? 2 : 1;
+  resetWeaponSlotRuntime(p, slot);
+  return { ok: 1, slot, name, opt: optId, lvl: weaponUpgradeCount(p, name) };
 }
 
 function packShopState(room, p) {
+  syncWeaponLevelsFromUpgrades(p);
   return {
     t: 'shop',
     wave: room.shopWave | 0,
@@ -3694,6 +3705,7 @@ function packShopState(room, p) {
     weapon: p.weapon || 'default',
     weapon2: p.weapon2 || null,
     levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
+    upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
     unlocked: Object.assign({}, ensureUnlockedWeapons(p))
   };
 }
@@ -3929,10 +3941,10 @@ function playerShopSessionOpen(room, p) {
   return !!(room.pvpShopOpen && room.pvpShopOpen.has(p.id));
 }
 
-function handleShopBuy(room, p, item, name, slot) {
+function handleShopBuy(room, p, item, name, slot, opt) {
   if (!room || !p || p.hp <= 0 || !playerShopSessionOpen(room, p)) return { ok: 0, err: 'closed' };
   ensureUnlockedWeapons(p);
-  if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+  ensureWeaponUpgrades(p);
 
   if (item === 'life') {
     const cost = 2400;
@@ -3955,9 +3967,29 @@ function handleShopBuy(room, p, item, name, slot) {
     return { ok: 1, hp: p.hp | 0 };
   }
 
+  if (item === 'upgrade') {
+    if (WEAPON_SLOTS.indexOf(name) < 0) return { ok: 0, err: 'item' };
+    const optId = opt != null ? String(opt) : '';
+    const cost = shopUpgradeCost(p, name);
+    if (cost < 0 || !canBuyWeaponUpgrade(p, name, optId)) return { ok: 0, err: 'max' };
+    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
+    p.coins = (p.coins | 0) - cost;
+    const info = applyWeaponUpgrade(p, name, optId);
+    if (!info.ok) {
+      p.coins = (p.coins | 0) + cost;
+      return info;
+    }
+    notifyPlayerCoins(room, p);
+    notifyPlayerWeapon(room, p, false, info.slot);
+    return { ok: 1, slot: info.slot, changed: info.slot, opt: optId };
+  }
+
   if (item === 'weapon') {
     if (WEAPON_SLOTS.indexOf(name) < 0) return { ok: 0, err: 'item' };
     const wantSlot = slot === 2 ? 2 : 1;
+    const curName = wantSlot === 2 ? p.weapon2 : p.weapon;
+    // Owned in that slot → client should use upgrade menu, not remount.
+    if (curName === name) return { ok: 0, err: 'owned' };
     const cost = shopWeaponCostForSlot(p, name, wantSlot);
     if (cost < 0) return { ok: 0, err: 'max' };
     if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
@@ -4151,8 +4183,9 @@ function asteroidFullyInside(a) {
  *  World rocks: wrap until ASTEROID_LIFE_MS; after that, stay on-screen then cull
  *  off-screen with no further teleports.
  *  PvP: medium/big wrap while alive; smalls never wrap.
- *  Player meteor-gun shots: exactly edgeWrapMax classic teleports (default 1), then cull. */
+ *  Player meteor-gun shots: exactly edgeWrapMax classic teleports (0 = no wrap), then cull. */
 function asteroidEdgeWrapMax(a) {
+  if (a && a.playerShot && a.edgeWrapMax != null) return Math.max(0, a.edgeWrapMax | 0);
   const m = a && a.edgeWrapMax != null ? (a.edgeWrapMax | 0) : 1;
   return m > 0 ? m : 1;
 }
@@ -4418,8 +4451,9 @@ function playerCallsign(p) {
 function spawnPlayer(id, name, colors, room) {
   const pose = playerSpawnPose(id, room);
   const wpn = 'default';
+  const upgrades = freshWeaponUpgrades();
   const levels = freshWeaponLevels();
-  const w = effectiveWeapon({ weapon: wpn, weaponLevels: levels }, wpn);
+  const w = effectiveWeapon({ weapon: wpn, weaponUpgrades: upgrades, weaponLevels: levels }, wpn);
   const pc = (colors && accountsDb.normalizeColor(colors.playerColor)) || accountsDb.DEFAULT_PLAYER_COLOR;
   const sc = (colors && accountsDb.normalizeColor(colors.shootColor)) || accountsDb.DEFAULT_SHOOT_COLOR;
   const tc = (colors && accountsDb.normalizeColor(colors.thrustColor)) || accountsDb.DEFAULT_THRUST_COLOR;
@@ -4446,6 +4480,7 @@ function spawnPlayer(id, name, colors, room) {
     weapon: wpn,
     /** Second weapon slot (X) — null when empty. */
     weapon2: null,
+    weaponUpgrades: upgrades,
     weaponLevels: levels,
     shootAmmo: w.ammo, shootCd: 0, reloadLeft: 0, bursting: false,
     railChargeLeft: 0,
@@ -4477,9 +4512,15 @@ function respawnPlayer(room, p, keepLoadout, maxHp, resetLevels) {
   p.lastHitBy = 0;
   p.hp = maxHp != null ? maxHp : MAX_HP;
   if (keepLoadout) {
-    // Keep both equipped guns (Z + X). Death: resetLevels → all L1, never demount.
+    // Keep both equipped guns (Z + X). Death: resetLevels → wipe upgrade ranks, never demount.
     if (!p.weapon) p.weapon = 'default';
-    if (resetLevels || !p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+    if (!p.weaponUpgrades) p.weaponUpgrades = freshWeaponUpgrades();
+    if (resetLevels) {
+      for (let i = 0; i < WEAPON_SLOTS.length; i++) {
+        p.weaponUpgrades[WEAPON_SLOTS[i]] = freshWeaponUpgradeRanks(WEAPON_SLOTS[i]);
+      }
+    }
+    syncWeaponLevelsFromUpgrades(p);
     ensureUnlockedWeapons(p);
     p.unlockedWeapons[p.weapon] = true;
     if (p.weapon2) p.unlockedWeapons[p.weapon2] = true;
@@ -4496,6 +4537,7 @@ function respawnPlayer(room, p, keepLoadout, maxHp, resetLevels) {
 /** changedSlot: which gun slot (1 = Z, 2 = X) this update is actually about — drives client FX. */
 function notifyPlayerWeapon(room, p, fromPickup, changedSlot) {
   const slot = WEAPON_SLOTS.indexOf(p.weapon) + 1;
+  syncWeaponLevelsFromUpgrades(p);
   const lvl = getWeaponLevel(p, p.weapon);
   const cs = changedSlot === 2 ? 2 : 1;
   for (const ws of room.clients) {
@@ -4511,6 +4553,7 @@ function notifyPlayerWeapon(room, p, fromPickup, changedSlot) {
         changedWeapon: cs === 2 ? p.weapon2 : p.weapon,
         changedLvl: cs === 2 ? (p.weapon2 ? getWeaponLevel(p, p.weapon2) : 0) : lvl,
         levels: p.weaponLevels,
+        upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
         unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
         pickup: !!fromPickup
       });
@@ -6165,7 +6208,7 @@ function resolvePlayerShotEnemyHits(room) {
       if (!hit) continue;
       // Damage only — leave velocities alone (no push / stun).
       shot.enemyHitCd = 6;
-      damageSnakePreferTurret(room, e, PLAYER_SHOT_ENEMY_DMG, shot.ownerId | 0, shot.x, shot.y, shot.r || 10);
+      damageSnakePreferTurret(room, e, (shot.shotEnemyDmg != null && Number.isFinite(+shot.shotEnemyDmg)) ? +shot.shotEnemyDmg : PLAYER_SHOT_ENEMY_DMG, shot.ownerId | 0, shot.x, shot.y, shot.r || 10);
       break;
     }
   }
@@ -6589,7 +6632,7 @@ function rocketBlastDamageAt(dist, radius, maxDmg) {
 function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
   if (!room) return;
   const R = (opts && opts.radius > 0) ? +opts.radius : ROCKET_BLAST_RADIUS;
-  let maxDmg = ROCKET_BLAST_DMG;
+  let maxDmg = (opts && opts.maxDmg > 0) ? +opts.maxDmg : ROCKET_BLAST_DMG;
   const skipEnemyId = opts && opts.skipEnemyId != null ? (opts.skipEnemyId | 0) : 0;
 
   for (const p of room.players.values()) {
@@ -6649,7 +6692,8 @@ function detonateRocket(room, b, hitKind, _applyDirectIgnored) {
   for (const a of room.asteroids) preAids.add(a.aid);
   applyRocketBlast(room, b.owner | 0, x, y, preAids, {
     skipEnemyId: b.enemyOwner | 0,
-    radius: blastR
+    radius: blastR,
+    maxDmg: (b.blastDmg > 0) ? +b.blastDmg : ROCKET_BLAST_DMG
   });
 }
 
@@ -6763,45 +6807,65 @@ function shotgunPelletMotion(aimAngle, spreadDeg, spdMin, spdMax, rnd) {
   return { ang, spd };
 }
 
+/** Hit damage for a projectile (applies default long-shot upgrade). */
+function projectileHitDmg(b) {
+  let dmg = b && b.dmg != null ? +b.dmg : 0;
+  const rank = b && (b.distDmgRank | 0);
+  if (rank > 0 && b.type === 'default') {
+    const sx = b.spawnX != null ? b.spawnX : b.x;
+    const sy = b.spawnY != null ? b.spawnY : b.y;
+    if (Math.hypot(b.x - sx, b.y - sy) >= DEFAULT_DIST_DMG_PX) {
+      dmg *= Math.pow(1.5, rank);
+    }
+  }
+  return dmg;
+}
+
 function fireProjectile(room, p, typeName) {
-  const w = effectiveWeapon(p);
+  const w = effectiveWeapon(p, typeName);
   const pose = predictedFirePose(room, p);
   const x = pose.x + Math.cos(pose.angle) * MUZZLE;
   const y = pose.y + Math.sin(pose.angle) * MUZZLE;
   const isRocket = typeName === 'rocket';
+  const isVoid = typeName === 'voidcannon';
   const speed = isRocket ? ROCKET_LAUNCH_SPEED : w.speed;
-  const vel = bulletVelocity(p, pose.angle, speed, !isRocket && !!w.relative);
-  const b = {
-    id: room.nextBulletId++,
-    owner: p.id,
-    type: typeName,
-    dmg: effectiveBulletDmg(p, typeName),
-    x, y, spawnX: x, spawnY: y,
-    vx: vel.vx,
-    vy: vel.vy,
-    spawnSt: Date.now()
-  };
-  // Default L2+: double hit circle (visual mirrors this on clients).
-  if (typeName === 'default' && getWeaponLevel(p, 'default') >= 2) {
-    const base = (BULLET_TYPES.default && BULLET_TYPES.default.size) || (2 * RES_SCALE);
-    b.size = base * 2;
+  const streamN = isVoid ? Math.max(1, w.streamCount | 0) : 1;
+  const sizeMul = isVoid && w.sizeMul ? w.sizeMul : 1;
+  const baseSize = (BULLET_TYPES[typeName] && BULLET_TYPES[typeName].size) || 0;
+
+  for (let si = 0; si < streamN; si++) {
+    const ang = pose.angle + si * (Math.PI / 2);
+    const vel = bulletVelocity(p, ang, speed, !isRocket && !!w.relative);
+    const b = {
+      id: room.nextBulletId++,
+      owner: p.id,
+      type: typeName,
+      dmg: effectiveBulletDmg(p, typeName),
+      x, y, spawnX: x, spawnY: y,
+      vx: vel.vx,
+      vy: vel.vy,
+      spawnSt: Date.now()
+    };
+    if (typeName === 'default') {
+      const distRank = getUpgradeRank(p, 'default', 'distDmg');
+      if (distRank > 0) b.distDmgRank = distRank;
+    }
+    if (isVoid && sizeMul !== 1 && baseSize > 0) {
+      b.size = baseSize * sizeMul;
+    }
+    if (isRocket) {
+      b.hp = ROCKET_HP_DEFAULT;
+      b.accel = ROCKET_ACCEL_DEFAULT;
+      b.maxSpeed = w.speed > 0 ? w.speed : 15;
+      b.homing = ROCKET_HOMING_DEFAULT;
+      b.flightAng = ang;
+      b.netLeft = ROCKET_NET_INTERVAL;
+      b.blastR = effectiveRocketBlastRadius(p);
+      b.blastDmg = effectiveRocketBlastDmg(p);
+    }
+    room.bullets.push(b);
+    roomBroadcast(room, { t: 'bf', b: packBullet(b) });
   }
-  // Void L3: 30% larger hit radius (client scales vortex + reddish tint).
-  if (typeName === 'voidcannon' && getWeaponLevel(p, 'voidcannon') >= 3) {
-    const base = (BULLET_TYPES.voidcannon && BULLET_TYPES.voidcannon.size) || (27 * RES_SCALE);
-    b.size = base * 1.3;
-  }
-  if (isRocket) {
-    b.hp = ROCKET_HP_DEFAULT;
-    b.accel = ROCKET_ACCEL_DEFAULT;
-    b.maxSpeed = w.speed > 0 ? w.speed : 15;
-    b.homing = ROCKET_HOMING_DEFAULT;
-    b.flightAng = pose.angle;
-    b.netLeft = ROCKET_NET_INTERVAL;
-    if (getWeaponLevel(p, 'rocket') >= 3) b.blastR = ROCKET_BLAST_RADIUS_L3;
-  }
-  room.bullets.push(b);
-  roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
 /** One network message per shell; pellets derived from muzzle x/y seed. */
@@ -6814,13 +6878,15 @@ function fireShotgun(room, p) {
   const y = pose.y + Math.sin(pose.angle) * MUZZLE;
   const now = Date.now();
   const dmg = effectiveBulletDmg(p, 'shotgun');
+  const sizeMul = w.pelletSizeMul > 0 ? w.pelletSizeMul : 1;
+  const baseSize = (BULLET_TYPES.shotgun && BULLET_TYPES.shotgun.size) || (2 * RES_SCALE);
   const baseId = room.nextBulletId;
   room.nextBulletId += count;
   const rnd = makeShotgunRng(x, y);
   for (let i = 0; i < count; i++) {
     const m = shotgunPelletMotion(pose.angle, w.spread || 0, spdMin, spdMax, rnd);
     const vel = bulletVelocity(p, m.ang, m.spd, !!w.relative);
-    room.bullets.push({
+    const pel = {
       id: baseId + i,
       owner: p.id,
       type: 'shotgun',
@@ -6829,7 +6895,9 @@ function fireShotgun(room, p) {
       vx: vel.vx,
       vy: vel.vy,
       spawnSt: now
-    });
+    };
+    if (sizeMul !== 1) pel.size = baseSize * sizeMul;
+    room.bullets.push(pel);
   }
   // row: [baseId, x, y, aimAngle, 0, owner, spawnSt, 'shotgun', pelletCount]
   roomBroadcast(room, {
@@ -6838,10 +6906,14 @@ function fireShotgun(room, p) {
   });
 }
 
+/**
+ * Laser: base 2 edge rays; each width rank +32% width and +2 rays (equal spacing).
+ * Damage per ray = total / rayCount (rays stack on the same target).
+ */
 function fireLaser(room, p, weaponName) {
   const name = weaponName || 'laser';
   const w = effectiveWeapon(p, name);
-  const dmg = effectiveBulletDmg(p, name);
+  const totalDmg = effectiveBulletDmg(p, name);
   const pose = predictedFirePose(room, p);
   const ox = pose.x + Math.cos(pose.angle) * MUZZLE;
   const oy = pose.y + Math.sin(pose.angle) * MUZZLE;
@@ -6849,51 +6921,27 @@ function fireLaser(room, p, weaponName) {
   const dy = Math.sin(pose.angle);
   const remaining = w.range || Math.hypot(W, H);
   const now = Date.now();
-  const wide = getWeaponLevel(p, name) >= 2;
-
-  if (!wide) {
-    // Slight per-shot flicker width — must be RES_SCALE'd like the wide beam (ENEMY_WORM_LASER.width),
-    // or a raw 2-6px value renders as a hairline (own Z-laser hides this by ignoring the server width).
-    const width = (2 + (Math.random() * 4 | 0)) * RES_SCALE;
-    const rayOpts = { enemyHitScale: PLAYER_RAY_ENEMY_HIT_SCALE };
-    const hit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining, rayOpts);
-    if (!hit) {
-      roomBroadcast(room, {
-        t: 'lf',
-        l: [room.nextBulletId++, ox, oy, ox + dx * remaining, oy + dy * remaining, width, now, p.id],
-        hit: 0,
-        w: name
-      });
-      return;
-    }
-    const hitKind = hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
-    roomBroadcast(room, {
-      t: 'lf',
-      l: [room.nextBulletId++, ox, oy, hit.x, hit.y, width, now, p.id],
-      hit: hitKind,
-      w: name
-    });
-    if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg, p.id);
-    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, p.id);
-    else if (hit.kind === 'enemy') damageSnakePreferTurret(room, hit.target, dmg, p.id, hit.x, hit.y, 6);
-    else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
-    return;
-  }
-
-  // L2+: worm-style wide beam + 2 edge raycasts; damage once per target id.
-  const width = ENEMY_WORM_LASER.width;
-  const sideOff = width * 0.35;
+  const widthRank = w.widthRank | 0;
+  const rayCount = 2 + 2 * widthRank;
+  const width = ENEMY_WORM_LASER.width * Math.pow(1.32, widthRank);
+  const dmgEach = totalDmg / rayCount;
   const px = -dy;
   const py = dx;
-  const origins = [
-    { x: ox + px * sideOff, y: oy + py * sideOff },
-    { x: ox - px * sideOff, y: oy - py * sideOff }
-  ];
+  const half = width * 0.5;
+  const origins = [];
+  if (rayCount <= 1) {
+    origins.push({ x: ox, y: oy });
+  } else {
+    for (let i = 0; i < rayCount; i++) {
+      const t = i / (rayCount - 1); // 0..1 edges inclusive
+      const off = -half + t * width;
+      origins.push({ x: ox + px * off, y: oy + py * off });
+    }
+  }
   const rays = [];
-  const damaged = new Set();
   const rayOpts = { enemyHitScale: PLAYER_RAY_ENEMY_HIT_SCALE };
-  // Centerline only for visual beam end (not a damage sample).
-  const midHit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining, rayOpts);
+  let midHit = null;
+  let anyHitKind = 0;
   for (let i = 0; i < origins.length; i++) {
     const o = origins[i];
     const hit = raycastFirst(room, p.id, o.x, o.y, dx, dy, remaining, rayOpts);
@@ -6901,27 +6949,20 @@ function fireLaser(room, p, weaponName) {
     const y1 = hit ? hit.y : o.y + dy * remaining;
     const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
     rays.push([o.x, o.y, x1, y1, hitKind]);
+    if (hit && (!midHit || hit.t < midHit.t)) midHit = hit;
+    if (hitKind > anyHitKind) anyHitKind = hitKind;
     if (!hit || !hit.target) continue;
-    // Asteroids key off `aid`, not `id` — using `id` here always left it null,
-    // so the wide L2+ player laser silently dealt zero damage to every asteroid it hit.
-    const rawId = hit.kind === 'asteroid' ? hit.target.aid : hit.target.id;
-    const tid = rawId != null ? (rawId | 0) : null;
-    if (tid == null) continue;
-    const key = hit.kind + ':' + tid;
-    if (damaged.has(key)) continue;
-    damaged.add(key);
-    if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg, p.id);
-    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, p.id);
-    else if (hit.kind === 'enemy') damageSnakePreferTurret(room, hit.target, dmg, p.id, hit.x, hit.y, 6);
-    else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
+    if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmgEach, p.id);
+    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmgEach, p.id);
+    else if (hit.kind === 'enemy') damageSnakePreferTurret(room, hit.target, dmgEach, p.id, hit.x, hit.y, 6);
+    else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmgEach);
   }
   const x1 = midHit ? midHit.x : ox + dx * remaining;
   const y1 = midHit ? midHit.y : oy + dy * remaining;
-  const hitKind = !midHit ? 0 : midHit.kind === 'player' || midHit.kind === 'rocket' ? 1 : midHit.kind === 'enemy' ? 3 : 2;
   roomBroadcast(room, {
     t: 'lf',
     l: [room.nextBulletId++, ox, oy, x1, y1, width, now, p.id],
-    hit: hitKind,
+    hit: anyHitKind,
     w: name,
     rays
   });
@@ -7008,12 +7049,13 @@ function reflectRailDir(dx, dy, nx, ny) {
 
 /**
  * One rail pierce segment: gather hits, broadcast `rf`, apply damage.
- * `opts.toroidal` — wrap images (L1). Bounce segments use Euclidean only.
+ * `opts.toroidal` — wrap images. Bounce segments use Euclidean only.
+ * `opts.dmgOverride` / `opts.width` — multi-ray callers.
  */
 function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
   opts = opts || {};
-  const dmg = effectiveBulletDmg(p, 'railgun');
-  const width = 4 * RES_SCALE;
+  const dmg = opts.dmgOverride != null ? +opts.dmgOverride : effectiveBulletDmg(p, 'railgun');
+  const width = opts.width != null ? +opts.width : 4 * RES_SCALE;
   const now = Date.now();
   const toroidal = opts.toroidal !== false;
   const maxDist = Math.max(0, range);
@@ -7183,9 +7225,28 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
   }
 }
 
-/** Charged rail shot — pierces all asteroids on the line; soft targets
- *  behind at least one asteroid take RAIL_THROUGH_ASTEROID_MULT damage.
- *  L2+: first segment to world edge, then one bounce hitscan 2 ticks later. */
+/** Always 3 rays (edges + center); width scales with upgrade; dmg ÷ 3 per ray (stacks). */
+function applyRailgunTriad(room, p, ox, oy, dx, dy, range, opts) {
+  opts = opts || {};
+  const w = effectiveWeapon(p, 'railgun');
+  const width = 4 * RES_SCALE * Math.pow(1.1, w.widthRank | 0);
+  const dmgEach = effectiveBulletDmg(p, 'railgun') / 3;
+  const px = -dy;
+  const py = dx;
+  const half = width * 0.5;
+  const offs = [-half, 0, half];
+  for (let i = 0; i < offs.length; i++) {
+    const off = offs[i];
+    applyRailgunSegment(room, p, ox + px * off, oy + py * off, dx, dy, range, Object.assign({}, opts, {
+      dmgOverride: dmgEach,
+      width,
+      skipBroadcast: i > 0
+    }));
+  }
+}
+
+/** Charged rail shot — pierces rocks; soft targets behind rocks take reduced dmg.
+ *  Bounce ranks: chain edge reflections (queued +2 ticks each). */
 function fireRailgun(room, p) {
   const w = effectiveWeapon(p, 'railgun');
   const pose = predictedFirePose(room, p);
@@ -7194,24 +7255,22 @@ function fireRailgun(room, p) {
   const dx = Math.cos(pose.angle);
   const dy = Math.sin(pose.angle);
   const fullRange = w.range || Math.hypot(W, H);
-  const bounce = getWeaponLevel(p, 'railgun') >= 2;
+  const bounces = w.bounce | 0;
 
-  if (!bounce) {
-    applyRailgunSegment(room, p, ox, oy, dx, dy, fullRange, { toroidal: true });
+  if (bounces <= 0) {
+    applyRailgunTriad(room, p, ox, oy, dx, dy, fullRange, { toroidal: true });
     return;
   }
 
   const edge = raycastWorldEdge(ox, oy, dx, dy, fullRange + 2);
   const segLen = edge ? edge.t : fullRange;
-  applyRailgunSegment(room, p, ox, oy, dx, dy, segLen, { toroidal: false });
+  applyRailgunTriad(room, p, ox, oy, dx, dy, segLen, { toroidal: false });
 
   if (!edge) return;
   const reflected = reflectRailDir(dx, dy, edge.nx, edge.ny);
   const eps = 0.75;
   const bx = edge.x + edge.nx * eps;
   const by = edge.y + edge.ny * eps;
-  const next = raycastWorldEdge(bx, by, reflected.dx, reflected.dy, fullRange + 2);
-  const bounceRange = next ? next.t : fullRange;
   if (!room.pendingRailBounces) room.pendingRailBounces = [];
   room.pendingRailBounces.push({
     tick: (room.tick | 0) + 2,
@@ -7220,7 +7279,8 @@ function fireRailgun(room, p) {
     oy: by,
     dx: reflected.dx,
     dy: reflected.dy,
-    range: bounceRange
+    range: fullRange,
+    left: bounces - 1
   });
 }
 
@@ -7233,9 +7293,26 @@ function processPendingRailBounces(room) {
     q.splice(i, 1);
     const p = room.players.get(job.ownerId);
     if (!p || (p.hp | 0) <= 0) continue;
-    applyRailgunSegment(room, p, job.ox, job.oy, job.dx, job.dy, job.range, {
+    const fullRange = job.range > 0 ? +job.range : Math.hypot(W, H);
+    const edge = raycastWorldEdge(job.ox, job.oy, job.dx, job.dy, fullRange + 2);
+    const segLen = edge ? edge.t : fullRange;
+    applyRailgunTriad(room, p, job.ox, job.oy, job.dx, job.dy, segLen, {
       toroidal: false,
       bounce: true
+    });
+    const left = job.left | 0;
+    if (left <= 0 || !edge) continue;
+    const reflected = reflectRailDir(job.dx, job.dy, edge.nx, edge.ny);
+    const eps = 0.75;
+    q.push({
+      tick: (room.tick | 0) + 2,
+      ownerId: job.ownerId | 0,
+      ox: edge.x + edge.nx * eps,
+      oy: edge.y + edge.ny * eps,
+      dx: reflected.dx,
+      dy: reflected.dy,
+      range: fullRange,
+      left: left - 1
     });
   }
 }
@@ -7259,6 +7336,7 @@ function consumeShot(room, p) {
 }
 
 function fireAsteroidGun(room, p) {
+  const w = effectiveWeapon(p, 'asteroidgun');
   const pose = predictedFirePose(room, p);
   const ang = pose.angle;
   const dx = p.prevX != null ? shortestWrapDelta(p.prevX, p.x, W) : (p.vx || 0);
@@ -7268,6 +7346,8 @@ function fireAsteroidGun(room, p) {
   if (spd < minSpd) spd = minSpd;
   const x = pose.x + Math.cos(ang) * (MUZZLE + 6);
   const y = pose.y + Math.sin(ang) * (MUZZLE + 6);
+  const sizeMul = w.sizeMul > 0 ? w.sizeMul : 1;
+  const dmgMul = w.dmgMul > 0 ? w.dmgMul : 1;
   const a = makeAsteroid({
     size: 'small',
     allowSpecial: false,
@@ -7276,8 +7356,8 @@ function fireAsteroidGun(room, p) {
     x, y,
     vx: Math.cos(ang) * spd,
     vy: Math.sin(ang) * spd,
-    r: ASTEROID_R.small * 0.85,
-    edgeWrapMax: 1,
+    r: ASTEROID_R.small * 0.85 * sizeMul,
+    edgeWrapMax: w.edgeWrapMax | 0,
     playerShot: true,
     ownerId: p.id
   });
@@ -7287,13 +7367,9 @@ function fireAsteroidGun(room, p) {
   a.maxHp = PLAYER_SHOT_ASTEROID_HP;
   a.portalArmed = false;
   a.noCollide = false;
-  // L3: higher player hit dmg; bounce vs world rocks is flat (all levels).
-  a.shotBounceDmg = PLAYER_SHOT_BOUNCE_DMG;
-  if (getWeaponLevel(p, 'asteroidgun') >= 3) {
-    a.shotHitDmg = PLAYER_SHOT_HIT_DMG_L3;
-  } else {
-    a.shotHitDmg = PLAYER_SHOT_HIT_DMG;
-  }
+  a.shotBounceDmg = Math.round(PLAYER_SHOT_BOUNCE_DMG * dmgMul);
+  a.shotHitDmg = Math.round(PLAYER_SHOT_HIT_DMG * dmgMul);
+  a.shotEnemyDmg = Math.round(PLAYER_SHOT_ENEMY_DMG * dmgMul);
   pushAsteroid(room, a);
   emitAsteroidFire(room, a);
 }
@@ -7348,7 +7424,7 @@ function updateShooting(room, p) {
         id: p.id,
         ms: Math.round(chargeMax * (1000 / TPS)),
         st: Date.now(),
-        bounce: getWeaponLevel(p, 'railgun') >= 2 ? 1 : 0
+        bounce: (getUpgradeRank(p, 'railgun', 'bounce') | 0) > 0 ? 1 : 0
       });
     }
     p.railChargeLeft--;
@@ -7880,7 +7956,7 @@ function updateBullets(room) {
         notifyShipHit(room, p);
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 1, x: b.x, y: b.y });
       } else {
-        dealDamageToPlayer(room, p, b.dmg, b.owner | 0);
+        dealDamageToPlayer(room, p, projectileHitDmg(b), b.owner | 0);
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 1, x: b.x, y: b.y });
       }
       if (room.roundResetting) return; // death already wiped bullets
@@ -7899,7 +7975,7 @@ function updateBullets(room) {
           if (b.noBlast) damageSnakePreferTurret(room, e, b.dmg || 30, b.owner | 0, b.x, b.y, 6);
           detonateRocket(room, b, 3);
         } else {
-          damageSnakePreferTurret(room, e, b.dmg, b.owner | 0, b.x, b.y, 4);
+          damageSnakePreferTurret(room, e, projectileHitDmg(b), b.owner | 0, b.x, b.y, 4);
           roomBroadcast(room, { t: 'bd', id: b.id, hit: 3, x: b.x, y: b.y });
         }
         bullets.splice(i, 1);
@@ -7951,7 +8027,7 @@ function updateBullets(room) {
         detonateRocket(room, b, 2);
       } else {
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 2, x: b.x, y: b.y });
-        damageAsteroid(room, a, b.dmg, b.owner | 0);
+        damageAsteroid(room, a, projectileHitDmg(b), b.owner | 0);
       }
       bullets.splice(i, 1);
       return true;

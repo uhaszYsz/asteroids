@@ -512,11 +512,13 @@ wss.on('connection', (ws) => {
       const item = String(msg.item || '');
       const name = msg.name != null ? String(msg.name) : '';
       const slot = msg.slot === 2 ? 2 : 1;
-      const result = handleShopBuy(room, p, item, name, slot);
+      const opt = msg.opt != null ? String(msg.opt) : '';
+      const result = handleShopBuy(room, p, item, name, slot, opt);
       send(ws, Object.assign({ t: 'shopBuy' }, result, {
         item,
         name,
         slot,
+        opt,
         wave: room.shopWave | 0,
         coins: p.coins | 0,
         score: p.coinsCollected | 0,
@@ -524,7 +526,8 @@ wss.on('connection', (ws) => {
         hp: p.hp | 0,
         weapon: p.weapon || 'default',
         weapon2: p.weapon2 || null,
-        levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
+        levels: Object.assign({}, syncWeaponLevelsFromUpgrades(p)),
+        upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
         unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
         shopTimeLeft: p.shopTimeLeft | 0,
         pvp: room.practice ? 0 : 1

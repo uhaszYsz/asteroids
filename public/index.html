@@ -955,6 +955,40 @@
       opacity: 0.35;
       cursor: default;
     }
+    .ss-upgrade-menu {
+      grid-template-columns: 1fr;
+      grid-auto-rows: minmax(0, 1fr);
+      padding-bottom: 28px;
+    }
+    .ss-upgrade-menu .ss-slot-menu-btn {
+      font-size: 12px;
+      letter-spacing: 0.02em;
+      min-height: 22px;
+    }
+    .ss-upgrade-desc {
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      bottom: 14px;
+      font: 600 9px Consolas, "Courier New", monospace;
+      color: #9ad8ef;
+      text-align: center;
+      line-height: 1.2;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ss-upgrade-meta {
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      bottom: 2px;
+      font: 600 8px Consolas, "Courier New", monospace;
+      color: #6a9aab;
+      text-align: center;
+      pointer-events: none;
+    }
     #solo-shop .ss-scanlines { display: none; }
     #solo-shop .ss-card {
       position: relative; z-index: 1;
@@ -2577,8 +2611,8 @@
       await loadScript('lib/bassoonplayer.js');
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
-      await loadScript('sim/local-server.js?v=96');
-      await loadScript('game.js?v=1134');
+      await loadScript('sim/local-server.js?v=97');
+      await loadScript('game.js?v=1135');
     } catch (err) {
       console.error(err);
     }

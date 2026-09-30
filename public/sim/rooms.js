@@ -987,7 +987,8 @@ function captureWaitingSnapshot(ws) {
       coinsCollected: p.coinsCollected | 0,
       weapon: p.weapon || 'default',
       weapon2: p.weapon2 || null,
-      weaponLevels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
+      weaponUpgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
+      weaponLevels: Object.assign({}, syncWeaponLevelsFromUpgrades(p)),
       unlockedWeapons: Object.assign({}, ensureUnlockedWeapons(p)),
       shootAmmo: p.shootAmmo | 0,
       shootCd: p.shootCd | 0,
@@ -1058,7 +1059,16 @@ function applySnapshotToRoom(room, p, snap) {
   p.weapon = sp.weapon || 'default';
   if (WEAPON_SLOTS.indexOf(p.weapon) < 0) p.weapon = 'default';
   p.weapon2 = (sp.weapon2 && WEAPON_SLOTS.indexOf(sp.weapon2) >= 0 && sp.weapon2 !== p.weapon) ? sp.weapon2 : null;
-  p.weaponLevels = Object.assign(freshWeaponLevels(), sp.weaponLevels || {});
+  if (sp.weaponUpgrades) {
+    p.weaponUpgrades = freshWeaponUpgrades();
+    for (let i = 0; i < WEAPON_SLOTS.length; i++) {
+      const k = WEAPON_SLOTS[i];
+      p.weaponUpgrades[k] = Object.assign(freshWeaponUpgradeRanks(k), sp.weaponUpgrades[k] || {});
+    }
+  } else {
+    p.weaponUpgrades = freshWeaponUpgrades();
+  }
+  syncWeaponLevelsFromUpgrades(p);
   p.unlockedWeapons = Object.assign(freshUnlockedWeapons(), sp.unlockedWeapons || {});
   p.unlockedWeapons[p.weapon] = true;
   if (p.weapon2) p.unlockedWeapons[p.weapon2] = true;
@@ -1286,7 +1296,8 @@ function startPractice(ws, queueKind, opts) {
     waitFor: queueKind || null,
     coins: p.coins | 0,
     score: p.coinsCollected | 0,
-    levels: p.weaponLevels,
+    levels: syncWeaponLevelsFromUpgrades(p),
+    upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
     unlocked: p.unlockedWeapons
   });
   notifyPlayerCoins(room, p);

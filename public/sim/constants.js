@@ -42,13 +42,14 @@ const PLAYER_HIT_OFFSET_FRONT = 5 * RES_SCALE;
 const PLAYER_HIT_OFFSET_BACK = 3 * RES_SCALE;
 const MUZZLE = 10 * RES_SCALE;
 const WEAPON_SLOTS = ['default', 'rocket', 'laser', 'shotgun', 'railgun', 'plasma', 'voidcannon', 'asteroidgun'];
+/** Max upgrade purchases per weapon (any mix of options). */
 const WEAPON_MAX_LEVEL = 3;
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
   rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 15 },
   laser: { ammo: 45, cooldown: 1, reload: 40, range: Math.hypot(W, H) },
   shotgun: {
-    ammo: 2,
+    ammo: 1,
     cooldown: 1,
     reload: 40,
     shotgun: 5,
@@ -79,23 +80,67 @@ const THRUST_RAY_ALIGN_RAD = 30 * Math.PI / 180;
 /** Ignore travel align when last-tick move is basically zero. */
 const THRUST_RAY_MIN_MOVE = 0.2 * RES_SCALE;
 const PLAYER_SHOT_ASTEROID_HP = 200;
-/** Meteor Gun rock bounce damage vs world rocks (all levels; after velocity bounce). */
+/** Meteor Gun rock bounce damage vs world rocks (after velocity bounce). */
 const PLAYER_SHOT_BOUNCE_DMG = 110;
-const PLAYER_SHOT_BOUNCE_DMG_L3 = PLAYER_SHOT_BOUNCE_DMG;
 /** Meteor Gun rock vs player — flat damage (same crash/stun path as world rocks). */
 const PLAYER_SHOT_HIT_DMG = 70;
-/** Meteor Gun L3: damage vs players. */
-const PLAYER_SHOT_HIT_DMG_L3 = PLAYER_SHOT_HIT_DMG * 2;
 /** Meteor Gun rock vs solo enemies — flat damage, no stun / no knockback. */
 const PLAYER_SHOT_ENEMY_DMG = 100;
 /** Hitting a player rocket damages hull and randomizes its heading if it survives. */
 const ROCKET_DEFLECT_RAD = 10 * Math.PI / 180;
 /** Player rocket explosion blast (world px). Falloff maxDmg → 0 by surface distance. */
 const ROCKET_BLAST_RADIUS = 32 * RES_SCALE;
-/** Rocket L3: double blast radius (128 world px at RES_SCALE=2). */
-const ROCKET_BLAST_RADIUS_L3 = 64 * RES_SCALE;
 /** Enough to one-shot common enemies (95 HP) even on a grazing contact detonation. */
 const ROCKET_BLAST_DMG = 125;
+/** Default gun: distance-dmg upgrade kicks in after this travel (world px). */
+const DEFAULT_DIST_DMG_PX = 150;
+/** Shotgun ammo hard cap (base 1 + ammo ranks). */
+const SHOTGUN_AMMO_MAX = 3;
+
+/**
+ * Independent shop upgrade options per weapon.
+ * maxRank: optional hard cap on that option alone (still limited by WEAPON_MAX_LEVEL budget).
+ */
+const WEAPON_UPGRADE_DEFS = {
+  default: [
+    { id: 'ammo', label: 'Ammo', desc: '+1 magazine ammo' },
+    { id: 'distDmg', label: 'Long shot', desc: '+50% damage after bullet travels 150px' },
+    { id: 'reload', label: 'Reload', desc: '−30% reload time' }
+  ],
+  shotgun: [
+    { id: 'pellet', label: 'Pellet', desc: '+1 pellet per shot' },
+    { id: 'ammo', label: 'Ammo', desc: '+1 ammo (max 3)', maxRank: 2 },
+    { id: 'size', label: 'Size', desc: '+30% pellet hit size' }
+  ],
+  laser: [
+    { id: 'width', label: 'Width', desc: '+32% beam width and +2 raycasts (damage split)' }
+  ],
+  railgun: [
+    { id: 'bounce', label: 'Bounce', desc: '+1 edge bounce' },
+    { id: 'ammo', label: 'Ammo', desc: '+1 ammo; shot cooldown 1s' },
+    { id: 'width', label: 'Width', desc: '+10% beam width (3 rays: edges + center)' },
+    { id: 'dmg', label: 'Damage', desc: '+50% damage' }
+  ],
+  rocket: [
+    { id: 'radius', label: 'Radius', desc: '+30% blast radius' },
+    { id: 'ammo', label: 'Ammo', desc: '+1 ammo; −30% blast damage' }
+  ],
+  asteroidgun: [
+    { id: 'bounce', label: 'Wrap', desc: '+1 edge teleport' },
+    { id: 'size', label: 'Size', desc: '+15% rock size' },
+    { id: 'dmg', label: 'Damage', desc: '+20% damage' }
+  ],
+  plasma: [
+    { id: 'ammo', label: 'Ammo', desc: '+10 magazine ammo' },
+    { id: 'dmg', label: 'Damage', desc: '+20 damage per bolt' }
+  ],
+  voidcannon: [
+    { id: 'stream', label: 'Stream', desc: '+1 orb at 90° spacing' },
+    { id: 'size', label: 'Size', desc: '+20% orb size' },
+    { id: 'reload', label: 'Reload', desc: '−30% reload time' }
+  ]
+};
+
 const BULLET_TYPES = {
   default: { dmg: 35, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   /** Direct dmg unused — rockets only deal ROCKET_BLAST_* circle damage on detonate. */
@@ -103,7 +148,7 @@ const BULLET_TYPES = {
   laser: { dmg: 7, col: 'ray', size: 0, scaleY: 1, length: 0, width: 2 * RES_SCALE },
   shotgun: { dmg: 10, col: 'circle', size: 2 * RES_SCALE, scaleY: 1, length: 4 * RES_SCALE, width: 2 * RES_SCALE },
   railgun: { dmg: 80, col: 'ray', size: 0, scaleY: 1, length: 0, width: 3 * RES_SCALE },
-  /** Engine exhaust hit — fired while thrusting (ex-melee). */
+  /** Engine exhaust hit — same range/dmg/width as old melee; drawn for now. */
   thrust: { dmg: 25, col: 'ray', size: 0, scaleY: 1, length: 0, width: 3 * RES_SCALE },
   plasma: { dmg: 6, col: 'circle', size: 5 * RES_SCALE, scaleY: 1, length: 5 * RES_SCALE, width: 2.5 * RES_SCALE },
   voidcannon: { dmg: 5, col: 'circle', size: 27 * RES_SCALE, scaleY: 1, length: 0, width: 0 },
@@ -146,49 +191,140 @@ function enemyShotCoreRadius(type, length, width) {
     * ENEMY_SHOT_VIS_SCALE * ENEMY_SHOT_HIT_FRAC;
 }
 
+function freshWeaponUpgradeRanks(weaponName) {
+  const defs = WEAPON_UPGRADE_DEFS[weaponName];
+  const o = {};
+  if (!defs) return o;
+  for (let i = 0; i < defs.length; i++) o[defs[i].id] = 0;
+  return o;
+}
+
+function freshWeaponUpgrades() {
+  const o = {};
+  for (let i = 0; i < WEAPON_SLOTS.length; i++) {
+    o[WEAPON_SLOTS[i]] = freshWeaponUpgradeRanks(WEAPON_SLOTS[i]);
+  }
+  return o;
+}
+
+function ensureWeaponUpgrades(p) {
+  if (!p.weaponUpgrades) p.weaponUpgrades = freshWeaponUpgrades();
+  for (let i = 0; i < WEAPON_SLOTS.length; i++) {
+    const k = WEAPON_SLOTS[i];
+    if (!p.weaponUpgrades[k]) p.weaponUpgrades[k] = freshWeaponUpgradeRanks(k);
+  }
+  return p.weaponUpgrades;
+}
+
+function getUpgradeRank(p, weaponName, optId) {
+  const ups = ensureWeaponUpgrades(p);
+  const ranks = ups[weaponName] || freshWeaponUpgradeRanks(weaponName);
+  return Math.max(0, ranks[optId] | 0);
+}
+
+/** Total upgrade purchases for a weapon (0..WEAPON_MAX_LEVEL). */
+function weaponUpgradeCount(p, name) {
+  const n = name || (p && p.weapon) || 'default';
+  const ranks = ensureWeaponUpgrades(p)[n] || freshWeaponUpgradeRanks(n);
+  let sum = 0;
+  for (const k of Object.keys(ranks)) sum += Math.max(0, ranks[k] | 0);
+  return Math.min(WEAPON_MAX_LEVEL, sum);
+}
+
+/** Derived HUD level = upgrade buy count (0..3). Kept for net `levels` field. */
 function freshWeaponLevels() {
-  return {
-    default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1,
-    plasma: 1, voidcannon: 1, asteroidgun: 1
-  };
+  const o = {};
+  for (let i = 0; i < WEAPON_SLOTS.length; i++) o[WEAPON_SLOTS[i]] = 0;
+  return o;
+}
+
+function syncWeaponLevelsFromUpgrades(p) {
+  ensureWeaponUpgrades(p);
+  if (!p.weaponLevels) p.weaponLevels = freshWeaponLevels();
+  for (let i = 0; i < WEAPON_SLOTS.length; i++) {
+    const k = WEAPON_SLOTS[i];
+    p.weaponLevels[k] = weaponUpgradeCount(p, k);
+  }
+  return p.weaponLevels;
 }
 
 function getWeaponLevel(p, name) {
-  const n = name || p.weapon;
-  const levels = p.weaponLevels || freshWeaponLevels();
-  return Math.max(1, Math.min(WEAPON_MAX_LEVEL, levels[n] | 0 || 1));
+  return weaponUpgradeCount(p, name);
 }
 
-/** Stats for a weapon at the player's upgrade level. */
+function findUpgradeDef(weaponName, optId) {
+  const defs = WEAPON_UPGRADE_DEFS[weaponName];
+  if (!defs) return null;
+  for (let i = 0; i < defs.length; i++) {
+    if (defs[i].id === optId) return defs[i];
+  }
+  return null;
+}
+
+/** Max rank for an option given weapon budget + optional per-option maxRank. */
+function upgradeOptMaxRank(weaponName, optId, currentBudget, currentRank) {
+  const def = findUpgradeDef(weaponName, optId);
+  if (!def) return 0;
+  const budgetLeft = WEAPON_MAX_LEVEL - (currentBudget | 0);
+  if (budgetLeft <= 0) return currentRank | 0;
+  let hard = WEAPON_MAX_LEVEL;
+  if (def.maxRank != null) hard = Math.min(hard, def.maxRank | 0);
+  return Math.min(hard, (currentRank | 0) + budgetLeft);
+}
+
+function canBuyWeaponUpgrade(p, weaponName, optId) {
+  if (!p || !findUpgradeDef(weaponName, optId)) return false;
+  const budget = weaponUpgradeCount(p, weaponName);
+  if (budget >= WEAPON_MAX_LEVEL) return false;
+  const rank = getUpgradeRank(p, weaponName, optId);
+  const maxR = upgradeOptMaxRank(weaponName, optId, budget, rank);
+  return rank < maxR;
+}
+
+function shopUpgradeCost(p, weaponName) {
+  const budget = weaponUpgradeCount(p, weaponName);
+  if (budget >= WEAPON_MAX_LEVEL) return -1;
+  return 800 + 200 * (budget + 1);
+}
+
+/** Stats for a weapon at the player's upgrade ranks. */
 function effectiveWeapon(p, name) {
   const n = name || p.weapon;
   const base = WEAPONS[n] || WEAPONS.default;
-  const lvl = getWeaponLevel(p, n);
   const w = Object.assign({}, base);
   if (base.shotgunSpeeds) w.shotgunSpeeds = base.shotgunSpeeds.slice();
+  const r = (id) => getUpgradeRank(p, n, id);
+
   if (n === 'default') {
-    // L2 = 2× bullet hit/visual size (set on fire). L3 = +1 ammo.
-    if (lvl >= 3) w.ammo += 1;
+    w.ammo = (base.ammo | 0) + r('ammo');
+    if (r('reload') > 0) {
+      w.reload = Math.max(1, Math.round(base.reload * Math.pow(0.7, r('reload'))));
+    }
   } else if (n === 'rocket') {
-    // L2 = faster reload. L3 = double blast radius (see detonateRocket).
-    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.7));
+    w.ammo = (base.ammo | 0) + r('ammo');
   } else if (n === 'shotgun') {
-    if (lvl >= 2) w.ammo += 1;
-    if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 1;
+    w.ammo = Math.min(SHOTGUN_AMMO_MAX, (base.ammo | 0) + r('ammo'));
+    w.shotgun = (base.shotgun | 0) + r('pellet');
+    w.pelletSizeMul = Math.pow(1.3, r('size'));
   } else if (n === 'laser') {
-    // L2 = wide dual-ray beam (fireLaser). L3 = +25% dmg (effectiveBulletDmg).
+    w.widthRank = r('width');
   } else if (n === 'plasma') {
-    // L2 = 7.5 dmg (effectiveBulletDmg). L3 = 60 ammo.
-    if (lvl >= 3) w.ammo = 60;
+    w.ammo = (base.ammo | 0) + 10 * r('ammo');
   } else if (n === 'asteroidgun') {
-    // L2 = 10% faster reload. L3 = 2× player hit dmg (set on fire). Bounce vs rocks is flat.
-    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
+    w.edgeWrapMax = r('bounce');
+    w.sizeMul = Math.pow(1.15, r('size'));
+    w.dmgMul = Math.pow(1.2, r('dmg'));
   } else if (n === 'voidcannon') {
-    // L2 = 10% faster reload. L3 = 30% bigger orb (set on fire + client tint).
-    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
+    w.streamCount = 1 + r('stream');
+    w.sizeMul = Math.pow(1.2, r('size'));
+    if (r('reload') > 0) {
+      w.reload = Math.max(1, Math.round(base.reload * Math.pow(0.7, r('reload'))));
+    }
   } else if (n === 'railgun') {
-    // L2 = edge bounce (handled in fireRailgun). L3 = 30% faster shot cooldown.
-    if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
+    w.ammo = (base.ammo | 0) + r('ammo');
+    w.bounce = r('bounce');
+    w.widthRank = r('width');
+    if (r('ammo') > 0) w.cooldown = Math.round(1 * TPS); // 1s between shots when ammo upgraded
   }
   return w;
 }
@@ -196,9 +332,17 @@ function effectiveWeapon(p, name) {
 function effectiveBulletDmg(p, typeName) {
   const cfg = BULLET_TYPES[typeName] || BULLET_TYPES.default;
   let dmg = cfg.dmg;
-  if (typeName === 'laser' && getWeaponLevel(p, 'laser') >= 3) dmg *= 1.25;
-  if (typeName === 'plasma' && getWeaponLevel(p, 'plasma') >= 2) dmg = 7.5;
+  if (typeName === 'plasma') dmg = cfg.dmg + 20 * getUpgradeRank(p, 'plasma', 'dmg');
+  if (typeName === 'railgun') dmg = cfg.dmg * Math.pow(1.5, getUpgradeRank(p, 'railgun', 'dmg'));
   return dmg;
+}
+
+function effectiveRocketBlastDmg(p) {
+  return ROCKET_BLAST_DMG * Math.pow(0.7, getUpgradeRank(p, 'rocket', 'ammo'));
+}
+
+function effectiveRocketBlastRadius(p) {
+  return ROCKET_BLAST_RADIUS * Math.pow(1.3, getUpgradeRank(p, 'rocket', 'radius'));
 }
 
 /** Magazine reload ticks. */

@@ -11623,8 +11623,49 @@ const GAME_KEYS = new Set([
 
 const WEAPON_NAMES = ['default', 'rocket', 'laser', 'shotgun', 'railgun', 'plasma', 'voidcannon', 'asteroidgun'];
 const WEAPON_MAX_LEVEL = 3;
+const SHOTGUN_AMMO_MAX = 3;
+/** Mirror of server WEAPON_UPGRADE_DEFS (shop upgrade option menu). */
+const WEAPON_UPGRADE_DEFS = {
+  default: [
+    { id: 'ammo', label: 'Ammo', desc: '+1 magazine ammo' },
+    { id: 'distDmg', label: 'Long shot', desc: '+50% damage after bullet travels 150px' },
+    { id: 'reload', label: 'Reload', desc: '−30% reload time' }
+  ],
+  shotgun: [
+    { id: 'pellet', label: 'Pellet', desc: '+1 pellet per shot' },
+    { id: 'ammo', label: 'Ammo', desc: '+1 ammo (max 3)', maxRank: 2 },
+    { id: 'size', label: 'Size', desc: '+30% pellet hit size' }
+  ],
+  laser: [
+    { id: 'width', label: 'Width', desc: '+32% beam width and +2 raycasts (damage split)' }
+  ],
+  railgun: [
+    { id: 'bounce', label: 'Bounce', desc: '+1 edge bounce' },
+    { id: 'ammo', label: 'Ammo', desc: '+1 ammo; shot cooldown 1s' },
+    { id: 'width', label: 'Width', desc: '+10% beam width (3 rays: edges + center)' },
+    { id: 'dmg', label: 'Damage', desc: '+50% damage' }
+  ],
+  rocket: [
+    { id: 'radius', label: 'Radius', desc: '+30% blast radius' },
+    { id: 'ammo', label: 'Ammo', desc: '+1 ammo; −30% blast damage' }
+  ],
+  asteroidgun: [
+    { id: 'bounce', label: 'Wrap', desc: '+1 edge teleport' },
+    { id: 'size', label: 'Size', desc: '+15% rock size' },
+    { id: 'dmg', label: 'Damage', desc: '+20% damage' }
+  ],
+  plasma: [
+    { id: 'ammo', label: 'Ammo', desc: '+10 magazine ammo' },
+    { id: 'dmg', label: 'Damage', desc: '+20 damage per bolt' }
+  ],
+  voidcannon: [
+    { id: 'stream', label: 'Stream', desc: '+1 orb at 90° spacing' },
+    { id: 'size', label: 'Size', desc: '+20% orb size' },
+    { id: 'reload', label: 'Reload', desc: '−30% reload time' }
+  ]
+};
 let selectedWeapon = 1; // 1 default … 8 asteroidgun
-/** Second gun slot (X) — weapon name, or null when empty. Level lives in weaponLevels[name]. */
+/** Second gun slot (X) — weapon name, or null when empty. */
 let equippedWeapon2 = null;
 /** Which loadout slot Space/Z fires (1 or 2). Left Alt toggles. */
 let activeWeaponSlot = 1;
@@ -11632,13 +11673,14 @@ let activeWeaponSlot = 1;
 let shopBuySlot = 1;
 let shopSlotMenuButtons = [];
 let shopSlotMenuFocus = 0;
+let shopUpgradeDescEl = null;
 /** Mirror of server WEAPONS — used only to gate local muzzle/fake shot FX. */
 const WEAPONS = {
   default: { ammo: 3, cooldown: 2, reload: 32, speed: 13.5 },
   rocket: { ammo: 1, cooldown: 3, reload: 45, speed: 15 },
   laser: { ammo: 45, cooldown: 1, reload: 40, range: Math.hypot(W, H) },
   shotgun: {
-    ammo: 2,
+    ammo: 1,
     cooldown: 1,
     reload: 40,
     shotgun: 5,
@@ -11650,10 +11692,25 @@ const WEAPONS = {
   voidcannon: { ammo: 1, cooldown: 1, reload: 60, speed: 2.1504 * RES_SCALE },
   asteroidgun: { ammo: 1, cooldown: 3, reload: Math.round(2.5 * TPS), speed: 8 * RES_SCALE }
 };
+/** Derived buy-count per weapon (0..3). */
 let weaponLevels = {
-  default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1,
-  plasma: 1, voidcannon: 1, asteroidgun: 1
+  default: 0, rocket: 0, laser: 0, shotgun: 0, railgun: 0,
+  plasma: 0, voidcannon: 0, asteroidgun: 0
 };
+/** Independent upgrade ranks per weapon. */
+let weaponUpgrades = null;
+function freshClientWeaponUpgrades() {
+  const o = {};
+  for (let i = 0; i < WEAPON_NAMES.length; i++) {
+    const k = WEAPON_NAMES[i];
+    const ranks = {};
+    const defs = WEAPON_UPGRADE_DEFS[k] || [];
+    for (let j = 0; j < defs.length; j++) ranks[defs[j].id] = 0;
+    o[k] = ranks;
+  }
+  return o;
+}
+weaponUpgrades = freshClientWeaponUpgrades();
 /** Solo shop unlocks — default only until bought or picked up. */
 let unlockedWeapons = {
   default: true, rocket: false, laser: false, shotgun: false,
@@ -11728,38 +11785,47 @@ function toggleActiveWeaponSlot() {
   if (soloShopOpen) updateShopSlotBadge();
 }
 
+function getLocalUpgradeRank(name, optId) {
+  const n = name || currentWeaponName();
+  if (!weaponUpgrades) weaponUpgrades = freshClientWeaponUpgrades();
+  const ranks = weaponUpgrades[n] || {};
+  return Math.max(0, ranks[optId] | 0);
+}
+
 function getLocalWeaponLevel(name) {
   const n = name || currentWeaponName();
-  return Math.max(1, Math.min(WEAPON_MAX_LEVEL, weaponLevels[n] | 0 || 1));
+  if (weaponUpgrades && weaponUpgrades[n]) {
+    let sum = 0;
+    const ranks = weaponUpgrades[n];
+    for (const k of Object.keys(ranks)) sum += Math.max(0, ranks[k] | 0);
+    return Math.min(WEAPON_MAX_LEVEL, sum);
+  }
+  return Math.max(0, Math.min(WEAPON_MAX_LEVEL, weaponLevels[n] | 0));
 }
 
 function effectiveLocalWeapon(name) {
   const n = name || currentWeaponName();
   const base = WEAPONS[n] || WEAPONS.default;
-  const lvl = getLocalWeaponLevel(n);
   const w = Object.assign({}, base);
+  const r = (id) => getLocalUpgradeRank(n, id);
   if (n === 'default') {
-    // L2 = 2× bullet size (server sets b.size). L3 = +1 ammo.
-    if (lvl >= 3) w.ammo += 1;
+    w.ammo = (base.ammo | 0) + r('ammo');
+    if (r('reload') > 0) w.reload = Math.max(1, Math.round(base.reload * Math.pow(0.7, r('reload'))));
   } else if (n === 'rocket') {
-    // L2 = faster reload. L3 = double blast radius (server).
-    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.7));
+    w.ammo = (base.ammo | 0) + r('ammo');
   } else if (n === 'shotgun') {
-    if (lvl >= 2) w.ammo += 1;
-    if (lvl >= 3) w.shotgun = (base.shotgun | 0) + 1;
+    w.ammo = Math.min(SHOTGUN_AMMO_MAX, (base.ammo | 0) + r('ammo'));
+    w.shotgun = (base.shotgun | 0) + r('pellet');
   } else if (n === 'laser') {
-    // L2 = wide dual-ray (server). L3 = +25% dmg (server).
+    w.widthRank = r('width');
   } else if (n === 'plasma') {
-    // L2 = 7.5 dmg (server). L3 = 60 ammo.
-    if (lvl >= 3) w.ammo = 60;
-  } else if (n === 'asteroidgun') {
-    // L2 = 10% faster reload. L3 = 2× player hit dmg (server). Bounce vs rocks is flat.
-    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
+    w.ammo = (base.ammo | 0) + 10 * r('ammo');
   } else if (n === 'voidcannon') {
-    // L2 = 10% faster reload. L3 = 30% bigger + reddish (server size / client tint).
-    if (lvl >= 2) w.reload = Math.max(1, Math.round(base.reload * 0.9));
+    w.streamCount = 1 + r('stream');
+    if (r('reload') > 0) w.reload = Math.max(1, Math.round(base.reload * Math.pow(0.7, r('reload'))));
   } else if (n === 'railgun') {
-    if (lvl >= 3) w.cooldown = Math.max(1, Math.round(base.cooldown * 0.7));
+    w.ammo = (base.ammo | 0) + r('ammo');
+    if (r('ammo') > 0) w.cooldown = Math.round(1 * TPS);
   }
   return w;
 }
@@ -11827,7 +11893,9 @@ function tryStartLocalBurst(slot) {
     const w = effectiveLocalWeapon(name);
     // Beam stays up while this slot is bursting (ammo dump on sim ticks) — not wall-clock ms.
     // L2+: worm-width beam (matches server ENEMY_WORM_LASER.width = 12*RES_SCALE).
-    const wideW = getLocalWeaponLevel('laser') >= 2 ? (12 * RES_SCALE) : 0;
+    const wideW = getLocalUpgradeRank('laser', 'width') >= 0
+      ? (12 * RES_SCALE) * Math.pow(1.32, getLocalUpgradeRank('laser', 'width'))
+      : 0;
     startLocalLaserClip(
       w.range != null ? w.range : LASER_RANGE,
       COL.laser,
@@ -11987,7 +12055,7 @@ function armRailCharge(ownerId, ms, serverSt, bounce) {
   }
   const wantBounce = bounce != null
     ? !!(bounce | 0)
-    : (ownerId === myId && getLocalWeaponLevel('railgun') >= 2);
+    : (ownerId === myId && getLocalUpgradeRank('railgun', 'bounce') > 0);
   railCharges.set(ownerId, {
     start,
     until,
@@ -12016,7 +12084,7 @@ function emitPredictedRailBeam(ownerId) {
   if (!pose) return;
   const m = shipMuzzle(pose.x, pose.y, pose.angle);
   const ch = railCharges.get(ownerId);
-  const bounce = !!(ch && ch.bounce) || (ownerId === myId && getLocalWeaponLevel('railgun') >= 2);
+  const bounce = !!(ch && ch.bounce) || (ownerId === myId && getLocalUpgradeRank('railgun', 'bounce') > 0);
   const segs = railAimSegments(m.x, m.y, m.c, m.s, bounce);
   const width = 4 * RES_SCALE;
   // Drop any prior predicted beam for this owner.
@@ -13365,12 +13433,12 @@ function updateLoadoutHud() {
   if (loadoutZNameEl) {
     const zName = currentWeaponName() || 'default';
     const zLvl = getLocalWeaponLevel(zName);
-    loadoutZNameEl.textContent = shopItemLabel(zName) + (zLvl > 1 ? ' L' + zLvl : '');
+    loadoutZNameEl.textContent = shopItemLabel(zName) + (zLvl > 0 ? ' L' + zLvl : '');
   }
   if (loadoutXNameEl) {
     if (equippedWeapon2) {
       const xLvl = getLocalWeaponLevel(equippedWeapon2);
-      loadoutXNameEl.textContent = shopItemLabel(equippedWeapon2) + (xLvl > 1 ? ' L' + xLvl : '');
+      loadoutXNameEl.textContent = shopItemLabel(equippedWeapon2) + (xLvl > 0 ? ' L' + xLvl : '');
     } else {
       loadoutXNameEl.textContent = '—';
     }
@@ -13526,11 +13594,40 @@ function shopCreditPrice(n) {
   return '$' + (n | 0);
 }
 
-/** Mirrors server classifyWeaponAcquire: which gun slot (Z=1 / X=2) picking up `name` affects. */
+/** Mirrors server classifyWeaponAcquire. */
 function classifyWeaponAcquireClient(st, name) {
-  if (st.weapon === name) return { kind: 'upgrade', slot: 1 };
-  if (st.weapon2 === name) return { kind: 'upgrade', slot: 2 };
+  if (st.weapon === name) return { kind: 'owned', slot: 1 };
+  if (st.weapon2 === name) return { kind: 'owned', slot: 2 };
   return { kind: st.weapon2 ? 'replace' : 'mount', slot: st.weapon2 ? 1 : 2 };
+}
+
+function shopUpgradeBudgetClient(st, name) {
+  if (st.upgrades && st.upgrades[name]) {
+    let sum = 0;
+    const ranks = st.upgrades[name];
+    for (const k of Object.keys(ranks)) sum += Math.max(0, ranks[k] | 0);
+    return Math.min(WEAPON_MAX_LEVEL, sum);
+  }
+  return Math.max(0, Math.min(WEAPON_MAX_LEVEL, (st.levels && st.levels[name]) | 0));
+}
+
+function shopUpgradeCostClient(st, name) {
+  const budget = shopUpgradeBudgetClient(st, name);
+  if (budget >= WEAPON_MAX_LEVEL) return -1;
+  return 800 + 200 * (budget + 1);
+}
+
+function shopCanBuyOptClient(st, name, optId) {
+  const defs = WEAPON_UPGRADE_DEFS[name];
+  if (!defs) return false;
+  let def = null;
+  for (let i = 0; i < defs.length; i++) if (defs[i].id === optId) { def = defs[i]; break; }
+  if (!def) return false;
+  const budget = shopUpgradeBudgetClient(st, name);
+  if (budget >= WEAPON_MAX_LEVEL) return false;
+  const rank = (st.upgrades && st.upgrades[name] && st.upgrades[name][optId]) | 0;
+  if (def.maxRank != null && rank >= (def.maxRank | 0)) return false;
+  return true;
 }
 
 /** Mirrors server shopWeaponCostForSlot for a chosen gun slot. */
@@ -13538,9 +13635,7 @@ function shopWeaponCostForSlotClient(st, name, slot) {
   const s = slot === 2 ? 2 : 1;
   const curName = s === 2 ? st.weapon2 : st.weapon;
   if (curName !== name) return 800;
-  const lvl = Math.max(1, (st.levels && st.levels[name]) | 0 || 1);
-  if (lvl >= WEAPON_MAX_LEVEL) return -1;
-  return 800 + 200 * (lvl + 1);
+  return shopUpgradeCostClient(st, name);
 }
 
 function shopWeaponCostClient(st, name) {
@@ -13557,7 +13652,7 @@ function updateShopSlotBadge() {
 }
 
 function closeShopWeaponSlotMenu() {
-  const m = document.getElementById('ss-slot-menu');
+  const m = document.getElementById('ss-slot-menu') || document.getElementById('ss-upgrade-menu');
   if (m) {
     const host = m.parentElement;
     m.remove();
@@ -13565,10 +13660,11 @@ function closeShopWeaponSlotMenu() {
   }
   shopSlotMenuButtons = [];
   shopSlotMenuFocus = 0;
+  shopUpgradeDescEl = null;
 }
 
 function shopSlotMenuIsOpen() {
-  return !!document.getElementById('ss-slot-menu');
+  return !!(document.getElementById('ss-slot-menu') || document.getElementById('ss-upgrade-menu'));
 }
 
 function shopSlotMenuApplyFocus() {
@@ -13581,6 +13677,10 @@ function shopSlotMenuApplyFocus() {
   const b = btns[shopSlotMenuFocus];
   if (b && typeof b.focus === 'function') {
     try { b.focus({ preventScroll: true }); } catch (_) { try { b.focus(); } catch (__) {} }
+  }
+  if (shopUpgradeDescEl) {
+    const desc = b && b.dataset ? (b.dataset.desc || '') : '';
+    shopUpgradeDescEl.textContent = desc;
   }
 }
 
@@ -13606,7 +13706,6 @@ function shopSlotMenuActivate() {
 
 /**
  * Two outlined slot buttons (1 / 2) overlaid on the shop weapon cell.
- * Esc cancels; no title / cancel row.
  */
 function openShopWeaponSlotMenuForEl(name, el) {
   closeShopWeaponSlotMenu();
@@ -13643,6 +13742,66 @@ function openShopWeaponSlotMenuForEl(name, el) {
     menu.appendChild(btn);
     shopSlotMenuButtons.push(btn);
   }
+  el.appendChild(menu);
+  shopSlotMenuFocus = 0;
+  for (let i = 0; i < shopSlotMenuButtons.length; i++) {
+    if (!shopSlotMenuButtons[i].disabled) {
+      shopSlotMenuFocus = i;
+      break;
+    }
+  }
+  shopSlotMenuApplyFocus();
+}
+
+/** Owned-weapon upgrade options menu (arrow focus + bottom description). */
+function openShopUpgradeMenuForEl(name, el) {
+  closeShopWeaponSlotMenu();
+  const st = soloShopState;
+  if (!st || !el) return;
+  const defs = WEAPON_UPGRADE_DEFS[name];
+  if (!defs || !defs.length) return;
+  el.classList.add('ss-slot-picking');
+  const menu = document.createElement('div');
+  menu.id = 'ss-upgrade-menu';
+  menu.className = 'ss-slot-menu ss-upgrade-menu';
+  menu.setAttribute('role', 'menu');
+  menu.tabIndex = -1;
+  shopSlotMenuButtons = [];
+  const cost = shopUpgradeCostClient(st, name);
+  const budget = shopUpgradeBudgetClient(st, name);
+  for (let i = 0; i < defs.length; i++) {
+    const def = defs[i];
+    const rank = (st.upgrades && st.upgrades[name] && st.upgrades[name][def.id]) | 0;
+    const can = cost > 0 && shopCanBuyOptClient(st, name, def.id) && st.coins >= cost;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ss-slot-menu-btn';
+    btn.setAttribute('role', 'menuitem');
+    btn.dataset.desc = def.desc || '';
+    btn.textContent = def.label + ' ' + rank;
+    btn.title = def.desc || def.label;
+    if (!can) btn.disabled = true;
+    else {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeShopWeaponSlotMenu();
+        sendShopBuy('upgrade', name, 1, def.id);
+      });
+    }
+    menu.appendChild(btn);
+    shopSlotMenuButtons.push(btn);
+  }
+  const desc = document.createElement('div');
+  desc.className = 'ss-upgrade-desc';
+  desc.textContent = '';
+  menu.appendChild(desc);
+  shopUpgradeDescEl = desc;
+  const meta = document.createElement('div');
+  meta.className = 'ss-upgrade-meta';
+  meta.textContent = 'LVL ' + budget + '/' + WEAPON_MAX_LEVEL
+    + (cost > 0 ? ' · ' + shopCreditPrice(cost) : ' · MAX');
+  menu.appendChild(meta);
   el.appendChild(menu);
   shopSlotMenuFocus = 0;
   for (let i = 0; i < shopSlotMenuButtons.length; i++) {
@@ -13723,6 +13882,29 @@ function updateShopPreviews() {
   }
 }
 
+function applyClientWeaponUpgrades(src) {
+  weaponUpgrades = freshClientWeaponUpgrades();
+  if (!src) {
+    weaponLevels = {
+      default: 0, rocket: 0, laser: 0, shotgun: 0, railgun: 0,
+      plasma: 0, voidcannon: 0, asteroidgun: 0
+    };
+    return;
+  }
+  for (let i = 0; i < WEAPON_NAMES.length; i++) {
+    const k = WEAPON_NAMES[i];
+    if (src[k]) weaponUpgrades[k] = Object.assign(weaponUpgrades[k], src[k]);
+  }
+  weaponLevels = {
+    default: 0, rocket: 0, laser: 0, shotgun: 0, railgun: 0,
+    plasma: 0, voidcannon: 0, asteroidgun: 0
+  };
+  for (let i = 0; i < WEAPON_NAMES.length; i++) {
+    const k = WEAPON_NAMES[i];
+    weaponLevels[k] = getLocalWeaponLevel(k);
+  }
+}
+
 function applyShopState(st) {
   if (!st) return;
   const keepWave = soloShopState ? (soloShopState.wave | 0) : 0;
@@ -13733,6 +13915,13 @@ function applyShopState(st) {
   const unlocked = Object.assign({}, blankUnlock, st.unlocked || {});
   const cur = (st.weapon || currentWeaponName() || 'default');
   const cur2 = st.weapon2 !== undefined ? (st.weapon2 || null) : equippedWeapon2;
+  applyClientWeaponUpgrades(st.upgrades || null);
+  if (!st.upgrades && st.levels) {
+    weaponLevels = Object.assign({
+      default: 0, rocket: 0, laser: 0, shotgun: 0, railgun: 0,
+      plasma: 0, voidcannon: 0, asteroidgun: 0
+    }, st.levels || {});
+  }
   soloShopState = {
     wave: st.wave != null ? (st.wave | 0) : keepWave,
     coins: st.coins | 0,
@@ -13740,13 +13929,13 @@ function applyShopState(st) {
     lives: st.lives | 0,
     weapon: cur,
     weapon2: cur2,
-    levels: Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, st.levels || {}),
+    levels: Object.assign({}, weaponLevels),
+    upgrades: JSON.parse(JSON.stringify(weaponUpgrades)),
     unlocked
   };
   setLocalCoins(soloShopState.coins);
   if (st.score != null) setLocalScore(st.score);
   setSoloLives(soloShopState.lives);
-  weaponLevels = Object.assign({}, soloShopState.levels);
   unlockedWeapons = Object.assign({}, blankUnlock, unlocked);
   equippedWeapon2 = cur2;
   if ((activeWeaponSlot | 0) === 2 && !equippedWeapon2) activeWeaponSlot = 1;
@@ -13840,10 +14029,10 @@ function renderSoloShop() {
       nameEl.textContent = shopItemLabel(name);
       row.appendChild(nameEl);
       if (isCur) {
-        const lvl = Math.max(1, (st.levels[name] | 0) || 1);
+        const lvl = shopUpgradeBudgetClient(st, name);
         const lvlEl = document.createElement('div');
         lvlEl.className = 'ss-lvl';
-        lvlEl.textContent = (slotHere === 1 ? '1' : '2') + ' · LVL ' + lvl;
+        lvlEl.textContent = (slotHere === 1 ? '1' : '2') + ' · LVL ' + lvl + '/' + WEAPON_MAX_LEVEL;
         row.appendChild(lvlEl);
       }
       const price = document.createElement('div');
@@ -13855,7 +14044,7 @@ function renderSoloShop() {
         price.textContent = shopCreditPrice(cost);
         if (st.coins < cost) row.classList.add('ss-owned');
         else {
-          // Click focuses; Space opens slot context menu.
+          // Click focuses; Space opens slot context menu / upgrade menu.
           row.addEventListener('click', (ev) => {
             ev.preventDefault();
             focusShopWeaponRow(row);
@@ -13863,11 +14052,11 @@ function renderSoloShop() {
           weaponRow.push({
             el: row,
             activate: (key) => {
-              // Already equipped → upgrade that slot immediately (no menu).
+              // Already equipped → open upgrade option menu.
               if (slotHere === 1 || slotHere === 2) {
                 shopBuySlot = slotHere;
                 updateShopSlotBadge();
-                sendShopBuy('weapon', name, slotHere);
+                openShopUpgradeMenuForEl(name, row);
                 return;
               }
               if (key === 'z' || key === 'x') {
@@ -13945,9 +14134,11 @@ function shopActivateFocus(key) {
   if (item) item.activate(key);
 }
 
-function sendShopBuy(item, name, slot) {
+function sendShopBuy(item, name, slot, opt) {
   if (!ws || ws.readyState !== 1 || !soloShopOpen) return;
-  ws.send(JSON.stringify({ t: 'shopBuy', item, name, slot: slot === 2 ? 2 : 1 }));
+  const msg = { t: 'shopBuy', item, name, slot: slot === 2 ? 2 : 1 };
+  if (opt) msg.opt = opt;
+  ws.send(JSON.stringify(msg));
 }
 
 function showSoloShop(st) {
@@ -16916,7 +17107,7 @@ function resetMatchState() {
   localLaserClip = null;
   selectedWeapon = 1;
   equippedWeapon2 = null;
-  weaponLevels = { default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 };
+  applyClientWeaponUpgrades(null);
   unlockedWeapons = {
     default: true, rocket: false, laser: false, shotgun: false,
     railgun: false, plasma: false, voidcannon: false, asteroidgun: false
@@ -23291,7 +23482,7 @@ function enterGameFromWelcome(msg) {
   localLaserClip = null;
   selectedWeapon = 1;
   equippedWeapon2 = null;
-  weaponLevels = { default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 };
+  applyClientWeaponUpgrades(null);
   unlockedWeapons = {
     default: true, rocket: false, laser: false, shotgun: false,
     railgun: false, plasma: false, voidcannon: false, asteroidgun: false
@@ -23372,7 +23563,11 @@ function enterGameFromWelcome(msg) {
   if (msg.score != null) {
     setLocalScore(msg.score);
   }
-  if (msg.levels) weaponLevels = Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, msg.levels);
+  if (msg.upgrades) applyClientWeaponUpgrades(msg.upgrades);
+  else if (msg.levels) {
+    applyClientWeaponUpgrades(null);
+    weaponLevels = Object.assign(weaponLevels, msg.levels);
+  }
   if (msg.unlocked) {
     unlockedWeapons = {
       default: false, rocket: false, laser: false, shotgun: false,
@@ -24005,7 +24200,7 @@ function handleWsMessage(e) {
       if (msg.ok) {
         // Which gun slot this purchase touched — mirror the server's rule against the PRE-buy state.
         const prevSt = soloShopState;
-        const boughtSlot = (msg.item === 'weapon')
+        const boughtSlot = (msg.item === 'weapon' || msg.item === 'upgrade')
           ? ((msg.slot | 0) === 2 || (msg.changed | 0) === 2 ? 2
             : ((msg.slot | 0) === 1 || (msg.changed | 0) === 1 ? 1
               : (prevSt && msg.name ? classifyWeaponAcquireClient(prevSt, msg.name).slot : 1)))
@@ -24018,9 +24213,9 @@ function handleWsMessage(e) {
         }
         if (msg.hp != null) player.hp = msg.hp | 0;
         // Reset only the gun slot this purchase actually changed.
-        if (msg.item === 'weapon' && boughtSlot === 2 && equippedWeapon2) {
+        if ((msg.item === 'weapon' || msg.item === 'upgrade') && boughtSlot === 2 && equippedWeapon2) {
           resetLocalShoot(equippedWeapon2, 2);
-        } else {
+        } else if (msg.item === 'weapon' || msg.item === 'upgrade') {
           resetLocalShoot(currentWeaponName(), 1);
         }
         if (boughtSlot === 1 || boughtSlot === 2) {
@@ -24262,8 +24457,10 @@ function handleWsMessage(e) {
       if (msg.w) selectedWeapon = msg.w | 0;
       if (msg.weapon2 !== undefined) equippedWeapon2 = msg.weapon2 || null;
       if ((activeWeaponSlot | 0) === 2 && !equippedWeapon2) activeWeaponSlot = 1;
-      if (msg.levels) {
-        weaponLevels = Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, msg.levels);
+      if (msg.upgrades) applyClientWeaponUpgrades(msg.upgrades);
+      else if (msg.levels) {
+        applyClientWeaponUpgrades(null);
+        weaponLevels = Object.assign(weaponLevels, msg.levels);
       } else if (msg.lvl != null && msg.weapon) {
         weaponLevels[msg.weapon] = msg.lvl | 0;
       }
@@ -24436,8 +24633,10 @@ function handleWsMessage(e) {
       selectedWeapon = msg.w != null ? (msg.w | 0) : 1;
       if (msg.weapon2 !== undefined) equippedWeapon2 = msg.weapon2 || null;
       if ((activeWeaponSlot | 0) === 2 && !equippedWeapon2) activeWeaponSlot = 1;
-      if (msg.levels) {
-        weaponLevels = Object.assign({ default: 1, rocket: 1, laser: 1, shotgun: 1, railgun: 1, plasma: 1, voidcannon: 1, asteroidgun: 1 }, msg.levels);
+      if (msg.upgrades) applyClientWeaponUpgrades(msg.upgrades);
+      else if (msg.levels) {
+        applyClientWeaponUpgrades(null);
+        weaponLevels = Object.assign(weaponLevels, msg.levels);
       }
       if (msg.ammo != null) {
         resetLocalShoot(currentWeaponName(), 1);
