@@ -17662,8 +17662,9 @@ const ENEMY_UFO_HIT_LEN = 84;
 const ENEMY_UFO_HIT_WID = 26;
 const ENEMY_UFO_HIT_R = Math.hypot(ENEMY_UFO_HIT_LEN * 0.5, ENEMY_UFO_HIT_WID * 0.5);
 ENEMY_R.ufo = ENEMY_UFO_HIT_R;
-/** Gunship (Worm 184) after 270° CW: fw=39, fh=81 — match server OBB × sprite scale. */
-const ENEMY_GUNSHIP_SPRITE_SCALE = 2;
+/** Gunship (Worm 184) after 270° CW: fw=39, fh=81 — match server OBB × sprite scale.
+ *  3.4 ≈ 2× old Craft 224 length (this PNG is much smaller than 224). */
+const ENEMY_GUNSHIP_SPRITE_SCALE = 3.4;
 const ENEMY_GUNSHIP_HIT_LEN = Math.round(81 * ENEMY_GUNSHIP_SPRITE_SCALE);
 const ENEMY_GUNSHIP_HIT_WID = Math.round((39 * 0.5) * ENEMY_GUNSHIP_SPRITE_SCALE);
 const ENEMY_GUNSHIP_HIT_R = Math.hypot(ENEMY_GUNSHIP_HIT_LEN * 0.5, ENEMY_GUNSHIP_HIT_WID * 0.5);
