@@ -1077,7 +1077,9 @@ function packEnemy(e) {
     e.y,
     dir,
     packEnemyNetSpeed(e),
-    (e.kind === 'worm' || e.kind === 'gunship') ? (e.wormPhase | 0) : 0,
+    (e.kind === 'worm' || e.kind === 'gunship')
+      ? (e.wormPhase | 0)
+      : (e.kind === 'snake' ? Math.max(1, e.snakeSegMax | 0) : 0),
     e.enteredPlay ? 1 : 0
   ];
 }
@@ -1099,7 +1101,9 @@ function packEnemySnap(e) {
     dir,
     e.enteredPlay ? 1 : 0,
     packEnemyNetSpeed(e),
-    (e.kind === 'worm' || e.kind === 'gunship') ? (e.wormPhase | 0) : 0
+    (e.kind === 'worm' || e.kind === 'gunship')
+      ? (e.wormPhase | 0)
+      : (e.kind === 'snake' ? Math.max(1, e.snakeSegMax | 0) : 0)
   ];
 }
 
@@ -1309,7 +1313,8 @@ function makeEnemy(kind, wave, weapon) {
     flankLeft: 0,
     flankDur: 0,
     // Snake: head path stamps (every ENEMY_SNAKE_FOLLOW_DIST px) for tail hits.
-    snakeTrail: null
+    snakeTrail: null,
+    snakeSegMax: k === 'snake' ? ENEMY_SNAKE_SEGMENTS : 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -1323,17 +1328,18 @@ function makeEnemy(kind, wave, weapon) {
   }
   if (k === 'snake') {
     e.snakeTrail = [{ x: e.x, y: e.y }];
+    e.snakeSegMax = ENEMY_SNAKE_SEGMENTS;
   }
   return e;
 }
 
-/** Stamp head pose every FOLLOW_DIST of travel; keep last SEGMENTS stamps (tail colliders).
+/** Stamp head pose every FOLLOW_DIST of travel; keep last snakeSegMax stamps (tail colliders).
  *  Uses wrap-shortest distance so edge crossings don't wipe the trail. */
 function updateSnakeTrail(e) {
   if (!e || e.kind !== 'snake') return;
   if (!e.snakeTrail) e.snakeTrail = [];
   const gap = ENEMY_SNAKE_FOLLOW_DIST;
-  const maxN = ENEMY_SNAKE_SEGMENTS;
+  const maxN = Math.max(1, (e.snakeSegMax | 0) || ENEMY_SNAKE_SEGMENTS);
   if (!e.snakeTrail.length) {
     e.snakeTrail.push({ x: e.x, y: e.y });
     return;
@@ -1360,6 +1366,67 @@ function updateSnakeTrail(e) {
     rem -= gap;
     while (e.snakeTrail.length > maxN) e.snakeTrail.shift();
   }
+}
+
+/** Grow trail length: pad copies of the tip (oldest stamp) so new segs pile at the end. */
+function growSnakeTrail(e, addN) {
+  const n = addN | 0;
+  if (!e || e.kind !== 'snake' || n <= 0) return;
+  e.snakeSegMax = Math.max(1, (e.snakeSegMax | 0) || ENEMY_SNAKE_SEGMENTS) + n;
+  if (!e.snakeTrail || !e.snakeTrail.length) {
+    e.snakeTrail = [{ x: e.x, y: e.y }];
+  }
+  const tip = e.snakeTrail[0];
+  for (let i = 0; i < n; i++) {
+    e.snakeTrail.unshift({ x: tip.x, y: tip.y });
+  }
+}
+
+/**
+ * Snake head vs asteroids: remove rock (no split / no coins) and grow +7 body stamps.
+ * Check cadence matches worm crush.
+ */
+function snakeEatAsteroids(room, e) {
+  if (!e || e.kind !== 'snake' || !room || (e.hp | 0) <= 0) return;
+  if (!enemyIsSpawned(e)) return;
+  e.astCheckLeft = (e.astCheckLeft | 0) - 1;
+  if ((e.astCheckLeft | 0) > 0) return;
+  e.astCheckLeft = ENEMY_WORM_AST_CHECK;
+
+  const er = e.r || ENEMY_R.snake || ENEMY_R.common || 10;
+  const queryR = er + (ASTEROID_R.big || 40);
+  const headCir = { x: e.x, y: e.y, r: er };
+  const crush = [];
+  forEachAsteroidNear(room, e.x, e.y, queryR, (a) => {
+    if (!a || a.noCollide || a.hp <= 0) return false;
+    if (!asteroidOverlapsPlayfield(a)) return false;
+    if (!circleVsAsteroidPoly(headCir, a)) return false;
+    crush.push(a);
+    return false;
+  });
+  if (!crush.length) return;
+  let grew = 0;
+  for (let i = 0; i < crush.length; i++) {
+    const a = crush[i];
+    if (!a || room.asteroids.indexOf(a) < 0 || a.hp <= 0) continue;
+    // Quietly drop linked portal twin / parent (same as damage kill path).
+    if (a.portalOfAid != null) {
+      const parent = findAsteroidByAid(room, a.portalOfAid);
+      a.portalOfAid = null;
+      if (parent) {
+        parent.portalTwinAid = null;
+        removePortalTwin(room, parent);
+        emitAsteroidDead(room, parent.aid, true);
+        removeAsteroid(room, parent);
+      }
+    }
+    removePortalTwin(room, a);
+    emitAsteroidDead(room, a.aid, false, a.x, a.y, 0);
+    removeAsteroid(room, a);
+    growSnakeTrail(e, ENEMY_SNAKE_GROW_PER_EAT);
+    grew++;
+  }
+  if (grew > 0) emitEnemyUpdate(room, e);
 }
 
 /**
@@ -2837,7 +2904,10 @@ function updateEnemies(room) {
         e.ty = target.y;
       }
       stepEnemyMovement(e);
-      if (e.kind === 'snake') updateSnakeTrail(e);
+      if (e.kind === 'snake') {
+        updateSnakeTrail(e);
+        snakeEatAsteroids(room, e);
+      }
       if (e.kind === 'common1') enemyTryFire(room, e);
       chaseSnap = true;
       continue;

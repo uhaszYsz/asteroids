@@ -18003,23 +18003,46 @@ function parseEnemyKind(raw) {
   return 'common';
 }
 
-/** Local path-trail tail (server only syncs the head). */
+/** Local path-trail tail (server only syncs the head). Length follows e.snakeSegMax. */
+function snakeSegTarget(e) {
+  const n = e && (e.snakeSegMax | 0);
+  return n > 0 ? n : ENEMY_SNAKE_SEGMENTS;
+}
+
 function ensureSnakeSegs(e, headX, headY, headAng) {
   if (!e || e.kind !== 'snake') return;
-  if (e.snakeSegs && e.snakeSegs.length === ENEMY_SNAKE_SEGMENTS && e.snakeTrail) return;
+  const want = snakeSegTarget(e);
   const ang = headAng || 0;
-  const segs = [];
-  for (let i = 0; i < ENEMY_SNAKE_SEGMENTS; i++) {
-    segs.push({
-      x: headX,
-      y: headY,
-      angle: ang,
-      scale: snakeSegmentScaleClient(i)
+  if (!e.snakeSegs || !e.snakeSegs.length) {
+    const segs = [];
+    for (let i = 0; i < want; i++) {
+      segs.push({
+        x: headX,
+        y: headY,
+        angle: ang,
+        scale: snakeSegmentScaleClient(i)
+      });
+    }
+    e.snakeSegs = segs;
+    e.snakeTrail = [{ x: headX, y: headY, dist: 0 }];
+    e.snakeTrailLen = 0;
+    return;
+  }
+  // Grow: pile new segs on the current tip (last body segment), same as spawn peel-off.
+  while (e.snakeSegs.length < want) {
+    const last = e.snakeSegs[e.snakeSegs.length - 1];
+    e.snakeSegs.push({
+      x: last.x,
+      y: last.y,
+      angle: last.angle,
+      scale: snakeSegmentScaleClient(e.snakeSegs.length)
     });
   }
-  e.snakeSegs = segs;
-  e.snakeTrail = [{ x: headX, y: headY, dist: 0 }];
-  e.snakeTrailLen = 0;
+  while (e.snakeSegs.length > want) e.snakeSegs.pop();
+  if (!e.snakeTrail) {
+    e.snakeTrail = [{ x: headX, y: headY, dist: 0 }];
+    e.snakeTrailLen = 0;
+  }
 }
 
 /**
@@ -18032,7 +18055,8 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
   ensureSnakeSegs(e, headX, headY, headAng || 0);
   if (worldFreezeClock()) return;
   const gap = ENEMY_SNAKE_FOLLOW_DIST;
-  const need = ENEMY_SNAKE_SEGMENTS * gap + gap;
+  const segN = snakeSegTarget(e);
+  const need = segN * gap + gap;
   let trail = e.snakeTrail;
   if (!trail || !trail.length) {
     e.snakeTrail = [{ x: headX, y: headY, dist: 0 }];
@@ -18145,6 +18169,10 @@ function unpackEnemy(row) {
   let enteredPlay;
   if (row[18] != null) enteredPlay = !!(row[18] | 0);
   else enteredPlay = x >= 8 && x <= W - 8 && y >= 8 && y <= H - 8;
+  const wormPhase = (kind === 'worm' || kind === 'gunship') ? (row[17] | 0) : 0;
+  const snakeSegMax = kind === 'snake'
+    ? Math.max(1, (row[17] | 0) || ENEMY_SNAKE_SEGMENTS)
+    : 0;
   return {
     id: row[0] | 0,
     kind,
@@ -18165,7 +18193,8 @@ function unpackEnemy(row) {
     hp,
     speed: spd,
     enteredPlay,
-    wormPhase: (kind === 'worm' || kind === 'gunship') ? (row[17] | 0) : 0
+    wormPhase,
+    snakeSegMax
   };
 }
 
@@ -18256,6 +18285,9 @@ function applyEnemySnapList(list, st) {
     e.travelDist = Math.hypot(e.tx - e.spawnX, e.ty - e.spawnY);
     const packedSpeed = row[14] != null ? +row[14] : 0;
     e.wormPhase = (kind === 'worm' || kind === 'gunship') ? (row[15] | 0) : 0;
+    if (kind === 'snake') {
+      e.snakeSegMax = Math.max(1, (row[15] | 0) || ENEMY_SNAKE_SEGMENTS);
+    }
     if (packedSpeed > 0) e.speed = packedSpeed;
     else if (Math.hypot(e.vx, e.vy) > 0.05) {
       // Don't bake rush/crawl multipliers into stored base speed.

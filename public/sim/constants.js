@@ -377,9 +377,10 @@ const ENEMY_HP = {
   gunship: 1000,
   snake: 3000
 };
-/** Snake boss: head path stamps every FOLLOW_DIST px (cap SEGMENTS) for tail collision. */
+/** Snake boss: head path stamps every FOLLOW_DIST px (cap starts at SEGMENTS; grows when head eats rocks). */
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
+const ENEMY_SNAKE_GROW_PER_EAT = 7;
 /** Snake field event: drip small rocks while the boss lives. */
 const SNAKE_FIELD_SMALL_INTERVAL = Math.round(3 * TPS);
 const SNAKE_FIELD_ASTEROID_CAP = 7;
