@@ -375,7 +375,7 @@ const ENEMY_HP = {
   worm: 1000,
   spinner: 320,
   gunship: 1000,
-  snake: 3000
+  snake: 3500
 };
 /** Snake boss: head path stamps every FOLLOW_DIST px (cap starts at SEGMENTS; grows when head eats rocks). */
 const ENEMY_SNAKE_SEGMENTS = 100;
