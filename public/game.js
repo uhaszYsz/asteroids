@@ -18462,9 +18462,9 @@ const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
 const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
-/** Tail pulse: impulse every 2.5s, hops seg→seg every 0.15s, each does one 0.6s grow cycle. */
+/** Tail pulse: impulse every 2.5s, hops seg→seg every 0.1s, each does one 0.6s grow cycle. */
 const SNAKE_PULSE_INTERVAL_MS = 2500;
-const SNAKE_PULSE_HOP_MS = 150;
+const SNAKE_PULSE_HOP_MS = 100;
 const SNAKE_PULSE_CYCLE_MS = 600;
 const SNAKE_SEG_SCALE_BASE = 0.6;
 const SNAKE_SEG_SCALE_PEAK = 0.8;
