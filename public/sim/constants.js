@@ -333,7 +333,8 @@ const ENEMY_R = {
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
   spinner: 8 * RES_SCALE,
-  gunship: 10 * RES_SCALE
+  gunship: 10 * RES_SCALE,
+  snake: 6 * RES_SCALE
 };
 /**
  * UFO (Heavy 370) after 270° CW load: fw=52, fh=84.
@@ -373,8 +374,12 @@ const ENEMY_HP = {
   carrier: 90,
   worm: 1000,
   spinner: 320,
-  gunship: 1000
+  gunship: 1000,
+  snake: 1000
 };
+/** Snake boss: head + trailing segments (follow gap in world px). */
+const ENEMY_SNAKE_SEGMENTS = 15;
+const ENEMY_SNAKE_FOLLOW_DIST = 5;
 /** Spinner: 2-way radial burst (180°); shoot angle advances `spin` degrees after each volley. */
 const ENEMY_SPINNER = {
   ammo: 25,

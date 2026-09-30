@@ -6663,6 +6663,7 @@ function enemyMaxHp(kind) {
   if (kind === 'worm') return 1000;
   if (kind === 'spinner') return 320;
   if (kind === 'gunship') return 1000;
+  if (kind === 'snake') return 1000;
   return 95;
 }
 
@@ -17712,7 +17713,8 @@ const ENEMY_R = {
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
   spinner: 8 * RES_SCALE,
-  gunship: 10 * RES_SCALE
+  gunship: 10 * RES_SCALE,
+  snake: 6 * RES_SCALE
 };
 /**
  * UFO (Heavy 370) after 270° CW: fw=52, fh=84.
@@ -17754,8 +17756,8 @@ function enemyWanderSpeedOf(e) {
 }
 
 function enemyTurnMaxOf(e) {
-  // Match server: common1 uses worm-rocket homing +30% (°/tick).
-  if (e && e.kind === 'common1') return (2 * 1.3 * Math.PI) / 180;
+  // Match server: common1 / snake use worm-rocket homing +30% (°/tick).
+  if (e && (e.kind === 'common1' || e.kind === 'snake')) return (2 * 1.3 * Math.PI) / 180;
   let t = ENEMY_TURN_MAX;
   if (e && e.kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) {
     t *= 2;
@@ -17871,7 +17873,57 @@ function parseEnemyKind(raw) {
   if (raw === 'spinner') return 'spinner';
   if (raw === 'gunship') return 'gunship';
   if (raw === 'common1') return 'common1';
+  if (raw === 'snake') return 'snake';
   return 'common';
+}
+
+/** Flat [x,y,angle,scale, ...] → segment objects on enemy. */
+function applySnakeSegs(e, flat) {
+  if (!e || e.kind !== 'snake' || !flat || !flat.length) return;
+  const n = (flat.length / 4) | 0;
+  if (n < 1) return;
+  const segs = e.snakeSegs && e.snakeSegs.length === n ? e.snakeSegs : [];
+  if (segs.length !== n) segs.length = 0;
+  for (let i = 0; i < n; i++) {
+    const o = i * 4;
+    const scale = +flat[o + 3];
+    if (segs[i]) {
+      segs[i].x = +flat[o];
+      segs[i].y = +flat[o + 1];
+      segs[i].angle = +flat[o + 2] || 0;
+      segs[i].scale = Number.isFinite(scale) && scale > 0 ? scale : (((i + 1) % 3 === 0) ? 0.6 : 0.3);
+    } else {
+      segs.push({
+        x: +flat[o],
+        y: +flat[o + 1],
+        angle: +flat[o + 2] || 0,
+        scale: Number.isFinite(scale) && scale > 0 ? scale : (((i + 1) % 3 === 0) ? 0.6 : 0.3)
+      });
+    }
+  }
+  e.snakeSegs = segs;
+}
+
+/** Client-side follow so segments track predicted head between snaps. */
+function updateSnakeSegsToward(e, headX, headY) {
+  if (!e || !e.snakeSegs || !e.snakeSegs.length) return;
+  const gap = ENEMY_SNAKE_FOLLOW_DIST;
+  let px = headX;
+  let py = headY;
+  for (let i = 0; i < e.snakeSegs.length; i++) {
+    const s = e.snakeSegs[i];
+    const dx = px - s.x;
+    const dy = py - s.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 1e-6) s.angle = Math.atan2(dy, dx);
+    if (dist > gap && dist > 1e-6) {
+      const pull = dist - gap;
+      s.x += (dx / dist) * pull;
+      s.y += (dy / dist) * pull;
+    }
+    px = s.x;
+    py = s.y;
+  }
 }
 
 function isCommonKind(kind) {
@@ -17958,7 +18010,9 @@ function rebaseEnemyPredictOrigin(e) {
 
 function applyEnemyUpdate(row) {
   const id = row[0] | 0;
+  const prev = enemies.get(id);
   const e = unpackEnemy(row);
+  if (prev && prev.snakeSegs) e.snakeSegs = prev.snakeSegs;
   rebaseEnemyPredictOrigin(e);
   enemies.set(id, e);
 }
@@ -18110,7 +18164,7 @@ function enemyAt(e) {
       wormPhase: e.wormPhase | 0,
       enteredPlay: !!e.enteredPlay
     };
-    const chase = e.kind === 'common1';
+    const chase = e.kind === 'common1' || e.kind === 'snake';
     const steps = Math.min(90, Math.floor(enemyAgeTicks(e)));
     const stepOpts = chase ? { noArriveSnap: true, noStop: true } : null;
     for (let i = 0; i < steps; i++) stepEnemyDestinationSmoothLocal(state, stepOpts);
@@ -18197,6 +18251,10 @@ function pickForwardGunLocals(mesh) {
 const ENEMY_COMMON_SCALE = 0.9 * 0.65;
 const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
+const ENEMY_SNAKE_HEAD_SPRITE_ID = 'enemy_36';
+const ENEMY_SNAKE_SEG_SPRITE_ID = 'enemy_88';
+const ENEMY_SNAKE_HEAD_SPRITE_SCALE = 1;
+const ENEMY_SNAKE_FOLLOW_DIST = 5;
 /** common1 = Craft 10. */
 const ENEMY_COMMON1_SPRITE_ID = 'enemy_10';
 const ENEMY_COMMON1_SPRITE_SCALE = 0.65;
@@ -19506,6 +19564,36 @@ function drawEnemyCarrier(x, y, angle, weapon) {
   drawThickSegment(x, y, nx, ny, 2.2 * RES_SCALE, accent);
 }
 
+/** Snake boss: Craft 36 head + Craft 88 trailing segments (scales from net). */
+function drawEnemySnake(e, x, y, angle, color, id, dt) {
+  updateSnakeSegsToward(e, x, y);
+  const segOpt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
+  if (segOpt && segOpt.kind === 'sprite' && e.snakeSegs) {
+    // Tail first so head draws on top.
+    for (let i = e.snakeSegs.length - 1; i >= 0; i--) {
+      const s = e.snakeSegs[i];
+      const sc = s.scale > 0 ? s.scale : (((i + 1) % 3 === 0) ? 0.6 : 0.3);
+      const sid = id * 64 + i + 1;
+      const bank = enemyBankSmoothed(sid, s.angle || 0, dt);
+      drawSpriteShipPlane(
+        s.x, s.y, s.angle || 0, 0, sid, dt, segOpt, true, color,
+        bank, sc, COL.enemyOutline
+      );
+    }
+  }
+  const headOpt = getShipOptionById(ENEMY_SNAKE_HEAD_SPRITE_ID);
+  const bank = enemyBankSmoothed(id, angle, dt);
+  if (headOpt && headOpt.kind === 'sprite') {
+    drawSpriteShipPlane(
+      x, y, angle, 0, id, dt, headOpt, true, color,
+      bank, ENEMY_SNAKE_HEAD_SPRITE_SCALE, COL.enemyOutline
+    );
+  } else {
+    drawEnemyCommon(x, y, angle, color, id, dt);
+  }
+  return bank;
+}
+
 function drawEnemies(dt) {
   enemyDrawBank.clear();
   const showHit = cv('cl_hitbox') > 0;
@@ -19518,6 +19606,9 @@ function drawEnemies(dt) {
     if (p.kind === 'ufo') drawEnemyUfo(x, y, p.angle, COL.enemyUfo, id, dt);
     else if (p.kind === 'gunship') {
       const bank = drawEnemyGunship(x, y, p.angle, COL.enemy, id, dt);
+      enemyDrawBank.set(id, bank);
+    } else if (p.kind === 'snake') {
+      const bank = drawEnemySnake(e, x, y, p.angle, COL.enemy, id, dt);
       enemyDrawBank.set(id, bank);
     } else if (p.kind === 'carrier') drawEnemyCarrier(x, y, p.angle, e.weapon);
     else if (p.kind === 'worm') {
@@ -22994,15 +23085,24 @@ function handleWsMessage(e) {
       return;
     }
     if (msg.t === 'ef' && inGame && msg.e) {
-      addEnemy(unpackEnemy(msg.e));
+      const e = unpackEnemy(msg.e);
+      addEnemy(e);
+      if (msg.segs) applySnakeSegs(enemies.get(e.id | 0), msg.segs);
       return;
     }
     if (msg.t === 'eu' && inGame && msg.e) {
       applyEnemyUpdate(msg.e);
+      if (msg.segs) applySnakeSegs(enemies.get(msg.e[0] | 0), msg.segs);
       return;
     }
     if (msg.t === 'es' && inGame) {
       if (msg.e) applyEnemySnapList(msg.e, msg.st);
+      if (msg.snakeSegs) {
+        for (const idStr of Object.keys(msg.snakeSegs)) {
+          const e = enemies.get(idStr | 0);
+          if (e) applySnakeSegs(e, msg.snakeSegs[idStr]);
+        }
+      }
       if (msg.a) applyAsteroidPoseSnap(msg.a, msg.st);
       if (msg.u) applyPickupPoseSnap(msg.u);
       return;
@@ -25240,15 +25340,24 @@ function demoReplayEvent(ev) {
     return;
   }
   if (ev.t === 'ef' && ev.e) {
-    addEnemy(unpackEnemy(ev.e));
+    const e = unpackEnemy(ev.e);
+    addEnemy(e);
+    if (ev.segs) applySnakeSegs(enemies.get(e.id | 0), ev.segs);
     return;
   }
   if (ev.t === 'eu' && ev.e) {
     applyEnemyUpdate(ev.e);
+    if (ev.segs) applySnakeSegs(enemies.get(ev.e[0] | 0), ev.segs);
     return;
   }
   if (ev.t === 'es') {
     if (ev.e) applyEnemySnapList(ev.e, ev.st);
+    if (ev.snakeSegs) {
+      for (const idStr of Object.keys(ev.snakeSegs)) {
+        const e = enemies.get(idStr | 0);
+        if (e) applySnakeSegs(e, ev.snakeSegs[idStr]);
+      }
+    }
     if (ev.a) applyAsteroidPoseSnap(ev.a, ev.st);
     if (ev.u) applyPickupPoseSnap(ev.u);
     return;

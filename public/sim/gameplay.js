@@ -1000,8 +1000,8 @@ function enemySpeed(e) {
 }
 
 function enemyTurnMax(e) {
-  // common1: worm-rocket homing +30% (°/tick → rad/tick).
-  if (e && e.kind === 'common1') {
+  // common1 / snake: worm-rocket homing +30% (°/tick → rad/tick).
+  if (e && (e.kind === 'common1' || e.kind === 'snake')) {
     return (ENEMY_COMMON1_HOMING * Math.PI) / 180;
   }
   let t = ENEMY_TURN_MAX;
@@ -1102,12 +1102,18 @@ function packEnemySnap(e) {
 
 function emitEnemyFire(room, e) {
   stampEnemyNet(e);
-  roomBroadcast(room, { t: 'ef', e: packEnemy(e) });
+  const msg = { t: 'ef', e: packEnemy(e) };
+  const segs = packSnakeSegs(e);
+  if (segs) msg.segs = segs;
+  roomBroadcast(room, msg);
 }
 
 function emitEnemyUpdate(room, e) {
   stampEnemyNet(e);
-  roomBroadcast(room, { t: 'eu', e: packEnemy(e) });
+  const msg = { t: 'eu', e: packEnemy(e) };
+  const segs = packSnakeSegs(e);
+  if (segs) msg.segs = segs;
+  roomBroadcast(room, msg);
 }
 
 /**
@@ -1121,11 +1127,21 @@ function emitEnemySnap(room, opts) {
   const msg = { t: 'es', st };
   if (room.enemies && room.enemies.length) {
     const list = [];
+    const snakeSegs = {};
+    let anySnake = false;
     for (const e of room.enemies) {
       if (!enemyIsSpawned(e)) continue;
       list.push(packEnemySnap(e));
+      if (e.kind === 'snake') {
+        const p = packSnakeSegs(e);
+        if (p) {
+          snakeSegs[e.id | 0] = p;
+          anySnake = true;
+        }
+      }
     }
     if (list.length) msg.e = list;
+    if (anySnake) msg.snakeSegs = snakeSegs;
   }
   if (field) {
     if (room.asteroids && room.asteroids.length) {
@@ -1234,10 +1250,12 @@ function makeEnemy(kind, wave, weapon) {
   else if (kind === 'worm') k = 'worm';
   else if (kind === 'spinner') k = 'spinner';
   else if (kind === 'gunship') k = 'gunship';
+  else if (kind === 'snake') k = 'snake';
   // Random 4–6s before first shot (reuse fireCd / shootCd — no extra timer).
   const firstShotCd = Math.round(
     (ENEMY_FIRST_SHOT_MIN_S + Math.random() * (ENEMY_FIRST_SHOT_MAX_S - ENEMY_FIRST_SHOT_MIN_S)) * TPS
   );
+  const chaseSpeed = k === 'common1' || k === 'snake';
   const e = {
     id: 0,
     kind: k,
@@ -1266,8 +1284,8 @@ function makeEnemy(kind, wave, weapon) {
     railChargeLeft: 0,
     lastLaserAng: null,
     enteredPlay: false,
-    // common1: worm-rocket maxSpeed −20%/−10%/−15%, ±10% per ship; others roll wander band.
-    speed: k === 'common1'
+    // common1/snake: worm-rocket maxSpeed −20%/−10%/−15%, ±10% per ship; others roll wander band.
+    speed: chaseSpeed
       ? ENEMY_COMMON1_SPEED * (1 - ENEMY_COMMON1_SPEED_JITTER + Math.random() * (ENEMY_COMMON1_SPEED_JITTER * 2))
       : randomEnemyWanderSpeed(),
     // Worm: 0 idle; laser 1–3; rockets 4–5; shotgun 6–7.
@@ -1289,7 +1307,8 @@ function makeEnemy(kind, wave, weapon) {
     // common1 post-shot flank (deg peak, ticks remaining / duration).
     flankDeg: 0,
     flankLeft: 0,
-    flankDur: 0
+    flankDur: 0,
+    snakeSegs: null
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -1301,7 +1320,63 @@ function makeEnemy(kind, wave, weapon) {
     e.shootAmmo = ENEMY_SPINNER.ammo;
     e.spinAng = Math.random() * Math.PI * 2;
   }
+  if (k === 'snake') initSnakeSegments(e);
   return e;
+}
+
+/** Flat [x,y,angle,scale, ...] for net. */
+function packSnakeSegs(e) {
+  if (!e || e.kind !== 'snake' || !e.snakeSegs || !e.snakeSegs.length) return null;
+  const out = [];
+  for (let i = 0; i < e.snakeSegs.length; i++) {
+    const s = e.snakeSegs[i];
+    out.push(+s.x, +s.y, +s.angle || 0, +s.scale || 0.3);
+  }
+  return out;
+}
+
+/** Every 3rd segment (1-based 3,6,9…) is 0.6; others 0.3. */
+function snakeSegmentScale(index0) {
+  return ((index0 + 1) % 3 === 0) ? 0.6 : 0.3;
+}
+
+function initSnakeSegments(e) {
+  const n = ENEMY_SNAKE_SEGMENTS;
+  const gap = ENEMY_SNAKE_FOLLOW_DIST;
+  const ang = e.angle || e.dir || 0;
+  const back = ang + Math.PI;
+  e.snakeSegs = [];
+  for (let i = 0; i < n; i++) {
+    const d = gap * (i + 1);
+    e.snakeSegs.push({
+      x: e.x + Math.cos(back) * d,
+      y: e.y + Math.sin(back) * d,
+      angle: ang,
+      scale: snakeSegmentScale(i)
+    });
+  }
+}
+
+/** Each segment follows the previous (head → seg0 → seg1…). Move only if dist > gap. */
+function updateSnakeSegments(e) {
+  if (!e || e.kind !== 'snake' || !e.snakeSegs || !e.snakeSegs.length) return;
+  const gap = ENEMY_SNAKE_FOLLOW_DIST;
+  let px = e.x;
+  let py = e.y;
+  for (let i = 0; i < e.snakeSegs.length; i++) {
+    const s = e.snakeSegs[i];
+    const dx = px - s.x;
+    const dy = py - s.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 1e-6) s.angle = Math.atan2(dy, dx);
+    if (dist > gap && dist > 1e-6) {
+      const pull = dist - gap;
+      s.x += (dx / dist) * pull;
+      s.y += (dy / dist) * pull;
+    }
+    px = s.x;
+    py = s.y;
+  }
 }
 
 /**
@@ -1313,7 +1388,7 @@ function makeEnemy(kind, wave, weapon) {
 const MAX_COMMON_ON_FIELD = 6;
 const MAX_COMMON1_ON_FIELD = 2;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
-const SOLO_BOSS_KINDS = ['worm', 'gunship'];
+const SOLO_BOSS_KINDS = ['worm', 'gunship', 'snake'];
 
 /** Roll once per match: wave 6 gets one random boss. */
 function rollSoloBossPlan() {
@@ -1471,7 +1546,9 @@ function spawnSoloWaveEnemies(room, wave) {
   const bosses = soloBossKindsForWave(room, n);
   if (bosses) {
     for (let i = 0; i < bosses.length; i++) {
-      const kind = bosses[i] === 'gunship' ? 'gunship' : 'worm';
+      const kind = bosses[i] === 'gunship' ? 'gunship'
+        : bosses[i] === 'snake' ? 'snake'
+        : 'worm';
       const boss = makeEnemy(kind, wave);
       boss.id = room.nextEnemyId++;
       boss.appearLeft = 0;
@@ -2667,8 +2744,8 @@ function stepEnemyMovement(e) {
   const dx = e.tx - e.x;
   const dy = e.ty - e.y;
   const dist = Math.hypot(dx, dy);
-  // common1 never stops — keep flying even when overlapping the chase point.
-  const chaseNoStop = e.kind === 'common1';
+  // common1 / snake never stop — keep flying even when overlapping the chase point.
+  const chaseNoStop = e.kind === 'common1' || e.kind === 'snake';
   if (!chaseNoStop && dist <= ENEMY_ARRIVE_R) return true;
 
   let desired = dist > 1e-6
@@ -2719,7 +2796,7 @@ function updateEnemies(room) {
   const target = soloHumanTarget(room);
   pushSoloAimHist(room, target);
   let wormHolding = false;
-  let common1Chase = false;
+  let chaseSnap = false;
 
   for (let i = room.enemies.length - 1; i >= 0; i--) {
     const e = room.enemies[i];
@@ -2729,6 +2806,7 @@ function updateEnemies(room) {
       if ((e.appearLeft | 0) <= 0) {
         // Fresh edge entry when the delay ends (queued or staggered commons).
         placeEnemyOffscreenEntry(e);
+        if (e.kind === 'snake') initSnakeSegments(e);
         emitEnemyFire(room, e);
       }
       continue;
@@ -2754,15 +2832,16 @@ function updateEnemies(room) {
       continue;
     }
 
-    if (e.kind === 'common1') {
+    if (e.kind === 'common1' || e.kind === 'snake') {
       // Chase the player every tick (no wander waypoints).
       if (target) {
         e.tx = target.x;
         e.ty = target.y;
       }
       stepEnemyMovement(e);
-      enemyTryFire(room, e);
-      common1Chase = true;
+      if (e.kind === 'snake') updateSnakeSegments(e);
+      if (e.kind === 'common1') enemyTryFire(room, e);
+      chaseSnap = true;
       continue;
     }
 
@@ -2779,9 +2858,9 @@ function updateEnemies(room) {
     enemyTryFire(room, e);
   }
 
-  // Worm aim / common1 chase: pose snap every tick so client predict can't drift.
+  // Worm aim / common1 / snake chase: pose snap every tick so client predict can't drift.
   // Full field snap (enemies+asteroids+pickups) is tickWorldPoseSnap (~2 Hz).
-  if (wormHolding || common1Chase) emitEnemySnap(room, { field: false });
+  if (wormHolding || chaseSnap) emitEnemySnap(room, { field: false });
 }
 
 function damageEnemy(room, e, dmg, ownerId) {
@@ -2808,7 +2887,7 @@ function damageEnemy(room, e, dmg, ownerId) {
   if (kind === 'ufo' || kind === 'spinner') {
     coinGrant = ENEMY_ELITE_COIN_GRANT;
     coinVisual = ENEMY_ELITE_COIN_VISUAL;
-  } else if (kind === 'worm' || kind === 'gunship') {
+  } else if (kind === 'worm' || kind === 'gunship' || kind === 'snake') {
     coinGrant = ENEMY_WORM_COIN_GRANT;
     coinVisual = ENEMY_WORM_COIN_VISUAL;
     destroyAllAsteroidsOnBossDeath(room);
@@ -4020,7 +4099,7 @@ function resolveAdminGiveItem(raw) {
 
 /**
  * Admin console `spawn <kind>` — off-screen asteroid / enemy with normal entry path.
- * kinds: big medium small meteor common common1 ufo worm spinner gunship
+ * kinds: big medium small meteor common common1 ufo worm spinner gunship snake
  */
 function handleAdminSpawn(ws, kindRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -4040,7 +4119,7 @@ function handleAdminSpawn(ws, kindRaw) {
     emitAsteroidFire(room, a);
     return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
   }
-  if (kind === 'common' || kind === 'common1' || kind === 'ufo' || kind === 'worm' || kind === 'spinner' || kind === 'gunship') {
+  if (kind === 'common' || kind === 'common1' || kind === 'ufo' || kind === 'worm' || kind === 'spinner' || kind === 'gunship' || kind === 'snake') {
     if (!room.practice) return { ok: 0, err: 'enemies only in solo/coop wave rooms' };
     if (!room.enemies) room.enemies = [];
     if (!room.nextEnemyId) room.nextEnemyId = 1;
@@ -4054,7 +4133,7 @@ function handleAdminSpawn(ws, kindRaw) {
   }
   return {
     ok: 0,
-    err: 'usage: spawn big|medium|small|meteor|common|common1|ufo|worm|spinner|gunship'
+    err: 'usage: spawn big|medium|small|meteor|common|common1|ufo|worm|spinner|gunship|snake'
   };
 }
 
