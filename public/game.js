@@ -13834,7 +13834,16 @@ function renderSoloShop() {
                 sendShopBuy('weapon', name, s);
                 return;
               }
-              // New / other weapon: Space opens slot picker.
+              // Empty slot available → mount there instantly (no menu).
+              const emptySlot = !st.weapon ? 1 : (!st.weapon2 ? 2 : 0);
+              if (emptySlot) {
+                shopBuySlot = emptySlot;
+                activeWeaponSlot = emptySlot;
+                updateShopSlotBadge();
+                sendShopBuy('weapon', name, emptySlot);
+                return;
+              }
+              // Both slots filled → Space opens replace picker.
               openShopWeaponSlotMenuForEl(name, row);
             }
           });
