@@ -11637,7 +11637,8 @@ const WEAPON_UPGRADE_DEFS = {
     { id: 'size', label: 'Size', desc: '+30% pellet hit size' }
   ],
   laser: [
-    { id: 'width', label: 'Width', desc: '+32% beam width and +2 raycasts (damage split)' }
+    { id: 'width', label: 'Width', desc: '+32% beam width and +2 raycasts (damage split)' },
+    { id: 'ammo', label: 'Ammo', desc: '+15 magazine ammo' }
   ],
   railgun: [
     { id: 'bounce', label: 'Bounce', desc: '+1 edge bounce' },
@@ -11818,6 +11819,7 @@ function effectiveLocalWeapon(name) {
     w.shotgun = (base.shotgun | 0) + r('pellet');
   } else if (n === 'laser') {
     w.widthRank = r('width');
+    w.ammo = (base.ammo | 0) + 15 * r('ammo');
   } else if (n === 'plasma') {
     w.ammo = (base.ammo | 0) + 10 * r('ammo');
   } else if (n === 'voidcannon') {
@@ -11893,9 +11895,9 @@ function tryStartLocalBurst(slot) {
     const w = effectiveLocalWeapon(name);
     // Beam stays up while this slot is bursting (ammo dump on sim ticks) — not wall-clock ms.
     // L2+: worm-width beam (matches server ENEMY_WORM_LASER.width = 12*RES_SCALE).
-    const wideW = getLocalUpgradeRank('laser', 'width') >= 0
-      ? (12 * RES_SCALE) * Math.pow(1.32, getLocalUpgradeRank('laser', 'width'))
-      : 0;
+    const wr = getLocalUpgradeRank('laser', 'width');
+    // Width rank 0 = thin beam; rank 1+ matches server worm-width × 1.32^(rank-1).
+    const wideW = wr > 0 ? (12 * RES_SCALE) * Math.pow(1.32, wr - 1) : 0;
     startLocalLaserClip(
       w.range != null ? w.range : LASER_RANGE,
       COL.laser,
@@ -13658,6 +13660,9 @@ function closeShopWeaponSlotMenu() {
     m.remove();
     if (host && host.classList) host.classList.remove('ss-slot-picking');
   }
+  // Floating upgrade menus attach to body — still clear picking on focused shop rows.
+  const picking = document.querySelectorAll('#solo-shop .ss-row.ss-slot-picking');
+  for (let i = 0; i < picking.length; i++) picking[i].classList.remove('ss-slot-picking');
   shopSlotMenuButtons = [];
   shopSlotMenuFocus = 0;
   shopUpgradeDescEl = null;
@@ -13753,7 +13758,7 @@ function openShopWeaponSlotMenuForEl(name, el) {
   shopSlotMenuApplyFocus();
 }
 
-/** Owned-weapon upgrade options menu (arrow focus + bottom description). */
+/** Owned-weapon upgrade options menu — floating panel (fixed height buttons). */
 function openShopUpgradeMenuForEl(name, el) {
   closeShopWeaponSlotMenu();
   const st = soloShopState;
@@ -13802,7 +13807,22 @@ function openShopUpgradeMenuForEl(name, el) {
   meta.textContent = 'LVL ' + budget + '/' + WEAPON_MAX_LEVEL
     + (cost > 0 ? ' · ' + shopCreditPrice(cost) : ' · MAX');
   menu.appendChild(meta);
-  el.appendChild(menu);
+  document.body.appendChild(menu);
+  const place = () => {
+    const r = el.getBoundingClientRect();
+    const mw = Math.max(148, Math.min(220, r.width));
+    menu.style.width = mw + 'px';
+    let left = r.left + (r.width - mw) * 0.5;
+    left = Math.max(8, Math.min(left, window.innerWidth - mw - 8));
+    menu.style.left = left + 'px';
+    menu.style.top = (r.bottom + 6) + 'px';
+    const mr = menu.getBoundingClientRect();
+    if (mr.bottom > window.innerHeight - 8) {
+      menu.style.top = Math.max(8, r.top - mr.height - 6) + 'px';
+    }
+  };
+  place();
+  requestAnimationFrame(place);
   shopSlotMenuFocus = 0;
   for (let i = 0; i < shopSlotMenuButtons.length; i++) {
     if (!shopSlotMenuButtons[i].disabled) {

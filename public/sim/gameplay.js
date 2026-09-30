@@ -6907,7 +6907,8 @@ function fireShotgun(room, p) {
 }
 
 /**
- * Laser: base 2 edge rays; each width rank +32% width and +2 rays (equal spacing).
+ * Laser: no width upgrades = thin single center ray (old L1).
+ * Each width rank: 2 edge rays at worm base width × 1.32^(rank-1), +2 rays per extra rank.
  * Damage per ray = total / rayCount (rays stack on the same target).
  */
 function fireLaser(room, p, weaponName) {
@@ -6922,24 +6923,49 @@ function fireLaser(room, p, weaponName) {
   const remaining = w.range || Math.hypot(W, H);
   const now = Date.now();
   const widthRank = w.widthRank | 0;
-  const rayCount = 2 + 2 * widthRank;
-  const width = ENEMY_WORM_LASER.width * Math.pow(1.32, widthRank);
+  const rayOpts = { enemyHitScale: PLAYER_RAY_ENEMY_HIT_SCALE };
+
+  // Rank 0: thin single center ray — same feel as old un-upgraded laser.
+  if (widthRank <= 0) {
+    const width = (2 + (Math.random() * 4 | 0)) * RES_SCALE;
+    const hit = raycastFirst(room, p.id, ox, oy, dx, dy, remaining, rayOpts);
+    if (!hit) {
+      roomBroadcast(room, {
+        t: 'lf',
+        l: [room.nextBulletId++, ox, oy, ox + dx * remaining, oy + dy * remaining, width, now, p.id],
+        hit: 0,
+        w: name
+      });
+      return;
+    }
+    const hitKind = hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
+    roomBroadcast(room, {
+      t: 'lf',
+      l: [room.nextBulletId++, ox, oy, hit.x, hit.y, width, now, p.id],
+      hit: hitKind,
+      w: name
+    });
+    if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, totalDmg, p.id);
+    else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, totalDmg, p.id);
+    else if (hit.kind === 'enemy') damageSnakePreferTurret(room, hit.target, totalDmg, p.id, hit.x, hit.y, 6);
+    else if (hit.kind === 'rocket') damageRocket(room, hit.target, totalDmg);
+    return;
+  }
+
+  // Rank 1+: 2 edges, then +2 rays / further rank; width grows +32% each rank past the first.
+  const rayCount = 2 * widthRank;
+  const width = ENEMY_WORM_LASER.width * Math.pow(1.32, widthRank - 1);
   const dmgEach = totalDmg / rayCount;
   const px = -dy;
   const py = dx;
   const half = width * 0.5;
   const origins = [];
-  if (rayCount <= 1) {
-    origins.push({ x: ox, y: oy });
-  } else {
-    for (let i = 0; i < rayCount; i++) {
-      const t = i / (rayCount - 1); // 0..1 edges inclusive
-      const off = -half + t * width;
-      origins.push({ x: ox + px * off, y: oy + py * off });
-    }
+  for (let i = 0; i < rayCount; i++) {
+    const t = rayCount === 1 ? 0.5 : i / (rayCount - 1);
+    const off = -half + t * width;
+    origins.push({ x: ox + px * off, y: oy + py * off });
   }
   const rays = [];
-  const rayOpts = { enemyHitScale: PLAYER_RAY_ENEMY_HIT_SCALE };
   let midHit = null;
   let anyHitKind = 0;
   for (let i = 0; i < origins.length; i++) {

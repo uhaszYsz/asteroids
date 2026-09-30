@@ -113,7 +113,8 @@ const WEAPON_UPGRADE_DEFS = {
     { id: 'size', label: 'Size', desc: '+30% pellet hit size' }
   ],
   laser: [
-    { id: 'width', label: 'Width', desc: '+32% beam width and +2 raycasts (damage split)' }
+    { id: 'width', label: 'Width', desc: '+32% beam width and +2 raycasts (damage split)' },
+    { id: 'ammo', label: 'Ammo', desc: '+15 magazine ammo' }
   ],
   railgun: [
     { id: 'bounce', label: 'Bounce', desc: '+1 edge bounce' },
@@ -308,6 +309,7 @@ function effectiveWeapon(p, name) {
     w.pelletSizeMul = Math.pow(1.3, r('size'));
   } else if (n === 'laser') {
     w.widthRank = r('width');
+    w.ammo = (base.ammo | 0) + 15 * r('ammo');
   } else if (n === 'plasma') {
     w.ammo = (base.ammo | 0) + 10 * r('ammo');
   } else if (n === 'asteroidgun') {
