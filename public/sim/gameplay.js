@@ -3037,11 +3037,12 @@ function applyEnemyRailSegment(room, e, ox, oy, dx, dy, range, opts) {
   }
 }
 
-/** Single void orb. opts: { keepFacing, noAsteroidDamage }. */
+/** Single void orb. opts: { keepFacing, noAsteroidDamage, speedMul }. */
 function fireEnemyVoidStream(room, e, ang, opts) {
   opts = opts || {};
   const w = WEAPONS.voidcannon;
-  const spd = (w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE);
+  const spdMul = opts.speedMul != null ? +opts.speedMul : 1;
+  const spd = ((w && w.speed > 0) ? w.speed : (2.1504 * RES_SCALE)) * spdMul;
   const cfg = BULLET_TYPES.voidcannon;
   const dmg = (cfg && cfg.dmg) || 5;
   const size = (cfg && cfg.size) || (27 * RES_SCALE);
