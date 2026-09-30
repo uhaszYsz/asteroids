@@ -1102,18 +1102,12 @@ function packEnemySnap(e) {
 
 function emitEnemyFire(room, e) {
   stampEnemyNet(e);
-  const msg = { t: 'ef', e: packEnemy(e) };
-  const segs = packSnakeSegs(e);
-  if (segs) msg.segs = segs;
-  roomBroadcast(room, msg);
+  roomBroadcast(room, { t: 'ef', e: packEnemy(e) });
 }
 
 function emitEnemyUpdate(room, e) {
   stampEnemyNet(e);
-  const msg = { t: 'eu', e: packEnemy(e) };
-  const segs = packSnakeSegs(e);
-  if (segs) msg.segs = segs;
-  roomBroadcast(room, msg);
+  roomBroadcast(room, { t: 'eu', e: packEnemy(e) });
 }
 
 /**
@@ -1127,21 +1121,11 @@ function emitEnemySnap(room, opts) {
   const msg = { t: 'es', st };
   if (room.enemies && room.enemies.length) {
     const list = [];
-    const snakeSegs = {};
-    let anySnake = false;
     for (const e of room.enemies) {
       if (!enemyIsSpawned(e)) continue;
       list.push(packEnemySnap(e));
-      if (e.kind === 'snake') {
-        const p = packSnakeSegs(e);
-        if (p) {
-          snakeSegs[e.id | 0] = p;
-          anySnake = true;
-        }
-      }
     }
     if (list.length) msg.e = list;
-    if (anySnake) msg.snakeSegs = snakeSegs;
   }
   if (field) {
     if (room.asteroids && room.asteroids.length) {
@@ -1307,8 +1291,7 @@ function makeEnemy(kind, wave, weapon) {
     // common1 post-shot flank (deg peak, ticks remaining / duration).
     flankDeg: 0,
     flankLeft: 0,
-    flankDur: 0,
-    snakeSegs: null
+    flankDur: 0
   };
   placeEnemyOffscreenEntry(e);
   if (k === 'carrier') {
@@ -1320,64 +1303,7 @@ function makeEnemy(kind, wave, weapon) {
     e.shootAmmo = ENEMY_SPINNER.ammo;
     e.spinAng = Math.random() * Math.PI * 2;
   }
-  if (k === 'snake') initSnakeSegments(e);
   return e;
-}
-
-/** Flat [x,y,angle,scale, ...] for net. */
-function packSnakeSegs(e) {
-  if (!e || e.kind !== 'snake' || !e.snakeSegs || !e.snakeSegs.length) return null;
-  const out = [];
-  for (let i = 0; i < e.snakeSegs.length; i++) {
-    const s = e.snakeSegs[i];
-    out.push(+s.x, +s.y, +s.angle || 0, +s.scale || 0.6);
-  }
-  return out;
-}
-
-/** All segments scale 0.6. */
-function snakeSegmentScale(index0) {
-  return 0.6;
-}
-
-function initSnakeSegments(e) {
-  const n = ENEMY_SNAKE_SEGMENTS;
-  const gap = ENEMY_SNAKE_FOLLOW_DIST;
-  const ang = e.angle || e.dir || 0;
-  const back = ang + Math.PI;
-  e.snakeSegs = [];
-  for (let i = 0; i < n; i++) {
-    const d = gap * (i + 1);
-    e.snakeSegs.push({
-      x: e.x + Math.cos(back) * d,
-      y: e.y + Math.sin(back) * d,
-      angle: ang,
-      scale: snakeSegmentScale(i)
-    });
-  }
-}
-
-/** Each segment follows the previous. Move only if farther than 5px dead zone. */
-function updateSnakeSegments(e) {
-  if (!e || e.kind !== 'snake' || !e.snakeSegs || !e.snakeSegs.length) return;
-  const gap = ENEMY_SNAKE_FOLLOW_DIST;
-  let px = e.x;
-  let py = e.y;
-  for (let i = 0; i < e.snakeSegs.length; i++) {
-    const s = e.snakeSegs[i];
-    s.scale = snakeSegmentScale(i);
-    const dx = px - s.x;
-    const dy = py - s.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist > 1e-6) s.angle = Math.atan2(dy, dx);
-    if (dist > gap && dist > 1e-6) {
-      const pull = dist - gap;
-      s.x += (dx / dist) * pull;
-      s.y += (dy / dist) * pull;
-    }
-    px = s.x;
-    py = s.y;
-  }
 }
 
 /**
@@ -2807,7 +2733,6 @@ function updateEnemies(room) {
       if ((e.appearLeft | 0) <= 0) {
         // Fresh edge entry when the delay ends (queued or staggered commons).
         placeEnemyOffscreenEntry(e);
-        if (e.kind === 'snake') initSnakeSegments(e);
         emitEnemyFire(room, e);
       }
       continue;
@@ -2840,7 +2765,6 @@ function updateEnemies(room) {
         e.ty = target.y;
       }
       stepEnemyMovement(e);
-      if (e.kind === 'snake') updateSnakeSegments(e);
       if (e.kind === 'common1') enemyTryFire(room, e);
       chaseSnap = true;
       continue;

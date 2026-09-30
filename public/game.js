@@ -17877,41 +17877,16 @@ function parseEnemyKind(raw) {
   return 'common';
 }
 
-/** Flat [x,y,angle,scale, ...] → segment objects on enemy. */
+/** Flat [x,y,angle,scale, ...] → segment objects (unused — tail is local-only). */
 function applySnakeSegs(e, flat) {
   if (!e || e.kind !== 'snake' || !flat || !flat.length) return;
-  const n = (flat.length / 4) | 0;
-  if (n < 1) return;
-  const segs = e.snakeSegs && e.snakeSegs.length === n ? e.snakeSegs : [];
-  if (segs.length !== n) segs.length = 0;
-  for (let i = 0; i < n; i++) {
-    const o = i * 4;
-    if (segs[i]) {
-      segs[i].x = +flat[o];
-      segs[i].y = +flat[o + 1];
-      segs[i].angle = +flat[o + 2] || 0;
-      segs[i].scale = snakeSegmentScaleClient(i);
-    } else {
-      segs.push({
-        x: +flat[o],
-        y: +flat[o + 1],
-        angle: +flat[o + 2] || 0,
-        scale: snakeSegmentScaleClient(i)
-      });
-    }
-  }
-  e.snakeSegs = segs;
+  // Tail is simulated locally; ignore any legacy segs from net.
 }
 
-/** Ensure 15 segments with correct scale pattern (local init if net lag). */
+/** Local tail init behind head (server only syncs the head). */
 function ensureSnakeSegs(e, headX, headY, headAng) {
   if (!e || e.kind !== 'snake') return;
-  if (e.snakeSegs && e.snakeSegs.length === ENEMY_SNAKE_SEGMENTS) {
-    for (let i = 0; i < e.snakeSegs.length; i++) {
-      e.snakeSegs[i].scale = snakeSegmentScaleClient(i);
-    }
-    return;
-  }
+  if (e.snakeSegs && e.snakeSegs.length === ENEMY_SNAKE_SEGMENTS) return;
   const ang = headAng || 0;
   const back = ang + Math.PI;
   const gap = ENEMY_SNAKE_FOLLOW_DIST;
@@ -17928,7 +17903,12 @@ function ensureSnakeSegs(e, headX, headY, headAng) {
   e.snakeSegs = segs;
 }
 
-/** Client-side follow: 5px dead zone — move only if farther than gap. */
+/**
+ * Local segment-to-segment follow (15px dead zone).
+ * Call once per frame with the *current drawn* head pose — head only moves a
+ * few px/frame, so one pass keeps the chain curved. Do not jump the head far
+ * ahead then resolve once (that rubber-bands into a straight line).
+ */
 function updateSnakeSegsToward(e, headX, headY) {
   if (!e || !e.snakeSegs || !e.snakeSegs.length) return;
   const gap = ENEMY_SNAKE_FOLLOW_DIST;
@@ -19594,15 +19574,10 @@ function drawEnemyCarrier(x, y, angle, weapon) {
   drawThickSegment(x, y, nx, ny, 2.2 * RES_SCALE, accent);
 }
 
-/** Snake boss: Craft 36 head + Craft 88 trailing segments.
- *  Segments use last server poses (segment-to-segment follow is sim-side).
- *  Do NOT re-resolve the chain toward the predicted head — one pass would
- *  collapse the whole body into a straight rubber-band line. */
+/** Snake boss: Craft 36 head (server) + Craft 88 tail (local follow). */
 function drawEnemySnake(e, x, y, angle, color, id, dt) {
   ensureSnakeSegs(e, x, y, angle);
-  // Keep server chain shape; slide with head prediction delta.
-  const ox = x - (e.x != null ? +e.x : x);
-  const oy = y - (e.y != null ? +e.y : y);
+  updateSnakeSegsToward(e, x, y);
   const segOpt = getShipOptionById(ENEMY_SNAKE_SEG_SPRITE_ID);
   if (segOpt && segOpt.kind === 'sprite' && e.snakeSegs) {
     // Tail first so head draws on top.
@@ -19613,7 +19588,7 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
       const sid = id * 64 + i + 1;
       const bank = enemyBankSmoothed(sid, s.angle || 0, dt);
       drawSpriteShipPlane(
-        s.x + ox, s.y + oy, s.angle || 0, 0, sid, dt, segOpt, true, color,
+        s.x, s.y, s.angle || 0, 0, sid, dt, segOpt, true, color,
         bank, sc, COL.enemyOutline
       );
     }
@@ -23124,22 +23099,18 @@ function handleWsMessage(e) {
     if (msg.t === 'ef' && inGame && msg.e) {
       const e = unpackEnemy(msg.e);
       addEnemy(e);
-      if (msg.segs) applySnakeSegs(enemies.get(e.id | 0), msg.segs);
+      if (e.kind === 'snake') {
+        const p = enemyAt(e);
+        ensureSnakeSegs(e, p.x, p.y, p.angle);
+      }
       return;
     }
     if (msg.t === 'eu' && inGame && msg.e) {
       applyEnemyUpdate(msg.e);
-      if (msg.segs) applySnakeSegs(enemies.get(msg.e[0] | 0), msg.segs);
       return;
     }
     if (msg.t === 'es' && inGame) {
       if (msg.e) applyEnemySnapList(msg.e, msg.st);
-      if (msg.snakeSegs) {
-        for (const idStr of Object.keys(msg.snakeSegs)) {
-          const e = enemies.get(idStr | 0);
-          if (e) applySnakeSegs(e, msg.snakeSegs[idStr]);
-        }
-      }
       if (msg.a) applyAsteroidPoseSnap(msg.a, msg.st);
       if (msg.u) applyPickupPoseSnap(msg.u);
       return;
@@ -25379,22 +25350,18 @@ function demoReplayEvent(ev) {
   if (ev.t === 'ef' && ev.e) {
     const e = unpackEnemy(ev.e);
     addEnemy(e);
-    if (ev.segs) applySnakeSegs(enemies.get(e.id | 0), ev.segs);
+    if (e.kind === 'snake') {
+      const p = enemyAt(e);
+      ensureSnakeSegs(e, p.x, p.y, p.angle);
+    }
     return;
   }
   if (ev.t === 'eu' && ev.e) {
     applyEnemyUpdate(ev.e);
-    if (ev.segs) applySnakeSegs(enemies.get(ev.e[0] | 0), ev.segs);
     return;
   }
   if (ev.t === 'es') {
     if (ev.e) applyEnemySnapList(ev.e, ev.st);
-    if (ev.snakeSegs) {
-      for (const idStr of Object.keys(ev.snakeSegs)) {
-        const e = enemies.get(idStr | 0);
-        if (e) applySnakeSegs(e, ev.snakeSegs[idStr]);
-      }
-    }
     if (ev.a) applyAsteroidPoseSnap(ev.a, ev.st);
     if (ev.u) applyPickupPoseSnap(ev.u);
     return;
