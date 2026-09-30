@@ -119,7 +119,7 @@ const WEAPON_UPGRADE_DEFS = {
   railgun: [
     { id: 'bounce', label: 'Bounce', desc: '+1 edge bounce' },
     { id: 'ammo', label: 'Ammo', desc: '+1 ammo; shot cooldown 1s' },
-    { id: 'width', label: 'Width', desc: '+10% beam width (3 rays: edges + center)' },
+    { id: 'width', label: 'Width', desc: '3 rays (edges + center); +10% beam width each' },
     { id: 'dmg', label: 'Damage', desc: '+50% damage' }
   ],
   rocket: [

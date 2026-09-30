@@ -7234,7 +7234,7 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
     msg.ix = impact.x;
     msg.iy = impact.y;
   }
-  roomBroadcast(room, msg);
+  if (!opts.skipBroadcast) roomBroadcast(room, msg);
 
   for (let i = 0; i < asteroidHits.length; i++) {
     const a = asteroidHits[i].target;
@@ -7260,11 +7260,21 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
   }
 }
 
-/** Always 3 rays (edges + center); width scales with upgrade; dmg ÷ 3 per ray (stacks). */
+/**
+ * Width rank 0: single center beam (old rail L1 / un-upgraded).
+ * Rank 1+: 3 rays (edges + center); width +10% per rank; dmg ÷ 3 per ray.
+ */
 function applyRailgunTriad(room, p, ox, oy, dx, dy, range, opts) {
   opts = opts || {};
   const w = effectiveWeapon(p, 'railgun');
-  const width = 4 * RES_SCALE * Math.pow(1.1, w.widthRank | 0);
+  const widthRank = w.widthRank | 0;
+
+  if (widthRank <= 0) {
+    applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts);
+    return;
+  }
+
+  const width = 4 * RES_SCALE * Math.pow(1.1, widthRank);
   const dmgEach = effectiveBulletDmg(p, 'railgun') / 3;
   const px = -dy;
   const py = dx;
