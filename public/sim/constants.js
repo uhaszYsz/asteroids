@@ -381,9 +381,11 @@ const ENEMY_HP = {
 const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 const ENEMY_SNAKE_GROW_PER_EAT = 7;
-/** Snake field event: drip small rocks while the boss lives. */
-const SNAKE_FIELD_SMALL_INTERVAL = Math.round(3 * TPS);
+/** Snake field event: drip smalls / mediums while the boss lives. */
+const SNAKE_FIELD_SMALL_INTERVAL = Math.round(2 * TPS);
+const SNAKE_FIELD_MEDIUM_INTERVAL = Math.round(5 * TPS);
 const SNAKE_FIELD_ASTEROID_CAP = 7;
+const SNAKE_FIELD_MEDIUM_CAP = 3;
 /** Spinner: 2-way radial burst (180°); shoot angle advances `spin` degrees after each volley. */
 const ENEMY_SPINNER = {
   ammo: 25,

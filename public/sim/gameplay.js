@@ -3520,6 +3520,7 @@ function clearAsteroidsForShop(room) {
 function destroyAllAsteroidsOnBossDeath(room) {
   room.pendingBigSpawns = [];
   room.snakeFieldLeft = 0;
+  room.snakeFieldMedLeft = 0;
   if (!room.asteroids || !room.asteroids.length) return;
   const list = room.asteroids.slice();
   for (let i = 0; i < list.length; i++) {
@@ -3542,6 +3543,18 @@ function countSnakeFieldAsteroids(room) {
   return n;
 }
 
+/** Medium rocks on the snake field (skip portal twins / center rocks). */
+function countSnakeFieldMediums(room) {
+  if (!room || !room.asteroids) return 0;
+  let n = 0;
+  for (let i = 0; i < room.asteroids.length; i++) {
+    const a = room.asteroids[i];
+    if (!a || a.portalOfAid != null || a.centerRock) continue;
+    if (a.size === 'medium') n++;
+  }
+  return n;
+}
+
 function roomHasLiveSnake(room) {
   if (!room || !room.enemies) return false;
   for (let i = 0; i < room.enemies.length; i++) {
@@ -3553,7 +3566,7 @@ function roomHasLiveSnake(room) {
 
 /**
  * Snake init: wipe the field, leave 1 big + 1 medium + 3 small,
- * then drip one small every 3s while the snake lives (cap 7 total).
+ * then drip smalls every 2s (cap 7 total) and mediums every 5s (cap 3 medium).
  */
 function startSnakeFieldEvent(room) {
   if (!room) return;
@@ -3578,27 +3591,48 @@ function startSnakeFieldEvent(room) {
   spawnSized('medium');
   for (let i = 0; i < 3; i++) spawnSized('small');
   room.snakeFieldLeft = SNAKE_FIELD_SMALL_INTERVAL;
+  room.snakeFieldMedLeft = SNAKE_FIELD_MEDIUM_INTERVAL;
 }
 
 function tickSnakeFieldEvent(room) {
   if (!room || !room.practice || room.shopOpen) return;
   if (!roomHasLiveSnake(room)) {
     room.snakeFieldLeft = 0;
+    room.snakeFieldMedLeft = 0;
     return;
   }
-  if (!(room.snakeFieldLeft > 0)) return;
-  room.snakeFieldLeft--;
-  if (room.snakeFieldLeft > 0) return;
-  room.snakeFieldLeft = SNAKE_FIELD_SMALL_INTERVAL;
-  if (countSnakeFieldAsteroids(room) >= SNAKE_FIELD_ASTEROID_CAP) return;
-  const a = makeAsteroid({
-    size: 'small',
-    offscreen: true,
-    allowSpecial: false,
-    special: null
-  });
-  pushAsteroid(room, a);
-  emitAsteroidFire(room, a);
+  if (room.snakeFieldLeft > 0) {
+    room.snakeFieldLeft--;
+    if (room.snakeFieldLeft <= 0) {
+      room.snakeFieldLeft = SNAKE_FIELD_SMALL_INTERVAL;
+      if (countSnakeFieldAsteroids(room) < SNAKE_FIELD_ASTEROID_CAP) {
+        const a = makeAsteroid({
+          size: 'small',
+          offscreen: true,
+          allowSpecial: false,
+          special: null
+        });
+        pushAsteroid(room, a);
+        emitAsteroidFire(room, a);
+      }
+    }
+  }
+  if (room.snakeFieldMedLeft > 0) {
+    room.snakeFieldMedLeft--;
+    if (room.snakeFieldMedLeft <= 0) {
+      room.snakeFieldMedLeft = SNAKE_FIELD_MEDIUM_INTERVAL;
+      if (countSnakeFieldMediums(room) < SNAKE_FIELD_MEDIUM_CAP) {
+        const a = makeAsteroid({
+          size: 'medium',
+          offscreen: true,
+          allowSpecial: false,
+          special: null
+        });
+        pushAsteroid(room, a);
+        emitAsteroidFire(room, a);
+      }
+    }
+  }
 }
 
 function openSoloShop(room, nextWave) {
