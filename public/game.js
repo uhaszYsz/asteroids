@@ -23699,6 +23699,8 @@ function handleWsMessage(e) {
         const label = msg.item || 'item';
         if (msg.kind === 'lives') {
           conPrint('gave ' + ((msg.n | 0) || 99) + ' lives', 'info');
+        } else if (msg.kind === 'gold') {
+          conPrint('gave ' + ((msg.n | 0) || 9999) + ' gold', 'info');
         } else if (msg.kind === 'weapon' && msg.lvl != null) {
           conPrint('gave ' + label + ' L' + (msg.lvl | 0), 'info');
         } else {
@@ -26870,11 +26872,14 @@ function conAllNames() {
 
 function conPrint(text, cls) {
   if (!conLogEl) return;
+  // Keep scroll position when the user has scrolled up to read history.
+  const distBottom = conLogEl.scrollHeight - conLogEl.scrollTop - conLogEl.clientHeight;
+  const stickBottom = distBottom < 48;
   const line = document.createElement('div');
   if (cls) line.className = cls;
   line.textContent = text;
   conLogEl.appendChild(line);
-  conLogEl.scrollTop = conLogEl.scrollHeight;
+  if (stickBottom) conLogEl.scrollTop = conLogEl.scrollHeight;
 }
 
 function openConsole() {
@@ -26885,8 +26890,14 @@ function openConsole() {
   for (const k of Object.keys(keys)) keys[k] = false;
   spaceLatch = false;
   enterLatch = false;
+  // Readonly-until-focus blocks browser password/email managers (Firefox Relay, etc.).
+  conInputEl.readOnly = true;
   conInputEl.focus();
-  conInputEl.select();
+  requestAnimationFrame(() => {
+    if (!consoleOpen || !conInputEl) return;
+    conInputEl.readOnly = false;
+    conInputEl.select();
+  });
   conUpdateSuggest();
 }
 
@@ -27113,6 +27124,7 @@ function runConsole(line) {
       conPrint('weapons: default rocket laser shotgun rail plasma void meteor', 'info');
       conPrint('keys: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
       conPrint('live — set lives to 99 (solo/coop)', 'info');
+      conPrint('gold — set gold to 9999', 'info');
       return;
     }
     if (!ws || ws.readyState !== 1) {
@@ -27148,7 +27160,7 @@ function runConsole(line) {
     conPrint('record <name> | stop | play <name> | demos | demolish <name>', 'info');
     conPrint('login <password>  — admin auth (saved locally for auto-login)', 'info');
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
-    conPrint('give <weapon|live>  — grant loadout / 99 lives (admin, in-game)', 'info');
+    conPrint('give <weapon|live|gold>  — grant loadout / 99 lives / 9999 gold (admin, in-game)', 'info');
     conPrint('spawn big|medium|small|meteor|common|common1|ufo|worm|spinner|gunship  — off-screen spawn (admin, in-game)', 'info');
     conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');

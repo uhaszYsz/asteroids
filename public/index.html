@@ -1181,7 +1181,15 @@
     #con-log {
       flex: 1; overflow-y: auto; padding: 8px 10px; white-space: pre-wrap;
       word-break: break-word; line-height: 1.35;
+      scrollbar-width: thin;
+      scrollbar-color: #2a5a3a #0a100c;
     }
+    #con-log::-webkit-scrollbar { width: 8px; }
+    #con-log::-webkit-scrollbar-track { background: #0a100c; }
+    #con-log::-webkit-scrollbar-thumb {
+      background: #2a5a3a; border-radius: 4px; border: 1px solid #0a100c;
+    }
+    #con-log::-webkit-scrollbar-thumb:hover { background: #3a7a4a; }
     #con-log .cmd { color: #c8ffd0; }
     #con-log .err { color: #ff8f8f; }
     #con-log .info { color: #9ad0ff; }
@@ -1200,7 +1208,15 @@
       border-top: 1px solid #1e3d28; padding: 4px 10px 6px;
       background: rgba(0, 12, 0, 0.92); color: #7a9a80;
       font: 12px Consolas, "Courier New", monospace; line-height: 1.4;
+      scrollbar-width: thin;
+      scrollbar-color: #2a5a3a #0a100c;
     }
+    #con-suggest::-webkit-scrollbar { width: 8px; }
+    #con-suggest::-webkit-scrollbar-track { background: #0a100c; }
+    #con-suggest::-webkit-scrollbar-thumb {
+      background: #2a5a3a; border-radius: 4px; border: 1px solid #0a100c;
+    }
+    #con-suggest::-webkit-scrollbar-thumb:hover { background: #3a7a4a; }
     #con.open #con-suggest.has-items { display: block; }
     #con-suggest .hit { color: #c8ffd0; }
     #con-suggest .sel { color: #fff; background: rgba(80, 160, 100, 0.35); }
@@ -2035,7 +2051,9 @@
 <div id="con">
   <div id="con-log"></div>
   <div id="con-suggest"></div>
-  <div id="con-row"><span>]</span><input id="con-input" type="text" autocomplete="off" spellcheck="false" /></div>
+  <form id="con-form" autocomplete="off" onsubmit="return false;">
+    <div id="con-row"><span>]</span><input id="con-input" type="text" name="asteroids_console_cmd" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" /></div>
+  </form>
 </div>
 <div id="grid-panel" aria-hidden="true">
   <div class="gp-head">
@@ -2638,7 +2656,7 @@
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
       await loadScript('sim/local-server.js?v=98');
-      await loadScript('game.js?v=1137');
+      await loadScript('game.js?v=1138');
     } catch (err) {
       console.error(err);
     }

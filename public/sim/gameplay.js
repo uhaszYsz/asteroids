@@ -4562,11 +4562,14 @@ function notifyPlayerWeapon(room, p, fromPickup, changedSlot) {
   }
 }
 
-/** Normalize console give aliases → canonical weapon / vital / lives. */
+/** Normalize console give aliases → canonical weapon / vital / lives / gold. */
 function resolveAdminGiveItem(raw) {
   const s = String(raw || '').trim().toLowerCase().replace(/[\s_-]+/g, '');
   if (!s) return null;
   if (s === 'live' || s === 'lives' || s === 'life') return { kind: 'lives', name: 'lives' };
+  if (s === 'gold' || s === 'coin' || s === 'coins' || s === 'credit' || s === 'credits') {
+    return { kind: 'gold', name: 'gold' };
+  }
   const weaponAlias = {
     default: 'default', gun: 'default', blaster: 'default',
     rocket: 'rocket', rockets: 'rocket',
@@ -4625,7 +4628,7 @@ function handleAdminSpawn(ws, kindRaw) {
 }
 
 /**
- * Admin console `give <item>` — equip weapon, or lives.
+ * Admin console `give <item>` — equip weapon, lives, or gold.
  */
 function handleAdminGive(ws, itemRaw) {
   if (!ws || !ws.isAdmin) return { ok: 0, err: 'not admin' };
@@ -4638,7 +4641,7 @@ function handleAdminGive(ws, itemRaw) {
   if (!item) {
     return {
       ok: 0,
-      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | live'
+      err: 'unknown item — weapons: default rocket laser shotgun rail plasma void meteor | live | gold'
     };
   }
 
@@ -4647,6 +4650,12 @@ function handleAdminGive(ws, itemRaw) {
     p.lives = 99;
     notifyPlayerLives(room, p);
     return { ok: 1, kind: 'lives', item: 'lives', n: 99 };
+  }
+
+  if (item.kind === 'gold') {
+    p.coins = 9999;
+    notifyPlayerCoins(room, p);
+    return { ok: 1, kind: 'gold', item: 'gold', n: 9999 };
   }
 
   if (item.kind === 'weapon') {
