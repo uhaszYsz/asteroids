@@ -3704,6 +3704,7 @@ function packShopState(room, p) {
     lives: p.lives | 0,
     weapon: p.weapon || 'default',
     weapon2: p.weapon2 || null,
+    fixingDrone: p.fixingDrone ? 1 : 0,
     levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
     upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
     unlocked: Object.assign({}, ensureUnlockedWeapons(p))
@@ -3733,6 +3734,27 @@ function notifyPlayerLives(room, p) {
       send(ws, { t: 'lives', n: p.lives | 0 });
       return;
     }
+  }
+}
+
+/** Passive shop drone: +FIXING_DRONE_HEAL_PER_SEC HP while alive (lost on death). */
+function tickFixingDrones(room) {
+  if (!room || !room.matchLive) return;
+  if (room.shopOpen || roomPreRoundFrozen(room)) return;
+  if (room.campaign && room.campaignMapOpen) return;
+  const cap = room.practice ? SOLO_MAX_HP : MAX_HP;
+  const rate = FIXING_DRONE_HEAL_PER_SEC / TPS;
+  for (const p of room.players.values()) {
+    if (!p || p.bot || !p.fixingDrone || (p.hp | 0) <= 0) continue;
+    if ((p.hp | 0) >= cap) {
+      p.droneHealAcc = 0;
+      continue;
+    }
+    p.droneHealAcc = (p.droneHealAcc || 0) + rate;
+    if (p.droneHealAcc < 1) continue;
+    const add = p.droneHealAcc | 0;
+    p.droneHealAcc -= add;
+    p.hp = Math.min(cap, (p.hp | 0) + add);
   }
 }
 
@@ -3965,6 +3987,17 @@ function handleShopBuy(room, p, item, name, slot, opt) {
     p.hp = cap;
     notifyPlayerCoins(room, p);
     return { ok: 1, hp: p.hp | 0 };
+  }
+
+  if (item === 'drone' || item === 'fixingdrone') {
+    const cost = FIXING_DRONE_COST;
+    if (p.fixingDrone) return { ok: 0, err: 'owned' };
+    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
+    p.coins = (p.coins | 0) - cost;
+    p.fixingDrone = true;
+    p.droneHealAcc = 0;
+    notifyPlayerCoins(room, p);
+    return { ok: 1, fixingDrone: 1 };
   }
 
   if (item === 'upgrade') {
@@ -4477,6 +4510,9 @@ function spawnPlayer(id, name, colors, room) {
     /** PvP shop open-time remaining (ticks); unused in solo. */
     shopTimeLeft: 0,
     lives: 0,
+    /** Shop vital: passive HP regen; cleared on death. */
+    fixingDrone: false,
+    droneHealAcc: 0,
     weapon: wpn,
     /** Second weapon slot (X) — null when empty. */
     weapon2: null,
@@ -4511,6 +4547,9 @@ function respawnPlayer(room, p, keepLoadout, maxHp, resetLevels) {
   p.godLeft = GODMODE_TICKS;
   p.lastHitBy = 0;
   p.hp = maxHp != null ? maxHp : MAX_HP;
+  // Fixing drone is lost on death (not carried through respawn).
+  p.fixingDrone = false;
+  p.droneHealAcc = 0;
   if (keepLoadout) {
     // Keep both equipped guns (Z + X). Death: resetLevels → wipe upgrade ranks, never demount.
     if (!p.weapon) p.weapon = 'default';
@@ -5452,6 +5491,9 @@ function handlePlayerDeath(room, victim) {
   victim.vy = 0;
   victim.bursting = false;
   victim.railChargeLeft = 0;
+  // Lost on death (before respawn wipe too).
+  victim.fixingDrone = false;
+  victim.droneHealAcc = 0;
   if (room.practice) {
     victim.lives = Math.max(0, (victim.lives | 0) - 1);
   }

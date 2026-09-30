@@ -653,6 +653,7 @@ function stepRoom(room) {
     // Humans: one cmd/step per tick (backlog drains over time — no thrust stack).
     stepPlayerInputs(room, p);
   }
+  tickFixingDrones(room);
   if (room.matchLive && !roomPreRoundFrozen(room)) processPendingRailBounces(room);
   // Move asteroids first, rebuild spatial hash once, then bullets + collisions
   // (avoids a second rebuild inside updateBullets).

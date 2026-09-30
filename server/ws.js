@@ -450,6 +450,7 @@ wss.on('connection', (ws) => {
         hp: p.hp | 0,
         weapon: p.weapon || 'default',
         weapon2: p.weapon2 || null,
+        fixingDrone: p.fixingDrone ? 1 : 0,
         levels: Object.assign({}, syncWeaponLevelsFromUpgrades(p)),
         upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
         unlocked: Object.assign({}, ensureUnlockedWeapons(p)),

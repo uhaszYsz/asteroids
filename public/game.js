@@ -13949,6 +13949,7 @@ function applyShopState(st) {
     lives: st.lives | 0,
     weapon: cur,
     weapon2: cur2,
+    fixingDrone: !!(st.fixingDrone | 0),
     levels: Object.assign({}, weaponLevels),
     upgrades: JSON.parse(JSON.stringify(weaponUpgrades)),
     unlocked
@@ -14027,6 +14028,34 @@ function renderSoloShop() {
     }
     lifeRow.appendChild(lifePrice);
     ssVitalEl.appendChild(lifeRow);
+
+    const droneOwned = !!st.fixingDrone;
+    const droneRow = document.createElement('div');
+    droneRow.className = 'ss-row' + (droneOwned ? ' ss-owned' : '');
+    attachShopPreview(droneRow, 'health', 'health', 3303);
+    const droneName = document.createElement('div');
+    droneName.className = 'ss-name';
+    droneName.textContent = 'FIXING DRONE';
+    droneRow.appendChild(droneName);
+    const droneDesc = document.createElement('div');
+    droneDesc.className = 'ss-lvl';
+    droneDesc.textContent = droneOwned ? 'OWNED · +2 HP/S' : '+2 HP/S · LOST ON DEATH';
+    droneRow.appendChild(droneDesc);
+    const dronePrice = document.createElement('div');
+    dronePrice.className = 'ss-price';
+    if (droneOwned) {
+      dronePrice.textContent = 'OWNED';
+    } else {
+      dronePrice.textContent = shopCreditPrice(1200);
+      if (st.coins < 1200) droneRow.classList.add('ss-owned');
+      else {
+        const buy = () => sendShopBuy('drone', '');
+        droneRow.addEventListener('click', buy);
+        vitalsRow.push({ el: droneRow, activate: () => buy() });
+      }
+    }
+    droneRow.appendChild(dronePrice);
+    ssVitalEl.appendChild(droneRow);
 
     if (vitalsRow.length) shopFocusGrid.push(vitalsRow);
   }

@@ -693,6 +693,9 @@ const PICKUP_DROP_CHANCE = 0.2;
 const PICKUP_BOUNCE_MAX = 3;
 /** Heal amount from health pickups (HP capped at MAX_HP). */
 const HEALTH_PICKUP_HEAL = 30;
+/** Shop vital: fixing drone — regen while alive; lost on death. */
+const FIXING_DRONE_COST = 1200;
+const FIXING_DRONE_HEAL_PER_SEC = 2;
 /** Pickup type codes in network packs: 1+ weapons by slot, 99 health. */
 const PICKUP_CODE_HEALTH = 99;
 const ASTEROID_HP = 50;
