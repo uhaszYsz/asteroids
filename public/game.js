@@ -17931,7 +17931,8 @@ function ensureSnakeSegs(e, headX, headY, headAng) {
   e.snakeSegs = segs;
 }
 
-/** Client-side follow so segments track predicted head between snaps. */
+/** Client-side follow so segments track predicted head between snaps.
+ *  Always hold exact rest distance (matches server — no turn-clumping). */
 function updateSnakeSegsToward(e, headX, headY) {
   if (!e || !e.snakeSegs || !e.snakeSegs.length) return;
   let px = headX;
@@ -17944,11 +17945,14 @@ function updateSnakeSegsToward(e, headX, headY) {
     const dx = px - s.x;
     const dy = py - s.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > 1e-6) s.angle = Math.atan2(dy, dx);
-    if (dist > gap && dist > 1e-6) {
-      const pull = dist - gap;
-      s.x += (dx / dist) * pull;
-      s.y += (dy / dist) * pull;
+    if (dist > 1e-6) {
+      s.angle = Math.atan2(dy, dx);
+      s.x = px - (dx / dist) * gap;
+      s.y = py - (dy / dist) * gap;
+    } else {
+      const back = (s.angle || 0) + Math.PI;
+      s.x = px + Math.cos(back) * gap;
+      s.y = py + Math.sin(back) * gap;
     }
     px = s.x;
     py = s.y;
