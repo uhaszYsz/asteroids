@@ -18139,7 +18139,7 @@ const ENEMY_COMMON_SPRITE_ID = 'enemy_4';
 const ENEMY_COMMON_SPRITE_SCALE = 1;
 /** common1 = Craft 10. */
 const ENEMY_COMMON1_SPRITE_ID = 'enemy_10';
-const ENEMY_COMMON1_SPRITE_SCALE = 1;
+const ENEMY_COMMON1_SPRITE_SCALE = 0.5;
 /** Craft 10 base half-extents (fh×fw / 2) before scale. */
 const ENEMY_COMMON1_HALF_L0 = 62 * 0.5;
 const ENEMY_COMMON1_HALF_W0 = 67 * 0.5;
