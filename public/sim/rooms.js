@@ -660,6 +660,7 @@ function stepRoom(room) {
   if (roomPreRoundFrozen(room) || (room.campaign && room.campaignMapOpen)) {
     clearGodmodeSpawnZones(room);
     rebuildAsteroidSpatialHash(room);
+    rebuildSnakeSegmentSpatialHash(room);
     pushPoseHistory(room);
     sendAsteroidGhostDumps(room);
     return;
@@ -823,10 +824,13 @@ function stepRoom(room) {
   }
   clearGodmodeSpawnZones(room);
   rebuildAsteroidSpatialHash(room);
+  rebuildSnakeSegmentSpatialHash(room);
   if (room.matchLive) {
     updateBullets(room);
     updatePickups(room);
     if (room.practice && !room.shopOpen) updateEnemies(room);
+    // Trail moves in updateEnemies — refresh hash for meteor / post-enemy queries.
+    rebuildSnakeSegmentSpatialHash(room);
     tickWorldPoseSnap(room);
   } else if (room.bullets.length) {
     // Pre-start: fly around only — clear any stray shots.

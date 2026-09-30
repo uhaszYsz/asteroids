@@ -1497,38 +1497,59 @@ function damageSnakeTurret(room, e, seg, dmg, ownerId) {
  * Trail index → body seg: newest stamp is near head (not a body seg);
  * stamp fromEnd=1 → seg 0, fromEnd=2 → seg 1, …
  */
-function snakeTurretOnHitSegment(e, hx, hy, hr) {
+/**
+ * Route body impact to a turret when the nearest head/trail stamp (within lim)
+ * is that turret's mount seg. Uses snakeHash when available (O(nearby segs));
+ * else O(mounts) via world poses — never a full trail scan.
+ */
+function snakeTurretOnHitSegment(room, e, hx, hy, hr) {
   if (!e || e.kind !== 'snake' || !e.snakeTurrets || !e.snakeTurrets.length) return null;
-  const trail = e.snakeTrail;
-  if (!trail || !trail.length) return null;
   const bodyR = (e.r || ENEMY_R.snake || 10) + (hr != null ? hr : 4);
   const lim = bodyR * bodyR;
-  const headD2 = torusDistSq(hx, hy, e.x, e.y);
-  let bestI = -1;
-  let bestD2 = Infinity;
-  for (let i = 0; i < trail.length; i++) {
-    const d2 = torusDistSq(hx, hy, trail[i].x, trail[i].y);
-    if (d2 <= lim && d2 < bestD2) {
-      bestD2 = d2;
-      bestI = i;
+
+  if (room && room.snakeHash) {
+    let bestSeg = -2;
+    let bestD2 = Infinity;
+    forEachSnakeSegNear(room, hx, hy, bodyR + 2, (s) => {
+      if (s.e !== e) return false;
+      const d2 = torusDistSq(hx, hy, s.x, s.y);
+      if (d2 <= lim && d2 < bestD2) {
+        bestD2 = d2;
+        bestSeg = s.seg | 0;
+      }
+      return false;
+    });
+    // Head (seg -1) or miss → boss HP, not a turret.
+    if (bestSeg < 0) return null;
+    for (let i = 0; i < e.snakeTurrets.length; i++) {
+      const t = e.snakeTurrets[i];
+      if ((t.seg | 0) === bestSeg && (t.hp | 0) > 0) return t;
     }
+    return null;
   }
-  // Head is closer / only head hit → boss head, not a turret mount.
-  if (headD2 <= lim && headD2 <= bestD2) return null;
-  if (bestI < 0) return null;
-  const fromEnd = trail.length - 1 - bestI;
-  const segIdx = fromEnd - 1;
-  if (segIdx < 0) return null;
+
+  // Fallback: nearest living mount under the impact (O(mounts)).
+  const headD2 = torusDistSq(hx, hy, e.x, e.y);
+  let bestTur = null;
+  let bestTurD2 = Infinity;
   for (let i = 0; i < e.snakeTurrets.length; i++) {
     const t = e.snakeTurrets[i];
-    if ((t.seg | 0) === segIdx && (t.hp | 0) > 0) return t;
+    if ((t.hp | 0) <= 0) continue;
+    const pos = snakeTurretWorldPos(e, t.seg);
+    const d2 = torusDistSq(hx, hy, pos.x, pos.y);
+    if (d2 <= lim && d2 < bestTurD2) {
+      bestTurD2 = d2;
+      bestTur = t;
+    }
   }
-  return null;
+  if (!bestTur) return null;
+  if (headD2 <= lim && headD2 <= bestTurD2) return null;
+  return bestTur;
 }
 
 function damageSnakePreferTurret(room, e, dmg, ownerId, hx, hy, hr) {
   if (e && e.kind === 'snake' && hx != null && hy != null) {
-    const tur = snakeTurretOnHitSegment(e, hx, hy, hr != null ? hr : 4);
+    const tur = snakeTurretOnHitSegment(room, e, hx, hy, hr != null ? hr : 4);
     if (tur) {
       damageSnakeTurret(room, e, tur.seg, dmg, ownerId);
       return;
@@ -3366,7 +3387,7 @@ function raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist, hitScale) {
   return best;
 }
 
-function distToEnemyHit(px, py, e) {
+function distToEnemyHit(px, py, e, room, queryR) {
   if (enemyUsesRectHit(e)) {
     const d = enemyRectDims(e);
     const hl = d.len * 0.5;
@@ -3376,6 +3397,18 @@ function distToEnemyHit(px, py, e) {
     const qy = Math.max(-hw, Math.min(hw, ly));
     return Math.hypot(lx - qx, ly - qy);
   }
+  if (e.kind === 'snake' && room && room.snakeHash) {
+    const er = e.r || ENEMY_R.snake || 10;
+    const rad = (queryR != null ? queryR : er) + er + 2;
+    let best = Infinity;
+    forEachSnakeSegNear(room, px, py, rad, (s) => {
+      if (s.e !== e) return false;
+      const dist = Math.max(0, Math.sqrt(torusDistSq(px, py, s.x, s.y)) - s.r);
+      if (dist < best) best = dist;
+      return false;
+    });
+    return best;
+  }
   let best = Infinity;
   for (const cir of enemyHitCircles(e)) {
     const dist = Math.max(0, Math.sqrt(torusDistSq(px, py, cir.x, cir.y)) - cir.r);
@@ -3384,7 +3417,7 @@ function distToEnemyHit(px, py, e) {
   return best;
 }
 
-function hitBulletEnemy(b, e) {
+function hitBulletEnemy(room, b, e) {
   if (enemyUsesRectHit(e)) {
     const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
     let br = cfg.size || 2;
@@ -3392,6 +3425,7 @@ function hitBulletEnemy(b, e) {
     if (cfg.col === 'line') br = Math.max(bulletLineWidth(b, cfg) || 2, 2);
     return circleHitsEnemyRect(b.x, b.y, br, e);
   }
+  if (e.kind === 'snake') return hitBulletSnake(room, b, e);
   for (const cir of enemyHitCircles(e)) {
     if (hitBulletTarget(b, cir.x, cir.y, cir.r, false)) return true;
   }
@@ -4928,6 +4962,165 @@ function forEachAsteroidNear(room, x, y, rad, fn) {
 }
 
 /**
+ * Spatial hash for snake head + trail stamps (same grid as asteroids).
+ * Player bullets / hitscans query nearby segs instead of scanning the whole body.
+ */
+function createSnakeSpatialHash() {
+  const cells = new Array(AST_HASH_N);
+  for (let i = 0; i < AST_HASH_N; i++) cells[i] = [];
+  return {
+    cells,
+    cellStamp: new Uint32Array(AST_HASH_N),
+    stamp: 1,
+    queryId: 1,
+    segPool: []
+  };
+}
+
+function rebuildSnakeSegmentSpatialHash(room) {
+  let h = room.snakeHash;
+  if (!h) {
+    h = createSnakeSpatialHash();
+    room.snakeHash = h;
+  }
+  let stamp = h.stamp + 1;
+  if (stamp >= 0xfffffff0) {
+    h.cellStamp.fill(0);
+    stamp = 1;
+  }
+  h.stamp = stamp;
+  const { cells, cellStamp, segPool } = h;
+  let poolN = 0;
+  const takeSeg = () => {
+    let s;
+    if (poolN < segPool.length) s = segPool[poolN++];
+    else {
+      s = { e: null, x: 0, y: 0, r: 0, seg: -1, _hq: 0 };
+      segPool.push(s);
+      poolN++;
+    }
+    return s;
+  };
+  const inv = 1 / AST_HASH_CELL;
+  const cols = AST_HASH_COLS;
+  const rows = AST_HASH_ROWS;
+  const ox = AST_HASH_OX;
+  const oy = AST_HASH_OY;
+
+  const insert = (e, x, y, r, seg) => {
+    const s = takeSeg();
+    s.e = e;
+    s.x = x;
+    s.y = y;
+    s.r = r;
+    s.seg = seg | 0;
+    s._hq = 0;
+    let x0 = ((x - r - ox) * inv) | 0;
+    let y0 = ((y - r - oy) * inv) | 0;
+    let x1 = ((x + r - ox) * inv) | 0;
+    let y1 = ((y + r - oy) * inv) | 0;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 >= cols) x1 = cols - 1;
+    if (y1 >= rows) y1 = rows - 1;
+    if (x1 < x0 || y1 < y0) return;
+    for (let cy = y0; cy <= y1; cy++) {
+      const row = cy * cols;
+      for (let cx = x0; cx <= x1; cx++) {
+        const idx = row + cx;
+        if (cellStamp[idx] !== stamp) {
+          cellStamp[idx] = stamp;
+          cells[idx].length = 0;
+        }
+        cells[idx].push(s);
+      }
+    }
+  };
+
+  const enemies = room.enemies;
+  if (!enemies || !enemies.length) return;
+  for (let ei = 0; ei < enemies.length; ei++) {
+    const e = enemies[ei];
+    if (!e || e.kind !== 'snake' || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
+    const r = e.r || ENEMY_R.snake || 10;
+    insert(e, e.x, e.y, r, -1);
+    const trail = e.snakeTrail;
+    if (!trail || !trail.length) continue;
+    for (let i = 0; i < trail.length; i++) {
+      const fromEnd = trail.length - 1 - i;
+      const segIdx = fromEnd - 1;
+      insert(e, trail[i].x, trail[i].y, r, segIdx);
+    }
+  }
+}
+
+/**
+ * Visit unique snake head/trail stamps near (x,y,rad).
+ * `fn(seg)` — seg has { e, x, y, r, seg }; return true to stop.
+ */
+function forEachSnakeSegNear(room, x, y, rad, fn) {
+  const h = room.snakeHash;
+  if (!h) return false;
+  const stamp = h.stamp;
+  let qid = h.queryId + 1;
+  if (qid >= 0xfffffff0) qid = 1;
+  h.queryId = qid;
+  const { cells, cellStamp } = h;
+  const inv = 1 / AST_HASH_CELL;
+  const cols = AST_HASH_COLS;
+  const rows = AST_HASH_ROWS;
+  const ox = AST_HASH_OX;
+  const oy = AST_HASH_OY;
+  let x0 = ((x - rad - ox) * inv) | 0;
+  let y0 = ((y - rad - oy) * inv) | 0;
+  let x1 = ((x + rad - ox) * inv) | 0;
+  let y1 = ((y + rad - oy) * inv) | 0;
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 >= cols) x1 = cols - 1;
+  if (y1 >= rows) y1 = rows - 1;
+  if (x1 < x0 || y1 < y0) return false;
+  for (let cy = y0; cy <= y1; cy++) {
+    const row = cy * cols;
+    for (let cx = x0; cx <= x1; cx++) {
+      const idx = row + cx;
+      if (cellStamp[idx] !== stamp) continue;
+      const bucket = cells[idx];
+      for (let i = 0, n = bucket.length; i < n; i++) {
+        const s = bucket[i];
+        if (s._hq === qid) continue;
+        s._hq = qid;
+        if (!s.e || (s.e.hp | 0) <= 0) continue;
+        if (fn(s) === true) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** True if player bullet overlaps this snake via spatial hash (fallback: full trail). */
+function hitBulletSnake(room, b, e) {
+  const br = bulletBroadR(b);
+  const er = e.r || ENEMY_R.snake || 10;
+  if (room && room.snakeHash) {
+    let hit = false;
+    forEachSnakeSegNear(room, b.x, b.y, br + er + 2, (s) => {
+      if (s.e !== e) return false;
+      if (hitBulletTarget(b, s.x, s.y, s.r, false)) {
+        hit = true;
+        return true;
+      }
+      return false;
+    });
+    return hit;
+  }
+  for (const cir of enemyHitCircles(e)) {
+    if (hitBulletTarget(b, cir.x, cir.y, cir.r, false)) return true;
+  }
+  return false;
+}
+
+/**
  * Circle vs asteroid collision polygon (jagged 2D outline × ASTEROID_HIT_SCALE).
  * Euclidean only — asteroids edge-teleport (not toroidal).
  * Local pts spun by a.angle.
@@ -5942,6 +6135,27 @@ function resolvePlayerShotEnemyHits(room) {
       if (!e || (e.hp | 0) <= 0 || !enemyIsSpawned(e)) continue;
       const hit = enemyUsesRectHit(e)
         ? circleHitsEnemyRect(shot.x, shot.y, shot.r || 10, e)
+        : e.kind === 'snake'
+          ? (() => {
+            const er = e.r || ENEMY_R.snake || 10;
+            const sr = shot.r || 10;
+            if (room.snakeHash) {
+              let ok = false;
+              forEachSnakeSegNear(room, shot.x, shot.y, sr + er + 2, (s) => {
+                if (s.e !== e) return false;
+                if (circleVsAsteroidPoly({ x: s.x, y: s.y, r: s.r }, shot)) {
+                  ok = true;
+                  return true;
+                }
+                return false;
+              });
+              return ok;
+            }
+            for (const cir of enemyHitCircles(e)) {
+              if (circleVsAsteroidPoly({ x: cir.x, y: cir.y, r: cir.r }, shot)) return true;
+            }
+            return false;
+          })()
         : (() => {
           for (const cir of enemyHitCircles(e)) {
             if (circleVsAsteroidPoly({ x: cir.x, y: cir.y, r: cir.r }, shot)) return true;
@@ -6281,6 +6495,35 @@ function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist, opts) {
     let hit = null;
     if (enemyUsesRectHit(e)) {
       hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist, enemyHitScale);
+    } else if (e.kind === 'snake' && room.snakeHash) {
+      const er = (e.r || ENEMY_R.snake || 10) * enemyHitScale;
+      let bestHit = null;
+      const half = maxDist * 0.5;
+      const qR = half + er + 2;
+      const considerNear = (qx, qy) => {
+        forEachSnakeSegNear(room, qx, qy, qR, (s) => {
+          if (s.e !== e) return false;
+          const h = wrapPlayers
+            ? raycastCircleToroidal(ox, oy, dx, dy, s.x, s.y, er, maxDist)
+            : (() => {
+              const t = raycastCircle(ox, oy, dx, dy, s.x, s.y, er);
+              return (t != null && t <= maxDist) ? { t, x: ox + dx * t, y: oy + dy * t } : null;
+            })();
+          if (h && (!bestHit || h.t < bestHit.t)) bestHit = h;
+          return false;
+        });
+      };
+      considerNear(ox + dx * half, oy + dy * half);
+      // Toroidal wrap: also sample segs near wrapped midpoints.
+      if (wrapPlayers) {
+        for (let oxw = -W; oxw <= W; oxw += W) {
+          for (let oyw = -H; oyw <= H; oyw += H) {
+            if (!oxw && !oyw) continue;
+            considerNear(ox + dx * half + oxw, oy + dy * half + oyw);
+          }
+        }
+      }
+      hit = bestHit;
     } else {
       let bestHit = null;
       for (const cir of enemyHitCircles(e)) {
@@ -6382,7 +6625,7 @@ function applyRocketBlast(room, ownerId, x, y, preAids, opts) {
       const e = enemies[i];
       if (!enemyIsSpawned(e) || e.hp <= 0) continue;
       if (skipEnemyId && (e.id | 0) === skipEnemyId) continue;
-      const dist = distToEnemyHit(x, y, e);
+      const dist = distToEnemyHit(x, y, e, room, R);
       const dmg = rocketBlastDamageAt(dist, R, maxDmg);
       if (dmg > 0) damageSnakePreferTurret(room, e, dmg, ownerId | 0, x, y, R);
     }
@@ -6821,6 +7064,36 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
         );
         if (t != null) hit = { t, x: ox + dx * t, y: oy + dy * t };
       }
+    } else if (e.kind === 'snake' && room.snakeHash) {
+      const er = (e.r || ENEMY_R.snake || 10) * enemyHitScale;
+      let bestHit = null;
+      const half = maxDist * 0.5;
+      const qR = half + er + 2;
+      const considerNear = (qx, qy) => {
+        forEachSnakeSegNear(room, qx, qy, qR, (s) => {
+          if (s.e !== e) return false;
+          if (toroidal) {
+            const h = raycastCircleToroidal(ox, oy, dx, dy, s.x, s.y, er, maxDist);
+            if (h && (!bestHit || h.t < bestHit.t)) bestHit = h;
+          } else {
+            const t = raycastCircle(ox, oy, dx, dy, s.x, s.y, er);
+            if (t != null && t <= maxDist && (!bestHit || t < bestHit.t)) {
+              bestHit = { t, x: ox + dx * t, y: oy + dy * t };
+            }
+          }
+          return false;
+        });
+      };
+      considerNear(ox + dx * half, oy + dy * half);
+      if (toroidal) {
+        for (let oxw = -W; oxw <= W; oxw += W) {
+          for (let oyw = -H; oyw <= H; oyw += H) {
+            if (!oxw && !oyw) continue;
+            considerNear(ox + dx * half + oxw, oy + dy * half + oyw);
+          }
+        }
+      }
+      hit = bestHit;
     } else {
       let bestHit = null;
       for (const cir of enemyHitCircles(e)) {
@@ -7542,7 +7815,7 @@ function updateBullets(room) {
         for (let ei = room.enemies.length - 1; ei >= 0; ei--) {
           const e = room.enemies[ei];
           if (!enemyIsSpawned(e) || e.hp <= 0) continue;
-          if (!hitBulletEnemy(b, e)) continue;
+          if (!hitBulletEnemy(room, b, e)) continue;
           const key = 'e:' + e.id;
           active.add(key);
           applyVoidOverlapPulse(b, key, (dmg) => {
@@ -7621,7 +7894,7 @@ function updateBullets(room) {
       for (let ei = room.enemies.length - 1; ei >= 0; ei--) {
         const e = room.enemies[ei];
         if (!enemyIsSpawned(e)) continue;
-        if (!hitBulletEnemy(b, e)) continue;
+        if (!hitBulletEnemy(room, b, e)) continue;
         if (b.type === 'rocket') {
           if (b.noBlast) damageSnakePreferTurret(room, e, b.dmg || 30, b.owner | 0, b.x, b.y, 6);
           detonateRocket(room, b, 3);
