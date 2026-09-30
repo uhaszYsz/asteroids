@@ -342,7 +342,7 @@ function packBullet(b) {
       b.hp != null ? (b.hp | 0) : ROCKET_HP_DEFAULT
     );
     if (b.flightAng != null && Number.isFinite(+b.flightAng)) row.push(+b.flightAng);
-  } else if (b.type === 'enemyWorm') {
+  } else if (b.type === 'enemyWorm' || (b.type === 'enemy' && (b.length != null || b.width != null))) {
     row.push(
       b.length != null ? +b.length : 15,
       b.width != null ? +b.width : 15

@@ -1329,6 +1329,7 @@ function makeEnemy(kind, wave, weapon) {
   if (k === 'snake') {
     e.snakeTrail = [{ x: e.x, y: e.y }];
     e.snakeSegMax = ENEMY_SNAKE_SEGMENTS;
+    e.fireCd = ENEMY_SNAKE_SHOT_INTERVAL;
   }
   return e;
 }
@@ -1427,6 +1428,46 @@ function snakeEatAsteroids(room, e) {
     grew++;
   }
   if (grew > 0) emitEnemyUpdate(room, e);
+}
+
+/**
+ * Every 0.5s: one shot from a random trail stamp aimed at the player
+ * (speed 4, +20% common bullet size).
+ */
+function snakeTryFire(room, e) {
+  if (!e || e.kind !== 'snake' || !room || (e.hp | 0) <= 0) return;
+  if (!enemyIsSpawned(e)) return;
+  if ((e.fireCd | 0) > 0) return;
+  e.fireCd = ENEMY_SNAKE_SHOT_INTERVAL;
+  const target = soloHumanTarget(room);
+  const trail = e.snakeTrail;
+  if (!target || !trail || !trail.length) return;
+  const seg = trail[(Math.random() * trail.length) | 0];
+  if (!seg) return;
+  const dx = shortestWrapDelta(seg.x, target.x, W);
+  const dy = shortestWrapDelta(seg.y, target.y, H);
+  if (!(dx * dx + dy * dy > 1e-8)) return;
+  const ang = Math.atan2(dy, dx);
+  const x = seg.x;
+  const y = seg.y;
+  const len = ENEMY_SNAKE_SHOT_LENGTH;
+  const b = {
+    id: room.nextBulletId++,
+    owner: 0,
+    enemyOwner: e.id | 0,
+    type: 'enemy',
+    dmg: ENEMY_COMMON_BULLET_DMG,
+    length: len,
+    width: len,
+    x, y,
+    spawnX: x,
+    spawnY: y,
+    vx: Math.cos(ang) * ENEMY_SNAKE_SHOT_SPEED,
+    vy: Math.sin(ang) * ENEMY_SNAKE_SHOT_SPEED,
+    spawnSt: Date.now()
+  };
+  room.bullets.push(b);
+  roomBroadcast(room, { t: 'bf', b: packBullet(b) });
 }
 
 /**
@@ -2907,6 +2948,7 @@ function updateEnemies(room) {
       if (e.kind === 'snake') {
         updateSnakeTrail(e);
         snakeEatAsteroids(room, e);
+        snakeTryFire(room, e);
       }
       if (e.kind === 'common1') enemyTryFire(room, e);
       chaseSnap = true;
