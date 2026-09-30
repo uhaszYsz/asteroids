@@ -378,7 +378,7 @@ const ENEMY_HP = {
   snake: 1000
 };
 /** Snake boss: head + trailing segments. FOLLOW_DIST = 5px dead zone. */
-const ENEMY_SNAKE_SEGMENTS = 15;
+const ENEMY_SNAKE_SEGMENTS = 100;
 const ENEMY_SNAKE_FOLLOW_DIST = 15;
 /** Spinner: 2-way radial burst (180°); shoot angle advances `spin` degrees after each volley. */
 const ENEMY_SPINNER = {
