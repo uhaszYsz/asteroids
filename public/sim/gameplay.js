@@ -1021,7 +1021,7 @@ function enemyTurnMax(e) {
 
 function isCommonKind(kind) {
   return kind === 'common' || kind === 'common1' || kind === 'commonRail'
-    || kind === 'commonVoid' || kind === 'volkano';
+    || kind === 'commonVoid';
 }
 
 function enemyMoveType(e) {
@@ -1061,7 +1061,6 @@ function wormIsShotgunRush(e) {
 function packEnemyNetSpeed(e) {
   // Spinner magazine isn't on the wire — pack effective speed so crawl still predicts.
   if (e && e.kind === 'spinner') return enemySpeed(e);
-  if (e && e.kind === 'volkano') return 0;
   const s = e && +e.speed;
   return (Number.isFinite(s) && s > 0) ? s : ENEMY_WANDER_SPEED;
 }
@@ -1091,10 +1090,6 @@ function packEnemy(e) {
       : (e.kind === 'snake' ? Math.max(1, e.snakeSegMax | 0) : 0),
     e.enteredPlay ? 1 : 0
   ];
-  if (e.kind === 'volkano') {
-    row.push(e.hostAid != null ? (e.hostAid | 0) : 0);
-    row.push(e.edgeI | 0);
-  }
   return row;
 }
 
@@ -1119,10 +1114,6 @@ function packEnemySnap(e) {
       ? (e.wormPhase | 0)
       : (e.kind === 'snake' ? Math.max(1, e.snakeSegMax | 0) : 0)
   ];
-  if (e.kind === 'volkano') {
-    row.push(e.hostAid != null ? (e.hostAid | 0) : 0);
-    row.push(e.edgeI | 0);
-  }
   return row;
 }
 
@@ -1251,13 +1242,6 @@ function randomSnakeEdgeSpawnPoint() {
 
 /** Place enemy off-screen aimed at an on-field wander point. */
 function placeEnemyOffscreenEntry(e) {
-  if (e && e.kind === 'volkano') {
-    // Pose is filled when appear fires / each tick via attachVolkanoToAsteroid.
-    e.vx = 0;
-    e.vy = 0;
-    e.enteredPlay = true;
-    return;
-  }
   const spawn = e.kind === 'snake'
     ? randomSnakeEdgeSpawnPoint()
     : randomOffscreenSpawnPoint((e.r || 12) + 24 * RES_SCALE);
@@ -1282,7 +1266,6 @@ function makeEnemy(kind, wave, weapon) {
   if (kind === 'common1') k = 'common1';
   else if (kind === 'commonRail') k = 'commonRail';
   else if (kind === 'commonVoid') k = 'commonVoid';
-  else if (kind === 'volkano') k = 'volkano';
   else if (kind === 'ufo') k = 'ufo';
   else if (kind === 'carrier') k = 'carrier';
   else if (kind === 'worm') k = 'worm';
@@ -1361,19 +1344,9 @@ function makeEnemy(kind, wave, weapon) {
     snakeTrail: null,
     snakeSegMax: k === 'snake' ? ENEMY_SNAKE_SEGMENTS : 0,
     snakeRageLeft: 0,
-    snakeDmgSinceRage: 0,
-    hostAid: null,
-    edgeI: 0
+    snakeDmgSinceRage: 0
   };
   placeEnemyOffscreenEntry(e);
-  if (k === 'volkano') {
-    e.speed = 0;
-    e.vx = 0;
-    e.vy = 0;
-    e.shootAmmo = ENEMY_VOLKANO_LASER.ammo;
-    e.shootCd = firstShotCd;
-    e.reloadLeft = 0;
-  }
   if (k === 'carrier') {
     if (e.weapon === 'laser') e.shootAmmo = ENEMY_LASER.ammo;
     else if (e.weapon === 'plasma') e.shootAmmo = ENEMY_PLASMA.ammo;
@@ -1819,14 +1792,12 @@ function countCommonRailSlots(room) {
 }
 
 /** Random common kind; caps common1 / commonRail at 2.
- *  World 1: common + common1. World 2+: void / rail / volkano only (no common/common1). */
+ *  World 1: common + common1. World 2+: void / rail only (no common/common1). */
 function pickRandomCommonKind(room) {
   const world = (room && room.world) | 0;
   if (world >= 2) {
     const opts = ['commonVoid'];
     if (countCommonRailSlots(room) < MAX_COMMON_RAIL_ON_FIELD) opts.push('commonRail');
-    // Always offer volkano in W2 — rocks often start off-screen at wave begin.
-    if (roomHasAttachableAsteroid(room)) opts.push('volkano');
     return opts[(Math.random() * opts.length) | 0];
   }
   const opts = ['common'];
@@ -1834,178 +1805,6 @@ function pickRandomCommonKind(room) {
   return opts[(Math.random() * opts.length) | 0];
 }
 
-/** Any living rock (on- or off-screen) can host a volkano. */
-function roomHasAttachableAsteroid(room) {
-  if (!room || !room.asteroids || !room.asteroids.length) return false;
-  for (let i = 0; i < room.asteroids.length; i++) {
-    const a = room.asteroids[i];
-    if (!a || (a.hp | 0) <= 0) continue;
-    return true;
-  }
-  return false;
-}
-
-/** Local silhouette edge midpoints in asteroid-local space. */
-function asteroidEdgeMidLocal(a, edgeI) {
-  if (!a) return null;
-  if (!a.pts || !a.pts.length) refreshAsteroidCollisionPts(a);
-  const pts = a.pts;
-  if (!pts || pts.length < 4) return null;
-  const n = (pts.length / 2) | 0;
-  if (n < 2) return null;
-  const i0 = ((edgeI | 0) % n + n) % n;
-  const i1 = (i0 + 1) % n;
-  return {
-    x: (pts[i0 * 2] + pts[i1 * 2]) * 0.5,
-    y: (pts[i0 * 2 + 1] + pts[i1 * 2 + 1]) * 0.5,
-    n
-  };
-}
-
-function asteroidLocalToWorld(a, lx, ly) {
-  const ca = Math.cos(a.angle || 0);
-  const sa = Math.sin(a.angle || 0);
-  return {
-    x: a.x + lx * ca - ly * sa,
-    y: a.y + lx * sa + ly * ca
-  };
-}
-
-/** Bind volkano to a random edge midpoint of a random living asteroid (incl. off-screen). */
-function attachVolkanoToAsteroid(room, e, preferAid) {
-  if (!e || e.kind !== 'volkano' || !room) return false;
-  let host = preferAid != null ? findAsteroidByAid(room, preferAid) : null;
-  if (!host || (host.hp | 0) <= 0) {
-    const onScreen = [];
-    const any = [];
-    for (let i = 0; i < (room.asteroids || []).length; i++) {
-      const a = room.asteroids[i];
-      if (!a || (a.hp | 0) <= 0) continue;
-      any.push(a);
-      if (!isOffScreen(a)) onScreen.push(a);
-    }
-    const cands = onScreen.length ? onScreen : any;
-    if (!cands.length) {
-      e.hostAid = null;
-      return false;
-    }
-    host = cands[(Math.random() * cands.length) | 0];
-  }
-  if (!host.pts || !host.pts.length) refreshAsteroidCollisionPts(host);
-  const n = host.pts ? ((host.pts.length / 2) | 0) : 0;
-  if (n < 2) {
-    e.hostAid = null;
-    return false;
-  }
-  e.hostAid = host.aid | 0;
-  e.edgeI = (Math.random() * n) | 0;
-  syncVolkanoPose(room, e);
-  return e.hostAid != null;
-}
-
-/** Keep volkano glued to its host edge. Dies with the rock (no reattach). */
-function syncVolkanoPose(room, e) {
-  if (!e || e.kind !== 'volkano') return false;
-  const host = e.hostAid != null ? findAsteroidByAid(room, e.hostAid) : null;
-  if (!host || (host.hp | 0) <= 0) return false;
-  const mid = asteroidEdgeMidLocal(host, e.edgeI);
-  if (!mid) return false;
-  const w = asteroidLocalToWorld(host, mid.x, mid.y);
-  const ang = Math.atan2(w.y - host.y, w.x - host.x);
-  e.x = w.x;
-  e.y = w.y;
-  e.spawnX = w.x;
-  e.spawnY = w.y;
-  e.tx = w.x;
-  e.ty = w.y;
-  e.angle = ang;
-  e.dir = ang;
-  e.vx = host.vx || 0;
-  e.vy = host.vy || 0;
-  e.enteredPlay = true;
-  return true;
-}
-
-/** Kill every volkano riding this asteroid (called when the rock is removed). */
-function killVolkanosOnAsteroid(room, aid) {
-  if (!room || !room.enemies || aid == null) return;
-  const want = aid | 0;
-  for (let i = room.enemies.length - 1; i >= 0; i--) {
-    const e = room.enemies[i];
-    if (!e || e.kind !== 'volkano') continue;
-    if ((e.hostAid | 0) !== want) continue;
-    emitEnemyDead(room, e, true);
-    room.enemies.splice(i, 1);
-    tryPromoteQueuedCommons(room);
-  }
-}
-
-/** Short red laser: origin = host asteroid center, tip = volkano edge + range. */
-function fireVolkanoLaser(room, e) {
-  const range = ENEMY_VOLKANO_LASER.range;
-  const dmg = ENEMY_VOLKANO_LASER.dmg;
-  const ang = Number.isFinite(e.angle) ? e.angle : 0;
-  const dx = Math.cos(ang);
-  const dy = Math.sin(ang);
-  // Same tip as before (volkano muzzle + range outward).
-  const tipX = e.x + dx * ((e.r || 4) + 2);
-  const tipY = e.y + dy * ((e.r || 4) + 2);
-  const endX = tipX + dx * range;
-  const endY = tipY + dy * range;
-  const host = e.hostAid != null ? findAsteroidByAid(room, e.hostAid) : null;
-  const ox = host ? host.x : tipX;
-  const oy = host ? host.y : tipY;
-  const maxDist = Math.hypot(endX - ox, endY - oy);
-  const width = (2 + (Math.random() * 4 | 0)) * RES_SCALE;
-  const now = Date.now();
-  const owner = enemyFxOwner(e);
-  const hit = raycastFirst(room, 0, ox, oy, dx, dy, maxDist, {
-    ignoreAid: e.hostAid
-  });
-  const x1 = hit ? hit.x : endX;
-  const y1 = hit ? hit.y : endY;
-  const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
-  roomBroadcast(room, {
-    t: 'lf',
-    l: [room.nextBulletId++, ox, oy, x1, y1, width, now, owner],
-    hit: hitKind,
-    w: 'volkano',
-    col: ENEMY_VOLKANO_LASER.col
-  });
-  if (!hit) return;
-  if (hit.kind === 'player') dealDamageToPlayer(room, hit.target, dmg);
-  else if (hit.kind === 'asteroid') damageAsteroid(room, hit.target, dmg, 0);
-  else if (hit.kind === 'enemy') damageSnakePreferTurret(room, hit.target, dmg, 0, hit.x, hit.y, 4);
-  else if (hit.kind === 'rocket') damageRocket(room, hit.target, dmg);
-}
-
-function updateVolkano(room, e) {
-  if (!syncVolkanoPose(room, e)) {
-    // No rock left — despawn quietly.
-    emitEnemyDead(room, e, true);
-    const idx = room.enemies.indexOf(e);
-    if (idx >= 0) room.enemies.splice(idx, 1);
-    tryPromoteQueuedCommons(room);
-    return;
-  }
-  if ((e.shootCd | 0) > 0) e.shootCd--;
-  if ((e.reloadLeft | 0) > 0) {
-    e.reloadLeft--;
-    if (e.reloadLeft === 0) e.shootAmmo = ENEMY_VOLKANO_LASER.ammo;
-    return;
-  }
-  if ((e.shootAmmo | 0) <= 0) {
-    e.reloadLeft = ENEMY_VOLKANO_LASER.reload;
-    return;
-  }
-  if ((e.shootCd | 0) > 0) return;
-  fireVolkanoLaser(room, e);
-  e.shootAmmo--;
-  e.shootCd = ENEMY_VOLKANO_LASER.cooldown;
-  if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_VOLKANO_LASER.reload;
-}
-
-/** When a slot frees, pull the next queued common in with a 2s delay. */
 function tryPromoteQueuedCommons(room) {
   if (!room.enemies) return;
   while (countCommonSlots(room) < MAX_COMMON_ON_FIELD) {
@@ -2062,7 +1861,6 @@ function spawnCampaignStageEnemies(room) {
       e.id = room.nextEnemyId++;
       e.queued = false;
       e.appearLeft = 0;
-      if (e.kind === 'volkano') attachVolkanoToAsteroid(room, e, null);
       room.enemies.push(e);
       emitEnemyFire(room, e);
     }
@@ -2134,7 +1932,6 @@ function spawnSoloWaveEnemies(room, wave) {
       e.appearLeft = (Math.random() * (7 * TPS + 1)) | 0;
       room.enemies.push(e);
       if (enemyIsSpawned(e)) {
-        if (e.kind === 'volkano') attachVolkanoToAsteroid(room, e, null);
         emitEnemyFire(room, e);
       }
     } else {
@@ -3602,15 +3399,6 @@ function updateEnemies(room) {
       e.appearLeft--;
       if ((e.appearLeft | 0) <= 0) {
         // Fresh edge entry when the delay ends (queued or staggered commons).
-        if (e.kind === 'volkano') {
-          if (!attachVolkanoToAsteroid(room, e, null)) {
-            // No rock yet — retry next tick.
-            e.appearLeft = 1;
-            continue;
-          }
-        } else {
-          placeEnemyOffscreenEntry(e);
-        }
         if (e.kind === 'snake') e.snakeTrail = [{ x: e.x, y: e.y }];
         emitEnemyFire(room, e);
       }
@@ -3618,9 +3406,6 @@ function updateEnemies(room) {
     }
     if ((e.fireCd | 0) > 0) e.fireCd--;
     // Pre-shot charge telegraph (commons 1s, UFO 1s + aim laser).
-    if (isCommonKind(e.kind) && e.kind !== 'volkano' && (e.fireCd | 0) === ENEMY_COMMON_CHARGE) {
-      emitEnemyCharge(room, e);
-    }
     if (e.kind === 'ufo' && (e.fireCd | 0) === ENEMY_UFO_CHARGE) {
       // Charge at hull center (same origin as rocket spawn / lead aim).
       emitEnemyCharge(room, e);
@@ -3637,10 +3422,6 @@ function updateEnemies(room) {
       continue;
     }
 
-    if (e.kind === 'volkano') {
-      updateVolkano(room, e);
-      continue;
-    }
 
     if (e.kind === 'common1' || e.kind === 'commonRail' || e.kind === 'snake') {
       // Chase the player every tick (no wander waypoints).
@@ -3681,8 +3462,6 @@ function updateEnemies(room) {
 
 function damageEnemy(room, e, dmg, ownerId) {
   if (!e || e.hp <= 0) return;
-  // Volkano has no hitbox — only dies with its host asteroid.
-  if (e.kind === 'volkano') return;
   const oid = ownerId | 0;
   if (oid > 0) e.lastHitBy = oid;
   const dealt = Math.max(0, dmg | 0);
@@ -3745,10 +3524,8 @@ function enemyRectDims(e) {
 
 /** Hit volumes (circle enemies only — rect kinds use enemyRectDims).
  *  Snake: head + path stamps (same radius) so tail hits damage the boss.
- *  Volkano: no collision (dies with host rock only). */
 function enemyHitCircles(e) {
   if (!e || enemyUsesRectHit(e)) return [];
-  if (e.kind === 'volkano') return [];
   const r = e.r || ENEMY_R[e.kind] || ENEMY_R.common || 10;
   if (e.kind === 'snake') {
     const out = [{ x: e.x, y: e.y, r }];
@@ -3960,7 +3737,6 @@ function distToEnemyHit(px, py, e, room, queryR) {
 }
 
 function hitBulletEnemy(room, b, e) {
-  if (!e || e.kind === 'volkano') return false;
   if (enemyUsesRectHit(e)) {
     const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
     let br = cfg.size || 2;
@@ -4854,7 +4630,6 @@ function spliceAsteroidAt(room, idx) {
 
 function removeAsteroid(room, a) {
   if (!a) return false;
-  killVolkanosOnAsteroid(room, a.aid);
   if (room.asteroidByAid) room.asteroidByAid.delete(a.aid);
   const idx = room.asteroids.indexOf(a);
   if (idx < 0) return false;
@@ -5199,23 +4974,9 @@ function handleAdminSpawn(ws, kindRaw) {
     emitAsteroidFire(room, a);
     return { ok: 1, kind, what: 'asteroid', aid: a.aid | 0 };
   }
-  if (kind === 'common' || kind === 'common1' || kind === 'commonRail' || kind === 'commonVoid' || kind === 'volkano' || kind === 'ufo' || kind === 'worm' || kind === 'spinner' || kind === 'railBounce' || kind === 'laserSpin' || kind === 'gunship' || kind === 'snake') {
-    if (!room.practice) return { ok: 0, err: 'enemies only in solo/coop wave rooms' };
-    if (!room.enemies) room.enemies = [];
-    if (!room.nextEnemyId) room.nextEnemyId = 1;
-    const e = makeEnemy(kind, room.wave || 1);
-    e.id = room.nextEnemyId++;
-    e.appearLeft = 0;
-    e.queued = false;
-    if (kind === 'volkano') attachVolkanoToAsteroid(room, e, null);
-    room.enemies.push(e);
-    emitEnemyFire(room, e);
-    if (kind === 'snake') startSnakeFieldEvent(room);
-    return { ok: 1, kind, what: 'enemy', id: e.id | 0 };
-  }
   return {
     ok: 0,
-    err: 'usage: spawn big|medium|small|meteor|common|common1|commonRail|commonVoid|volkano|ufo|worm|spinner|railBounce|laserSpin|gunship|snake'
+    err: 'usage: spawn big|medium|small|meteor|common|common1|commonRail|commonVoid|ufo|worm|spinner|railBounce|laserSpin|gunship|snake'
   };
 }
 
@@ -7147,7 +6908,6 @@ function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist, opts) {
   // Solo / coop enemies (commons, UFOs, carriers).
   for (const e of room.enemies || []) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
-    if (e.kind === 'volkano') continue; // no hitbox
     let hit = null;
     if (enemyUsesRectHit(e)) {
       hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist, enemyHitScale);
@@ -7731,7 +7491,6 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
   const enemyHitScale = PLAYER_RAY_ENEMY_HIT_SCALE;
   for (const e of room.enemies || []) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
-    if (e.kind === 'volkano') continue;
     let hit = null;
     if (enemyUsesRectHit(e)) {
       if (toroidal) {

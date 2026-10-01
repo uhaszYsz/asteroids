@@ -5329,7 +5329,7 @@ function spawnCommonEnemyCorpse(e, x, y, bank) {
     life: 2.4 + Math.random() * 1.2, // 2.4–3.6 s (40% shorter than 4–6)
     age: 0,
     decelTick: 0.025,
-    kind: (e.kind === 'common1' || e.kind === 'commonRail' || e.kind === 'commonVoid' || e.kind === 'volkano')
+    kind: (e.kind === 'common1' || e.kind === 'commonRail' || e.kind === 'commonVoid')
       ? e.kind
       : 'common'
   });
@@ -5345,7 +5345,6 @@ function emitCorpseBurn(c, intensity) {
   const is1 = c.kind === 'common1';
   const sc = c.kind === 'commonRail' ? ENEMY_COMMON_RAIL_SPRITE_SCALE
     : c.kind === 'commonVoid' ? ENEMY_COMMON_VOID_SPRITE_SCALE
-    : c.kind === 'volkano' ? ENEMY_VOLKANO_SPRITE_SCALE
     : is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
   const hl = (is1 ? ENEMY_COMMON1_HALF_L0 : ENEMY_CORPSE_HALF_L) * sc;
   const hw = (is1 ? ENEMY_COMMON1_HALF_W0 : ENEMY_CORPSE_HALF_W) * sc;
@@ -5440,14 +5439,12 @@ function drawEnemyCorpses(dt) {
     const is1 = c.kind === 'common1';
     const spriteId = c.kind === 'commonRail' ? ENEMY_COMMON_RAIL_SPRITE_ID
       : c.kind === 'commonVoid' ? ENEMY_COMMON_VOID_SPRITE_ID
-      : c.kind === 'volkano' ? ENEMY_VOLKANO_SPRITE_ID
       : is1 ? ENEMY_COMMON1_SPRITE_ID : ENEMY_COMMON_SPRITE_ID;
     const opt = getShipOptionById(spriteId);
     if (!opt || opt.kind !== 'sprite') continue;
     const scale = c.kind === 'commonRail' ? ENEMY_COMMON_RAIL_SPRITE_SCALE
       : c.kind === 'commonVoid' ? ENEMY_COMMON_VOID_SPRITE_SCALE
-      : c.kind === 'volkano' ? ENEMY_VOLKANO_SPRITE_SCALE
-      : is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
+        : is1 ? ENEMY_COMMON1_SPRITE_SCALE : ENEMY_COMMON_SPRITE_SCALE;
     const t = c.age / Math.max(1e-3, c.life);
     const alpha = t > 0.9 ? Math.max(0, 1 - (t - 0.9) / 0.1) : 1;
     drawSpriteShipPlane(
@@ -8439,7 +8436,6 @@ function drawSceneLines(dt) {
   }
   drawLaserBeams();
   drawHitscanDebug();
-  drawVolkanoEnemies(dt);
   for (const a of asteroids.values()) {
     const p = asteroidAt(a);
     const vs = voidShakeOffset('a', a.id);
@@ -17604,7 +17600,7 @@ function addLaser(row, hitKind, weaponName, rays, beamCol) {
   const beamW = row[5] != null ? +row[5] : 0;
   const colOverride = Array.isArray(beamCol) && beamCol.length >= 3
     ? [+beamCol[0], +beamCol[1], +beamCol[2]]
-    : (wpn === 'volkano' ? ENEMY_VOLKANO_LASER_COL : null);
+    : null;
   // Impact FX at the drawn tip: own laser tip is client-raycast from the ship;
   // server lf endpoints can disagree (pose lag / different ray). Remotes use packet tip.
   let ix = x1;
@@ -17626,9 +17622,9 @@ function addLaser(row, hitKind, weaponName, rays, beamCol) {
     return;
   }
   // Laser impact SFX + spark FX only for laser weapon hits (not miss).
-  emitLaserImpactFx(ix, iy, kind, wpn === 'laser' || wpn === 'wormLaser' || wpn === 'volkano', beamDir);
+  emitLaserImpactFx(ix, iy, kind, wpn === 'laser' || wpn === 'wormLaser', beamDir);
   pushHitscanDebug(x0, y0, x1, y1, kind, wpn);
-  if (wpn === 'laser' || wpn === 'wormLaser' || wpn === 'volkano') pushGridShock(x0, y0, gridBlastLaserOpts(x0, y0, x1, y1));
+  if (wpn === 'laser' || wpn === 'wormLaser') pushGridShock(x0, y0, gridBlastLaserOpts(x0, y0, x1, y1));
   // Debug: worm / L2 laser sample rays (only with cl_hitbox).
   if (cv('cl_hitbox') > 0 && (wpn === 'wormLaser' || wpn === 'laser') && rays && rays.length) {
     const until = performance.now() + 90;
@@ -17651,7 +17647,7 @@ function addLaser(row, hitKind, weaponName, rays, beamCol) {
     // Own shots (slot 2 / X) get every 'lf' reliably — no need for the generous
     // network-jitter linger remotes get; a short bridge just covers inter-tick gaps
     // so the beam actually disappears right after the burst ends instead of hanging.
-    const linger = wpn === 'wormLaser' || wpn === 'volkano' || isOwnShot
+    const linger = wpn === 'wormLaser' || isOwnShot
       ? Math.round(1000 / TPS) * 2
       : LASER_CLIP_MS + LASER_LINGER_MS;
     remoteLasers.set(owner, {
@@ -18054,7 +18050,7 @@ function drawLaserBeams() {
   }
   for (const [owner, rl] of remoteLasers) {
     const beamW = rl.width > 0 ? rl.width : width;
-    const isLaser = !rl.wpn || rl.wpn === 'laser' || rl.wpn === 'wormLaser' || rl.wpn === 'volkano';
+    const isLaser = !rl.wpn || rl.wpn === 'laser' || rl.wpn === 'wormLaser';
     const col = rl.col
       || (ownerHasDamagePowerup(owner)
         ? damageRainbowColor()
@@ -18400,7 +18396,6 @@ const ENEMY_R = {
   common1: 6 * RES_SCALE,
   commonRail: 6 * RES_SCALE * 0.7,
   commonVoid: 6 * RES_SCALE * 0.7,
-  volkano: 4 * RES_SCALE,
   ufo: 9 * RES_SCALE,
   carrier: 12 * RES_SCALE,
   worm: 10 * RES_SCALE,
@@ -18484,7 +18479,6 @@ function enemyRectDims(e) {
 /** Circle enemies only. */
 function enemyHitCirclesAt(x, y, angle, e) {
   if (enemyUsesRectHit(e)) return [];
-  if (e && e.kind === 'volkano') return [];
   const r = enemyHitR(e);
   if (e && e.kind === 'snake' && e.snakeSegs && e.snakeSegs.length) {
     const out = [{ x, y, r }];
@@ -18583,7 +18577,6 @@ function parseEnemyKind(raw) {
   if (raw === 'common1') return 'common1';
   if (raw === 'commonRail') return 'commonRail';
   if (raw === 'commonVoid') return 'commonVoid';
-  if (raw === 'volkano') return 'volkano';
   if (raw === 'snake') return 'snake';
   return 'common';
 }
@@ -18722,7 +18715,7 @@ function updateSnakeSegsToward(e, headX, headY, headAng) {
 
 function isCommonKind(kind) {
   return kind === 'common' || kind === 'common1' || kind === 'commonRail'
-    || kind === 'commonVoid' || kind === 'volkano';
+    || kind === 'commonVoid';
 }
 
 function unpackEnemy(row) {
@@ -18759,8 +18752,6 @@ function unpackEnemy(row) {
   const snakeSegMax = kind === 'snake'
     ? Math.max(1, (row[17] | 0) || ENEMY_SNAKE_SEGMENTS)
     : 0;
-  const hostAid = kind === 'volkano' && row[19] != null ? (row[19] | 0) : null;
-  const edgeI = kind === 'volkano' && row[20] != null ? (row[20] | 0) : 0;
   return {
     id: row[0] | 0,
     kind,
@@ -18782,9 +18773,7 @@ function unpackEnemy(row) {
     speed: spd,
     enteredPlay,
     wormPhase,
-    snakeSegMax,
-    hostAid,
-    edgeI
+    snakeSegMax
   };
 }
 
@@ -18831,10 +18820,7 @@ function applyEnemyUpdate(row) {
     e.snakePulseNext = prev.snakePulseNext;
   }
   if (prev && prev.snakeTurrets) e.snakeTurrets = prev.snakeTurrets;
-  if (e.kind === 'volkano') {
-    if (e.hostAid == null && prev && prev.hostAid != null) e.hostAid = prev.hostAid;
-    if ((e.edgeI | 0) === 0 && prev && (prev.edgeI | 0) !== 0) e.edgeI = prev.edgeI | 0;
-  }
+
   rebaseEnemyPredictOrigin(e);
   enemies.set(id, e);
 }
@@ -18890,10 +18876,7 @@ function applyEnemySnapList(list, st) {
       if (kind === 'worm' && (e.wormPhase | 0) >= 6 && (e.wormPhase | 0) <= 7) fallback *= 0.5;
       e.speed = fallback;
     }
-    if (kind === 'volkano') {
-      if (row[16] != null) e.hostAid = row[16] | 0;
-      if (row[17] != null) e.edgeI = row[17] | 0;
-    }
+
   }
 }
 
@@ -19034,43 +19017,12 @@ function stepEnemyDestinationSmoothLocal(state, opts) {
   }
 }
 
-/** Glue volkano to its host asteroid edge (matches server syncVolkanoPose). */
-function volkanoPoseFromHost(e) {
-  if (!e || e.hostAid == null) return null;
-  const a = asteroids.get(e.hostAid | 0);
-  if (!a || (a.hp | 0) <= 0) return null;
-  const p = asteroidAt(a);
-  const pts = asteroidCollisionPts(a);
-  if (!pts || pts.length < 4) return null;
-  const n = (pts.length / 2) | 0;
-  if (n < 2) return null;
-  const i0 = ((e.edgeI | 0) % n + n) % n;
-  const i1 = (i0 + 1) % n;
-  const lx = (pts[i0 * 2] + pts[i1 * 2]) * 0.5;
-  const ly = (pts[i0 * 2 + 1] + pts[i1 * 2 + 1]) * 0.5;
-  const ca = Math.cos(p.angle || 0);
-  const sa = Math.sin(p.angle || 0);
-  const x = p.x + lx * ca - ly * sa;
-  const y = p.y + lx * sa + ly * ca;
-  const ang = Math.atan2(y - p.y, x - p.x);
-  return {
-    x, y,
-    angle: ang,
-    vx: p.vx || 0,
-    vy: p.vy || 0,
-    kind: 'volkano',
-    hp: e.hp
-  };
-}
 
 /** Pose from last ef/eu/es. destinationSmooth simulates ticks; destination dead-reckons.
  *  common1: do NOT re-home toward the live player — that fights server snaps
  *  (server chased where you were each past tick; live replay aims where you are now). */
 function enemyAt(e) {
-  if (e && e.kind === 'volkano') {
-    const pose = volkanoPoseFromHost(e);
-    if (pose) return pose;
-  }
+
   if (enemyMoveTypeOf(e) === ENEMY_MOVE_DESTINATION_SMOOTH) {
     const state = {
       x: e.x != null ? e.x : e.spawnX,
@@ -19259,10 +19211,6 @@ const ENEMY_COMMON_RAIL_SPRITE_ID = 'enemy_218';
 const ENEMY_COMMON_RAIL_SPRITE_SCALE = 0.7;
 const ENEMY_COMMON_VOID_SPRITE_ID = 'enemy_281';
 const ENEMY_COMMON_VOID_SPRITE_SCALE = 0.7;
-/** Volkano: tiny_1 perched on asteroid edge. */
-const ENEMY_VOLKANO_SPRITE_ID = 'tiny_1';
-const ENEMY_VOLKANO_SPRITE_SCALE = 1;
-const ENEMY_VOLKANO_LASER_COL = [1.0, 0.12, 0.08];
 /** World-2 specials. */
 const ENEMY_RAIL_BOUNCE_SPRITE_ID = 'enemy_378';
 const ENEMY_RAIL_BOUNCE_SPRITE_SCALE = 0.8;
@@ -19480,9 +19428,6 @@ function drawEnemyCommon(x, y, angle, color, id, dt, kind) {
   } else if (k === 'commonVoid') {
     spriteId = ENEMY_COMMON_VOID_SPRITE_ID;
     scale = ENEMY_COMMON_VOID_SPRITE_SCALE;
-  } else if (k === 'volkano') {
-    spriteId = ENEMY_VOLKANO_SPRITE_ID;
-    scale = ENEMY_VOLKANO_SPRITE_SCALE;
   }
   const opt = getShipOptionById(spriteId);
   if (opt && opt.kind === 'sprite') {
@@ -20876,30 +20821,11 @@ function drawEnemySnake(e, x, y, angle, color, id, dt) {
   return bank;
 }
 
-function drawVolkanoEnemies(dt) {
-  const showHit = cv('cl_hitbox') > 0;
-  for (const e of enemies.values()) {
-    if ((e.kind || '') !== 'volkano') continue;
-    const p = enemyAt(e);
-    const id = e.id | 0;
-    const vs = voidShakeOffset('e', id);
-    const x = p.x + vs.x;
-    const y = p.y + vs.y;
-    const bank = drawEnemyCommon(x, y, p.angle, COL.enemy, id, dt, 'volkano');
-    enemyDrawBank.set(id, bank);
-    if (showHit) {
-      for (const cir of enemyHitCirclesAt(x, y, p.angle, e)) {
-        drawHitCircle(cir.x, cir.y, cir.r, COL.debug);
-      }
-    }
-  }
-}
 
 function drawEnemies(dt) {
   enemyDrawBank.clear();
   const showHit = cv('cl_hitbox') > 0;
   for (const e of enemies.values()) {
-    if ((e.kind || '') === 'volkano') continue; // Drawn under asteroids.
     const p = enemyAt(e);
     const id = e.id | 0;
     const vs = voidShakeOffset('e', id);
