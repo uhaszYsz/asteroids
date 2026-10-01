@@ -737,6 +737,8 @@ const HEALTH_PICKUP_HEAL = 30;
 /** Shop vital: fixing drone — regen while alive; lost on death. */
 const FIXING_DRONE_COST = 1200;
 const FIXING_DRONE_HEAL_PER_SEC = 2;
+/** Shop vital: keep weapons + upgrades through one death (then consumed). */
+const LOADOUT_INSURANCE_COST = 2000;
 /** Pickup type codes in network packs: 1+ weapons by slot, 99 health. */
 const PICKUP_CODE_HEALTH = 99;
 const ASTEROID_HP = 50;

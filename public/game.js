@@ -14005,6 +14005,7 @@ function applyShopState(st) {
     weapon: cur,
     weapon2: cur2,
     fixingDrone: !!(st.fixingDrone | 0),
+    loadoutInsurance: !!(st.loadoutInsurance | 0),
     levels: Object.assign({}, weaponLevels),
     upgrades: JSON.parse(JSON.stringify(weaponUpgrades)),
     unlocked
@@ -14111,6 +14112,36 @@ function renderSoloShop() {
     }
     droneRow.appendChild(dronePrice);
     ssVitalEl.appendChild(droneRow);
+
+    const insureOwned = !!st.loadoutInsurance;
+    const insureRow = document.createElement('div');
+    insureRow.className = 'ss-row' + (insureOwned ? ' ss-owned' : '');
+    attachShopPreview(insureRow, 'health', 'health', 3304);
+    const insureName = document.createElement('div');
+    insureName.className = 'ss-name';
+    insureName.textContent = 'INSURANCE';
+    insureRow.appendChild(insureName);
+    const insureDesc = document.createElement('div');
+    insureDesc.className = 'ss-lvl';
+    insureDesc.textContent = insureOwned
+      ? 'OWNED · KEEP GEAR ON DEATH'
+      : 'KEEP WEAPONS + UPGRADES ON DEATH';
+    insureRow.appendChild(insureDesc);
+    const insurePrice = document.createElement('div');
+    insurePrice.className = 'ss-price';
+    if (insureOwned) {
+      insurePrice.textContent = 'OWNED';
+    } else {
+      insurePrice.textContent = shopCreditPrice(2000);
+      if (st.coins < 2000) insureRow.classList.add('ss-owned');
+      else {
+        const buy = () => sendShopBuy('insurance', '');
+        insureRow.addEventListener('click', buy);
+        vitalsRow.push({ el: insureRow, activate: () => buy() });
+      }
+    }
+    insureRow.appendChild(insurePrice);
+    ssVitalEl.appendChild(insureRow);
 
     if (vitalsRow.length) shopFocusGrid.push(vitalsRow);
   }
@@ -24696,6 +24727,20 @@ function handleWsMessage(e) {
       else if (msg.levels) {
         applyClientWeaponUpgrades(null);
         weaponLevels = Object.assign(weaponLevels, msg.levels);
+      }
+      if (msg.unlocked) {
+        unlockedWeapons = {
+          default: false, rocket: false, laser: false, shotgun: false,
+          railgun: false, plasma: false, voidcannon: false, asteroidgun: false
+        };
+        Object.assign(unlockedWeapons, msg.unlocked);
+      } else if (msg.weapon) {
+        unlockedWeapons = {
+          default: false, rocket: false, laser: false, shotgun: false,
+          railgun: false, plasma: false, voidcannon: false, asteroidgun: false
+        };
+        unlockedWeapons[msg.weapon] = true;
+        if (msg.weapon2) unlockedWeapons[msg.weapon2] = true;
       }
       if (msg.ammo != null) {
         resetLocalShoot(currentWeaponName(), 1);

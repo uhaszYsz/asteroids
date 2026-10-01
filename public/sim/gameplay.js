@@ -4032,6 +4032,7 @@ function packShopState(room, p) {
     weapon: p.weapon || 'default',
     weapon2: p.weapon2 || null,
     fixingDrone: p.fixingDrone ? 1 : 0,
+    loadoutInsurance: p.loadoutInsurance ? 1 : 0,
     levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
     upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
     unlocked: Object.assign({}, ensureUnlockedWeapons(p))
@@ -4325,6 +4326,16 @@ function handleShopBuy(room, p, item, name, slot, opt) {
     p.droneHealAcc = 0;
     notifyPlayerCoins(room, p);
     return { ok: 1, fixingDrone: 1 };
+  }
+
+  if (item === 'insurance' || item === 'loadoutinsurance') {
+    const cost = LOADOUT_INSURANCE_COST;
+    if (p.loadoutInsurance) return { ok: 0, err: 'owned' };
+    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
+    p.coins = (p.coins | 0) - cost;
+    p.loadoutInsurance = true;
+    notifyPlayerCoins(room, p);
+    return { ok: 1, loadoutInsurance: 1 };
   }
 
   if (item === 'upgrade') {
@@ -4840,6 +4851,8 @@ function spawnPlayer(id, name, colors, room) {
     /** Shop vital: passive HP regen; cleared on death. */
     fixingDrone: false,
     droneHealAcc: 0,
+    /** Shop vital: keep weapons+upgrades through one death; consumed on use. */
+    loadoutInsurance: false,
     weapon: wpn,
     /** Second weapon slot (X) — null when empty. */
     weapon2: null,
@@ -4893,11 +4906,22 @@ function respawnPlayer(room, p, keepLoadout, maxHp, resetLevels) {
     resetWeaponSlotRuntime(p, 1);
     if (p.weapon2) resetWeaponSlotRuntime(p, 2);
   } else {
-    // Fresh / full wipe: default gun only.
+    // Fresh / full wipe: default gun only at level 0.
     ownOnlyWeapon(p, 'default', 1);
     resetWeaponSlotRuntime(p, 1);
   }
   p.inputQueue = [];
+}
+
+/**
+ * Death respawn: insurance keeps weapons+upgrades (consumed);
+ * otherwise strip to default L0 only.
+ */
+function respawnAfterDeath(room, p, maxHp) {
+  if (!p) return;
+  const insured = !!p.loadoutInsurance;
+  if (insured) p.loadoutInsurance = false;
+  respawnPlayer(room, p, insured, maxHp, false);
 }
 
 /** changedSlot: which gun slot (1 = Z, 2 = X) this update is actually about — drives client FX. */
@@ -6022,8 +6046,8 @@ function finishDeathRound(room) {
         return;
       }
       if (victim && (victim.lives | 0) > 0) {
-        // Solo/coop: keep mounts, downgrade all weapons to L1.
-        respawnPlayer(room, victim, true, SOLO_MAX_HP, true);
+        // Solo/coop: strip to default L0 unless insurance keeps the loadout.
+        respawnAfterDeath(room, victim, SOLO_MAX_HP);
         resyncAllAsteroids(room);
         emitRoundReset(room);
       }
@@ -6034,8 +6058,8 @@ function finishDeathRound(room) {
       endSoloPractice(room);
       return;
     }
-    // Keep wave field / enemies; keep mounts, downgrade all weapons to L1.
-    respawnPlayer(room, victim, true, SOLO_MAX_HP, true);
+    // Keep wave field / enemies; strip to default L0 unless insured.
+    respawnAfterDeath(room, victim, SOLO_MAX_HP);
     resyncAllAsteroids(room);
     emitRoundReset(room);
     return;
@@ -6052,9 +6076,9 @@ function finishDeathRound(room) {
     return;
   }
   for (const p of room.players.values()) {
-    // Dead player: keep mounts, all weapons → L1. Living: keep mounts + levels.
-    const died = p.id === room.deathVictimId;
-    respawnPlayer(room, p, true, undefined, died);
+    // Dead: strip (or insurance). Living: keep mounts + levels.
+    if (p.id === room.deathVictimId) respawnAfterDeath(room, p, undefined);
+    else respawnPlayer(room, p, true, undefined, false);
   }
   resetCenterAsteroid(room);
   // Bake frozen poses into spawn clocks so clients don't extrapolate death-freeze time.
@@ -6099,13 +6123,17 @@ function emitRoundReset(room) {
         p.av || 0, 0, p.godLeft | 0
       ],
       w: wpnSlot,
+      weapon: p.weapon || 'default',
       weapon2: p.weapon2 || null,
       levels: p.weaponLevels,
+      upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
+      unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
       ammo: p.shootAmmo,
       ammo2: p.weapon2 ? p.shootAmmo2 : 0,
       asteroids,
       players,
-      lives: p.lives | 0
+      lives: p.lives | 0,
+      loadoutInsurance: p.loadoutInsurance ? 1 : 0
     });
   }
 }
