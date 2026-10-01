@@ -1370,7 +1370,9 @@ function makeEnemy(kind, wave, weapon) {
     e.speed = 0;
     e.vx = 0;
     e.vy = 0;
+    e.shootAmmo = ENEMY_VOLKANO_LASER.ammo;
     e.shootCd = firstShotCd;
+    e.reloadLeft = 0;
   }
   if (k === 'carrier') {
     if (e.weapon === 'laser') e.shootAmmo = ENEMY_LASER.ammo;
@@ -1986,12 +1988,21 @@ function updateVolkano(room, e) {
     tryPromoteQueuedCommons(room);
     return;
   }
-  if ((e.shootCd | 0) > 0) {
-    e.shootCd--;
+  if ((e.shootCd | 0) > 0) e.shootCd--;
+  if ((e.reloadLeft | 0) > 0) {
+    e.reloadLeft--;
+    if (e.reloadLeft === 0) e.shootAmmo = ENEMY_VOLKANO_LASER.ammo;
     return;
   }
+  if ((e.shootAmmo | 0) <= 0) {
+    e.reloadLeft = ENEMY_VOLKANO_LASER.reload;
+    return;
+  }
+  if ((e.shootCd | 0) > 0) return;
   fireVolkanoLaser(room, e);
+  e.shootAmmo--;
   e.shootCd = ENEMY_VOLKANO_LASER.cooldown;
+  if ((e.shootAmmo | 0) <= 0) e.reloadLeft = ENEMY_VOLKANO_LASER.reload;
 }
 
 /** When a slot frees, pull the next queued common in with a 2s delay. */

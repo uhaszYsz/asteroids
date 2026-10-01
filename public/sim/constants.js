@@ -590,11 +590,14 @@ const ENEMY_COMMON_LASER = {
 const ENEMY_COMMON_RAIL_RELOAD = ENEMY_COMMON_LASER.reload;
 const ENEMY_COMMON_RAIL_DMG = ENEMY_COMMON_LASER.dmg;
 const ENEMY_COMMON_RAIL_CHARGE = Math.round(0.5 * TPS);
-/** Volkano: sits on an asteroid edge; short red laser (50% of player laser dmg). */
+/** Volkano: sits on an asteroid edge; short red laser (50% of player laser dmg).
+ *  1.2s dump / 6s reload. */
 const ENEMY_VOLKANO_LASER = {
   range: 45,
   dmg: BULLET_TYPES.laser.dmg * 0.5,
+  ammo: Math.round(1.2 * TPS),
   cooldown: WEAPONS.laser.cooldown,
+  reload: Math.round(6 * TPS),
   col: [1.0, 0.12, 0.08]
 };
 /** World-2 special: bouncing fuchsia rail every 8s (6 edge bounces). */
