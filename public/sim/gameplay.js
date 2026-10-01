@@ -1901,15 +1901,11 @@ function attachVolkanoToAsteroid(room, e, preferAid) {
   return e.hostAid != null;
 }
 
-/** Keep volkano glued to its host edge; reattach or fail if host is gone. */
+/** Keep volkano glued to its host edge. Dies with the rock (no reattach). */
 function syncVolkanoPose(room, e) {
   if (!e || e.kind !== 'volkano') return false;
-  let host = e.hostAid != null ? findAsteroidByAid(room, e.hostAid) : null;
-  if (!host || (host.hp | 0) <= 0) {
-    if (!attachVolkanoToAsteroid(room, e, null)) return false;
-    host = findAsteroidByAid(room, e.hostAid);
-    if (!host) return false;
-  }
+  const host = e.hostAid != null ? findAsteroidByAid(room, e.hostAid) : null;
+  if (!host || (host.hp | 0) <= 0) return false;
   const mid = asteroidEdgeMidLocal(host, e.edgeI);
   if (!mid) return false;
   const w = asteroidLocalToWorld(host, mid.x, mid.y);
@@ -1926,6 +1922,20 @@ function syncVolkanoPose(room, e) {
   e.vy = host.vy || 0;
   e.enteredPlay = true;
   return true;
+}
+
+/** Kill every volkano riding this asteroid (called when the rock is removed). */
+function killVolkanosOnAsteroid(room, aid) {
+  if (!room || !room.enemies || aid == null) return;
+  const want = aid | 0;
+  for (let i = room.enemies.length - 1; i >= 0; i--) {
+    const e = room.enemies[i];
+    if (!e || e.kind !== 'volkano') continue;
+    if ((e.hostAid | 0) !== want) continue;
+    emitEnemyDead(room, e, true);
+    room.enemies.splice(i, 1);
+    tryPromoteQueuedCommons(room);
+  }
 }
 
 /** Short red laser — player laser rules at 50% dmg, fixed 45px range. */
@@ -3653,6 +3663,8 @@ function updateEnemies(room) {
 
 function damageEnemy(room, e, dmg, ownerId) {
   if (!e || e.hp <= 0) return;
+  // Volkano has no hitbox — only dies with its host asteroid.
+  if (e.kind === 'volkano') return;
   const oid = ownerId | 0;
   if (oid > 0) e.lastHitBy = oid;
   const dealt = Math.max(0, dmg | 0);
@@ -3714,9 +3726,11 @@ function enemyRectDims(e) {
 }
 
 /** Hit volumes (circle enemies only — rect kinds use enemyRectDims).
- *  Snake: head + path stamps (same radius) so tail hits damage the boss. */
+ *  Snake: head + path stamps (same radius) so tail hits damage the boss.
+ *  Volkano: no collision (dies with host rock only). */
 function enemyHitCircles(e) {
   if (!e || enemyUsesRectHit(e)) return [];
+  if (e.kind === 'volkano') return [];
   const r = e.r || ENEMY_R[e.kind] || ENEMY_R.common || 10;
   if (e.kind === 'snake') {
     const out = [{ x: e.x, y: e.y, r }];
@@ -3928,6 +3942,7 @@ function distToEnemyHit(px, py, e, room, queryR) {
 }
 
 function hitBulletEnemy(room, b, e) {
+  if (!e || e.kind === 'volkano') return false;
   if (enemyUsesRectHit(e)) {
     const cfg = BULLET_TYPES[b.type] || BULLET_TYPES.default;
     let br = cfg.size || 2;
@@ -4821,6 +4836,7 @@ function spliceAsteroidAt(room, idx) {
 
 function removeAsteroid(room, a) {
   if (!a) return false;
+  killVolkanosOnAsteroid(room, a.aid);
   if (room.asteroidByAid) room.asteroidByAid.delete(a.aid);
   const idx = room.asteroids.indexOf(a);
   if (idx < 0) return false;
@@ -7113,6 +7129,7 @@ function raycastFirst(room, ownerId, ox, oy, dx, dy, maxDist, opts) {
   // Solo / coop enemies (commons, UFOs, carriers).
   for (const e of room.enemies || []) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
+    if (e.kind === 'volkano') continue; // no hitbox
     let hit = null;
     if (enemyUsesRectHit(e)) {
       hit = raycastEnemyRectToroidal(ox, oy, dx, dy, e, maxDist, enemyHitScale);
@@ -7696,6 +7713,7 @@ function applyRailgunSegment(room, p, ox, oy, dx, dy, range, opts) {
   const enemyHitScale = PLAYER_RAY_ENEMY_HIT_SCALE;
   for (const e of room.enemies || []) {
     if (!enemyIsSpawned(e) || e.hp <= 0) continue;
+    if (e.kind === 'volkano') continue;
     let hit = null;
     if (enemyUsesRectHit(e)) {
       if (toroidal) {

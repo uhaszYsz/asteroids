@@ -18484,6 +18484,7 @@ function enemyRectDims(e) {
 /** Circle enemies only. */
 function enemyHitCirclesAt(x, y, angle, e) {
   if (enemyUsesRectHit(e)) return [];
+  if (e && e.kind === 'volkano') return [];
   const r = enemyHitR(e);
   if (e && e.kind === 'snake' && e.snakeSegs && e.snakeSegs.length) {
     const out = [{ x, y, r }];
@@ -27407,7 +27408,7 @@ function runConsole(line) {
     conPrint('password <new> <repeat>  — change admin password (admin only)', 'info');
     conPrint('give <weapon|live|gold>  — grant loadout / 99 lives / 9999 gold (admin, in-game)', 'info');
     conPrint('spawn big|medium|small|meteor|common|common1|ufo|worm|spinner|gunship  — off-screen spawn (admin, in-game)', 'info');
-    conPrint('sv_wave <n>  — wipe field and start wave N (admin, solo/coop debug)', 'info');
+    conPrint('sv_wave <n>  — wipe field; abs wave (1–6 = W1, 7 = W2-1) (admin, solo/coop)', 'info');
     conPrint('admin keys 1–8 in-game — pickup/upgrade: 1 default 2 rocket 3 laser 4 shotgun 5 rail 6 plasma 7 void 8 meteor', 'info');
     conPrint('status  — local ping + server/room/wave field dump', 'info');
     conPrint('cl_bg [0-3]  — new random space nebula (optional strip frame)', 'info');
