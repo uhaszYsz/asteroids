@@ -1823,6 +1823,7 @@ function pickRandomCommonKind(room) {
   if (world >= 2) {
     const opts = ['commonVoid'];
     if (countCommonRailSlots(room) < MAX_COMMON_RAIL_ON_FIELD) opts.push('commonRail');
+    // Always offer volkano in W2 — rocks often start off-screen at wave begin.
     if (roomHasAttachableAsteroid(room)) opts.push('volkano');
     return opts[(Math.random() * opts.length) | 0];
   }
@@ -1831,12 +1832,12 @@ function pickRandomCommonKind(room) {
   return opts[(Math.random() * opts.length) | 0];
 }
 
+/** Any living rock (on- or off-screen) can host a volkano. */
 function roomHasAttachableAsteroid(room) {
   if (!room || !room.asteroids || !room.asteroids.length) return false;
   for (let i = 0; i < room.asteroids.length; i++) {
     const a = room.asteroids[i];
     if (!a || (a.hp | 0) <= 0) continue;
-    if (isOffScreen(a)) continue;
     return true;
   }
   return false;
@@ -1868,17 +1869,20 @@ function asteroidLocalToWorld(a, lx, ly) {
   };
 }
 
-/** Bind volkano to a random edge midpoint of a random on-field asteroid. */
+/** Bind volkano to a random edge midpoint of a random living asteroid (incl. off-screen). */
 function attachVolkanoToAsteroid(room, e, preferAid) {
   if (!e || e.kind !== 'volkano' || !room) return false;
   let host = preferAid != null ? findAsteroidByAid(room, preferAid) : null;
-  if (!host || (host.hp | 0) <= 0 || isOffScreen(host)) {
-    const cands = [];
+  if (!host || (host.hp | 0) <= 0) {
+    const onScreen = [];
+    const any = [];
     for (let i = 0; i < (room.asteroids || []).length; i++) {
       const a = room.asteroids[i];
-      if (!a || (a.hp | 0) <= 0 || isOffScreen(a)) continue;
-      cands.push(a);
+      if (!a || (a.hp | 0) <= 0) continue;
+      any.push(a);
+      if (!isOffScreen(a)) onScreen.push(a);
     }
+    const cands = onScreen.length ? onScreen : any;
     if (!cands.length) {
       e.hostAid = null;
       return false;
@@ -3434,7 +3438,8 @@ function enemyTryFire(room, e) {
     // Random shot direction — ship keeps its wander facing.
     fireEnemyVoidStream(room, e, Math.random() * Math.PI * 2, {
       keepFacing: true,
-      noAsteroidDamage: true
+      noAsteroidDamage: true,
+      speedMul: 0.5
     });
     e.fireCd = ENEMY_COMMON_RELOAD;
     return;
