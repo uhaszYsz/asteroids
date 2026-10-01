@@ -1938,23 +1938,30 @@ function killVolkanosOnAsteroid(room, aid) {
   }
 }
 
-/** Short red laser — player laser rules at 50% dmg, fixed 45px range. */
+/** Short red laser: origin = host asteroid center, tip = volkano edge + range. */
 function fireVolkanoLaser(room, e) {
   const range = ENEMY_VOLKANO_LASER.range;
   const dmg = ENEMY_VOLKANO_LASER.dmg;
   const ang = Number.isFinite(e.angle) ? e.angle : 0;
   const dx = Math.cos(ang);
   const dy = Math.sin(ang);
-  const ox = e.x + dx * ((e.r || 4) + 2);
-  const oy = e.y + dy * ((e.r || 4) + 2);
+  // Same tip as before (volkano muzzle + range outward).
+  const tipX = e.x + dx * ((e.r || 4) + 2);
+  const tipY = e.y + dy * ((e.r || 4) + 2);
+  const endX = tipX + dx * range;
+  const endY = tipY + dy * range;
+  const host = e.hostAid != null ? findAsteroidByAid(room, e.hostAid) : null;
+  const ox = host ? host.x : tipX;
+  const oy = host ? host.y : tipY;
+  const maxDist = Math.hypot(endX - ox, endY - oy);
   const width = (2 + (Math.random() * 4 | 0)) * RES_SCALE;
   const now = Date.now();
   const owner = enemyFxOwner(e);
-  const hit = raycastFirst(room, 0, ox, oy, dx, dy, range, {
+  const hit = raycastFirst(room, 0, ox, oy, dx, dy, maxDist, {
     ignoreAid: e.hostAid
   });
-  const x1 = hit ? hit.x : ox + dx * range;
-  const y1 = hit ? hit.y : oy + dy * range;
+  const x1 = hit ? hit.x : endX;
+  const y1 = hit ? hit.y : endY;
   const hitKind = !hit ? 0 : hit.kind === 'player' || hit.kind === 'rocket' ? 1 : hit.kind === 'enemy' ? 3 : 2;
   roomBroadcast(room, {
     t: 'lf',
