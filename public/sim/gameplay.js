@@ -1696,7 +1696,7 @@ function snakeEatAsteroids(room, e) {
  * Wave 6 is the boss wave (room.bossPlan — no commons/specials).
  * Wave ends only when asteroids and enemies are all cleared.
  */
-const MAX_COMMON_ON_FIELD = 6;
+const MAX_COMMON_ON_FIELD = 4;
 const MAX_COMMON1_ON_FIELD = 2;
 const MAX_COMMON_RAIL_ON_FIELD = 2;
 const COMMON_QUEUE_SPAWN_DELAY = Math.round(2 * TPS);
