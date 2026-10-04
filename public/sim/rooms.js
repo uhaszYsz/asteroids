@@ -994,7 +994,6 @@ function captureWaitingSnapshot(ws) {
       weaponLevels: Object.assign({}, syncWeaponLevelsFromUpgrades(p)),
       unlockedWeapons: Object.assign({}, ensureUnlockedWeapons(p)),
       fixingDrone: !!p.fixingDrone,
-      loadoutInsurance: !!p.loadoutInsurance,
       shootAmmo: p.shootAmmo | 0,
       shootCd: p.shootCd | 0,
       reloadLeft: p.reloadLeft | 0,
@@ -1079,7 +1078,6 @@ function applySnapshotToRoom(room, p, snap) {
   if (p.weapon2) p.unlockedWeapons[p.weapon2] = true;
   p.fixingDrone = !!sp.fixingDrone;
   p.droneHealAcc = 0;
-  p.loadoutInsurance = !!sp.loadoutInsurance;
   p.shootAmmo = sp.shootAmmo | 0;
   p.shootCd = sp.shootCd | 0;
   p.reloadLeft = sp.reloadLeft | 0;

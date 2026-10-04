@@ -4032,7 +4032,6 @@ function packShopState(room, p) {
     weapon: p.weapon || 'default',
     weapon2: p.weapon2 || null,
     fixingDrone: p.fixingDrone ? 1 : 0,
-    loadoutInsurance: p.loadoutInsurance ? 1 : 0,
     levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
     upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
     unlocked: Object.assign({}, ensureUnlockedWeapons(p))
@@ -4326,16 +4325,6 @@ function handleShopBuy(room, p, item, name, slot, opt) {
     p.droneHealAcc = 0;
     notifyPlayerCoins(room, p);
     return { ok: 1, fixingDrone: 1 };
-  }
-
-  if (item === 'insurance' || item === 'loadoutinsurance') {
-    const cost = LOADOUT_INSURANCE_COST;
-    if (p.loadoutInsurance) return { ok: 0, err: 'owned' };
-    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
-    p.coins = (p.coins | 0) - cost;
-    p.loadoutInsurance = true;
-    notifyPlayerCoins(room, p);
-    return { ok: 1, loadoutInsurance: 1 };
   }
 
   if (item === 'upgrade') {
@@ -4851,8 +4840,6 @@ function spawnPlayer(id, name, colors, room) {
     /** Shop vital: passive HP regen; cleared on death. */
     fixingDrone: false,
     droneHealAcc: 0,
-    /** Shop vital: keep weapons+upgrades through one death; consumed on use. */
-    loadoutInsurance: false,
     weapon: wpn,
     /** Second weapon slot (X) — null when empty. */
     weapon2: null,
@@ -6043,7 +6030,7 @@ function finishDeathRound(room) {
         return;
       }
       if (victim && (victim.lives | 0) > 0) {
-        // Solo/coop: strip to default L0 unless insurance keeps the loadout.
+        // Solo/coop: keep weapons + upgrades.
         respawnAfterDeath(room, victim, SOLO_MAX_HP);
         resyncAllAsteroids(room);
         emitRoundReset(room);
@@ -6055,7 +6042,7 @@ function finishDeathRound(room) {
       endSoloPractice(room);
       return;
     }
-    // Keep wave field / enemies; strip to default L0 unless insured.
+    // Keep wave field / enemies; keep weapons + upgrades.
     respawnAfterDeath(room, victim, SOLO_MAX_HP);
     resyncAllAsteroids(room);
     emitRoundReset(room);
@@ -6073,7 +6060,7 @@ function finishDeathRound(room) {
     return;
   }
   for (const p of room.players.values()) {
-    // Dead: strip (or insurance). Living: keep mounts + levels.
+    // Dead / living: keep mounts + levels (fixing drone still cleared in respawn).
     if (p.id === room.deathVictimId) respawnAfterDeath(room, p, undefined);
     else respawnPlayer(room, p, true, undefined, false);
   }
@@ -6129,8 +6116,7 @@ function emitRoundReset(room) {
       ammo2: p.weapon2 ? p.shootAmmo2 : 0,
       asteroids,
       players,
-      lives: p.lives | 0,
-      loadoutInsurance: p.loadoutInsurance ? 1 : 0
+      lives: p.lives | 0
     });
   }
 }
