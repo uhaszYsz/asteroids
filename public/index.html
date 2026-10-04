@@ -2622,7 +2622,7 @@
 
   function registerSw() {
     if (!('serviceWorker' in navigator)) return;
-    navigator.serviceWorker.register(dir + 'sw.js?v=7', { scope: dir }).then(function (reg) {
+    navigator.serviceWorker.register(dir + 'sw.js?v=8', { scope: dir }).then(function (reg) {
       function sync() {
         var w = navigator.serviceWorker.controller || reg.active;
         if (w) w.postMessage({ type: 'SYNC_ASSETS' });
@@ -2655,8 +2655,8 @@
       await loadScript('lib/bassoonplayer.js');
       await loadScript('music.js?v=7');
       await loadScript('config.js?v=36');
-      await loadScript('sim/local-server.js?v=98');
-      await loadScript('game.js?v=1154');
+      await loadScript('sim/local-server.js?v=99');
+      await loadScript('game.js?v=1155');
     } catch (err) {
       console.error(err);
     }

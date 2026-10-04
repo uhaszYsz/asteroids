@@ -1,13 +1,14 @@
 /* Asteroids asset service worker: hash-keyed forever cache, origin-first + CDN fallback. */
 /* eslint-disable no-restricted-globals */
 
-const META_CACHE = 'asteroids-meta-v5';
-const ASSET_CACHE = 'asteroids-assets-v5';
+const META_CACHE = 'asteroids-meta-v6';
+const ASSET_CACHE = 'asteroids-assets-v6';
 const OLD_CACHES = [
   'asteroids-meta-v1', 'asteroids-assets-v1',
   'asteroids-meta-v2', 'asteroids-assets-v2',
   'asteroids-meta-v3', 'asteroids-assets-v3',
-  'asteroids-meta-v4', 'asteroids-assets-v4'
+  'asteroids-meta-v4', 'asteroids-assets-v4',
+  'asteroids-meta-v5', 'asteroids-assets-v5'
 ];
 /** Always network: SW/manifest, plus critical JS so ?v= cache-bust cannot lose to a stale hash. */
 const NETWORK_ONLY = new Set([
@@ -16,7 +17,15 @@ const NETWORK_ONLY = new Set([
   'game.js',
   'music.js',
   'config.js',
-  'sim/local-server.js'
+  'sim/local-server.js',
+  'sim/constants.js',
+  'sim/utils.js',
+  'sim/net.js',
+  'sim/gameplay.js',
+  'sim/session.js',
+  'sim/rooms.js',
+  'sim/ws-handlers.js',
+  'sim/tick.js'
 ]);
 /** Repo path prefix for client files (browser URLs omit this; CDN needs it). */
 const REPO_PUBLIC = 'public';
@@ -93,7 +102,7 @@ self.addEventListener('fetch', (event) => {
   const rel = pathToRel(url.pathname);
   if (!rel || rel.includes('..')) return;
   // Critical JS / manifest: never serve from SW cache (query-bust + origin only).
-  if (NETWORK_ONLY.has(rel) || rel.endsWith('/sw.js')) return;
+  if (NETWORK_ONLY.has(rel) || rel.endsWith('/sw.js') || rel.startsWith('sim/')) return;
 
   event.respondWith(handleAsset(req, rel));
 });
