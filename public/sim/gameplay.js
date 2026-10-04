@@ -348,8 +348,7 @@ function damageAsteroid(room, a, dmg, ownerId) {
 
 function spawnBigAsteroid(room) {
   // Shop holds the next wave — never drip asteroids while anyone is shopping.
-  if (room.shopOpen) return;
-  const a = makeAsteroid({ size: 'big', offscreen: true, allowSpecial: true });
+    const a = makeAsteroid({ size: 'big', offscreen: true, allowSpecial: true });
   pushAsteroid(room, a);
   emitAsteroidFire(room, a);
 }
@@ -357,14 +356,12 @@ function spawnBigAsteroid(room) {
 function scheduleBigAsteroidSpawn(room) {
   // Solo waves: no endless big refill — clear the field to advance.
   if (room.practice) return;
-  if (room.shopOpen) return;
-  if (!room.pendingBigSpawns) room.pendingBigSpawns = [];
+    if (!room.pendingBigSpawns) room.pendingBigSpawns = [];
   room.pendingBigSpawns.push(BIG_SPAWN_DELAY_TICKS);
 }
 
 function tickPendingBigSpawns(room) {
-  if (room.shopOpen) return;
-  const q = room.pendingBigSpawns;
+    const q = room.pendingBigSpawns;
   if (!q || !q.length) return;
   for (let i = q.length - 1; i >= 0; i--) {
     q[i]--;
@@ -3802,11 +3799,6 @@ function placePlayersAtWaveStart(room, opts) {
 function tickSoloWaves(room) {
   if (!room.practice) return;
   if (room.campaign) return;
-  if (room.shopOpen) {
-    // Safety: shop with nobody connected to finish it → force next wave.
-    tryFinishSoloShop(room);
-    return;
-  }
   if ((room.deathShakeLeft | 0) > 0 || (room.deathBoomLeft | 0) > 0 || room.deathBoomed) return;
 
   if ((room.waveClearLeft | 0) > 0) {
@@ -3820,12 +3812,7 @@ function tickSoloWaves(room) {
         beginSoloWave(room, 1);
         return;
       }
-      const next = cur + 1;
-      if (next % 2 === 0) {
-        openSoloShop(room, next);
-      } else {
-        beginSoloWave(room, next);
-      }
+      beginSoloWave(room, cur + 1);
     }
     return;
   }
@@ -3962,13 +3949,6 @@ function equipWeaponAcquire(p, name) {
   return info;
 }
 
-function shopWeaponCost(p, weaponName) {
-  ensureUnlockedWeapons(p);
-  const info = classifyWeaponAcquire(p, weaponName);
-  if (info.kind === 'owned') return shopUpgradeCost(p, weaponName);
-  return 800;
-}
-
 /**
  * Shop-only: buy `name` directly into slot 1 (Z) or slot 2 (X).
  * Same weapon already in that slot → not used for upgrades (use applyWeaponUpgrade).
@@ -3998,14 +3978,6 @@ function equipWeaponIntoSlot(p, name, slot) {
   return { kind, slot: s, name, lvl: weaponUpgradeCount(p, name) };
 }
 
-function shopWeaponCostForSlot(p, name, slot) {
-  ensureUnlockedWeapons(p);
-  const s = slot === 2 ? 2 : 1;
-  const curName = s === 2 ? p.weapon2 : p.weapon;
-  if (curName !== name) return 800;
-  return shopUpgradeCost(p, name);
-}
-
 /** Apply one shop upgrade option. Returns { ok, err? } fields via caller. */
 function applyWeaponUpgrade(p, name, optId) {
   if (!name || WEAPON_SLOTS.indexOf(name) < 0) return { ok: 0, err: 'item' };
@@ -4019,23 +3991,6 @@ function applyWeaponUpgrade(p, name, optId) {
   const slot = p.weapon2 === name ? 2 : 1;
   resetWeaponSlotRuntime(p, slot);
   return { ok: 1, slot, name, opt: optId, lvl: weaponUpgradeCount(p, name) };
-}
-
-function packShopState(room, p) {
-  syncWeaponLevelsFromUpgrades(p);
-  return {
-    t: 'shop',
-    wave: room.shopWave | 0,
-    coins: p.coins | 0,
-    score: p.coinsCollected | 0,
-    lives: p.lives | 0,
-    weapon: p.weapon || 'default',
-    weapon2: p.weapon2 || null,
-    fixingDrone: p.fixingDrone ? 1 : 0,
-    levels: Object.assign({}, p.weaponLevels || freshWeaponLevels()),
-    upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
-    unlocked: Object.assign({}, ensureUnlockedWeapons(p))
-  };
 }
 
 function grantCoins(p, n) {
@@ -4067,7 +4022,7 @@ function notifyPlayerLives(room, p) {
 /** Passive shop drone: +FIXING_DRONE_HEAL_PER_SEC HP while alive (lost on death). */
 function tickFixingDrones(room) {
   if (!room || !room.matchLive) return;
-  if (room.shopOpen || roomPreRoundFrozen(room)) return;
+  if (roomPreRoundFrozen(room)) return;
   if (room.campaign && room.campaignMapOpen) return;
   const cap = room.practice ? SOLO_MAX_HP : MAX_HP;
   const rate = FIXING_DRONE_HEAL_PER_SEC / TPS;
@@ -4083,29 +4038,6 @@ function tickFixingDrones(room) {
     p.droneHealAcc -= add;
     p.hp = Math.min(cap, (p.hp | 0) + add);
   }
-}
-
-function livingShopHumans(room) {
-  // Only connected clients can Continue — disconnected ghosts must not block the shop.
-  // room.clients is a Set (not an Array) — iterate, don't call Array#some on it.
-  return [...room.players.values()].filter(p => {
-    if (p.bot || (p.lives | 0) <= 0) return false;
-    if (!room.clients) return false;
-    for (const ws of room.clients) {
-      if (ws.playerId === p.id && ws.readyState === 1) return true;
-    }
-    return false;
-  });
-}
-
-/** Clear field so the shop wave is the only spawn source after everyone continues. */
-function clearAsteroidsForShop(room) {
-  room.pendingBigSpawns = [];
-  if (!room.asteroids || !room.asteroids.length) return;
-  for (const a of room.asteroids) {
-    emitAsteroidDead(room, a.aid, true);
-  }
-  clearAsteroidsList(room);
 }
 
 /** Boss kill: blow up every rock (FX, no shards / no coin grants). */
@@ -4187,7 +4119,7 @@ function startSnakeFieldEvent(room) {
 }
 
 function tickSnakeFieldEvent(room) {
-  if (!room || !room.practice || room.shopOpen) return;
+  if (!room || !room.practice) return;
   if (!roomHasLiveSnake(room)) {
     room.snakeFieldLeft = 0;
     room.snakeFieldMedLeft = 0;
@@ -4225,142 +4157,6 @@ function tickSnakeFieldEvent(room) {
       }
     }
   }
-}
-
-function openSoloShop(room, nextWave) {
-  room.shopOpen = true;
-  room.shopWave = nextWave | 0;
-  room.waveClearLeft = 0;
-  room.shopDoneIds = new Set();
-  clearAsteroidsForShop(room);
-  clearSoloEnemies(room, true);
-  for (const p of room.players.values()) {
-    // Hard stop — stay parked for the whole shop session.
-    p.vx = 0;
-    p.vy = 0;
-    p.av = 0;
-    p.bursting = false;
-    p.railChargeLeft = 0;
-    p.bursting2 = false;
-    p.railChargeLeft2 = 0;
-    if (p.bot) continue;
-    for (const ws of room.clients) {
-      if (ws.playerId === p.id && ws.readyState === 1) {
-        send(ws, packShopState(room, p));
-      }
-    }
-  }
-}
-
-function closeSoloShopAndStartWave(room) {
-  if (!room.shopOpen) return;
-  const wave = room.shopWave | 0;
-  room.shopOpen = false;
-  room.shopWave = 0;
-  room.shopDoneIds = new Set();
-  // Wave rooms only — admin dbgShop can open in PvP without restarting the match.
-  if (!room.practice) return;
-  // Asteroids for this wave spawn only here — after every living player continued.
-  beginSoloWave(room, wave, { center: true });
-}
-
-function tryFinishSoloShop(room) {
-  if (!room || !room.shopOpen) return;
-  if (!room.shopDoneIds) room.shopDoneIds = new Set();
-  const humans = livingShopHumans(room);
-  if (!humans.length || humans.every(h => room.shopDoneIds.has(h.id))) {
-    closeSoloShopAndStartWave(room);
-  }
-}
-
-function markShopDone(room, playerId) {
-  if (!room || !room.shopOpen) return;
-  if (!room.shopDoneIds) room.shopDoneIds = new Set();
-  room.shopDoneIds.add(playerId);
-  tryFinishSoloShop(room);
-}
-
-/**
- * Shop purchase. item: 'weapon'|'life', name: weapon id.
- * Returns { ok, err? } and syncs buyer.
- */
-function playerShopSessionOpen(room, p) {
-  if (!room || !p) return false;
-  if (room.shopOpen) return true;
-  return !!(room.pvpShopOpen && room.pvpShopOpen.has(p.id));
-}
-
-function handleShopBuy(room, p, item, name, slot, opt) {
-  if (!room || !p || p.hp <= 0 || !playerShopSessionOpen(room, p)) return { ok: 0, err: 'closed' };
-  ensureUnlockedWeapons(p);
-  ensureWeaponUpgrades(p);
-
-  if (item === 'life') {
-    const cost = 2400;
-    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
-    p.coins = (p.coins | 0) - cost;
-    p.lives = (p.lives | 0) + 1;
-    notifyPlayerCoins(room, p);
-    notifyPlayerLives(room, p);
-    return { ok: 1 };
-  }
-
-  if (item === 'health') {
-    const cost = 400;
-    const cap = room.practice ? SOLO_MAX_HP : MAX_HP;
-    if ((p.hp | 0) >= cap) return { ok: 0, err: 'full' };
-    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
-    p.coins = (p.coins | 0) - cost;
-    p.hp = cap;
-    notifyPlayerCoins(room, p);
-    return { ok: 1, hp: p.hp | 0 };
-  }
-
-  if (item === 'drone' || item === 'fixingdrone') {
-    const cost = FIXING_DRONE_COST;
-    if (p.fixingDrone) return { ok: 0, err: 'owned' };
-    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
-    p.coins = (p.coins | 0) - cost;
-    p.fixingDrone = true;
-    p.droneHealAcc = 0;
-    notifyPlayerCoins(room, p);
-    return { ok: 1, fixingDrone: 1 };
-  }
-
-  if (item === 'upgrade') {
-    if (WEAPON_SLOTS.indexOf(name) < 0) return { ok: 0, err: 'item' };
-    const optId = opt != null ? String(opt) : '';
-    const cost = shopUpgradeCost(p, name);
-    if (cost < 0 || !canBuyWeaponUpgrade(p, name, optId)) return { ok: 0, err: 'max' };
-    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
-    p.coins = (p.coins | 0) - cost;
-    const info = applyWeaponUpgrade(p, name, optId);
-    if (!info.ok) {
-      p.coins = (p.coins | 0) + cost;
-      return info;
-    }
-    notifyPlayerCoins(room, p);
-    notifyPlayerWeapon(room, p, false, info.slot);
-    return { ok: 1, slot: info.slot, changed: info.slot, opt: optId };
-  }
-
-  if (item === 'weapon') {
-    if (WEAPON_SLOTS.indexOf(name) < 0) return { ok: 0, err: 'item' };
-    const wantSlot = slot === 2 ? 2 : 1;
-    const curName = wantSlot === 2 ? p.weapon2 : p.weapon;
-    // Owned in that slot → client should use upgrade menu, not remount.
-    if (curName === name) return { ok: 0, err: 'owned' };
-    const cost = shopWeaponCostForSlot(p, name, wantSlot);
-    if (cost < 0) return { ok: 0, err: 'max' };
-    if ((p.coins | 0) < cost) return { ok: 0, err: 'coins' };
-    p.coins = (p.coins | 0) - cost;
-    const info = equipWeaponIntoSlot(p, name, wantSlot);
-    notifyPlayerCoins(room, p);
-    notifyPlayerWeapon(room, p, false, info && info.slot);
-    return { ok: 1, slot: info && info.slot, changed: info && info.slot };
-  }
-
-  return { ok: 0, err: 'item' };
 }
 
 function splitAsteroid(room, parent) {
@@ -4712,7 +4508,6 @@ function portalWrapOffset(a) {
  */
 function spawnAsteroidPortalTwin(room, a) {
   if (!svPortal || !a || a.playerShot || a.portalTwinAid != null || a.portalOfAid != null) return null;
-  if (room && room.shopOpen) return null;
   if (!a.portalArmed) return null;
   if (!asteroidWouldWrap(room, a)) return null;
   const { ox, oy } = portalWrapOffset(a);
@@ -5051,11 +4846,6 @@ function handleAdminWave(ws, waveRaw) {
   const abs = Math.max(1, Math.min(9999, waveRaw | 0));
   const mapped = absoluteWaveToWorldWave(abs);
 
-  if (room.shopOpen) {
-    room.shopOpen = false;
-    room.shopWave = 0;
-    room.shopDoneIds = new Set();
-  }
   // Cancel death cinematic so the sim can run the new wave immediately.
   room.deathShakeLeft = 0;
   room.deathBoomLeft = 0;
@@ -7969,7 +7759,6 @@ function packAdminStatus(ws) {
     paused: !!room.paused,
     tick: room.tick | 0,
     wave: room.wave | 0,
-    shopOpen: !!room.shopOpen,
     shopWave: room.shopWave | 0,
     waveClearLeft: room.waveClearLeft | 0,
     pendingBigSpawns: (room.pendingBigSpawns && room.pendingBigSpawns.length) || 0,
@@ -8085,10 +7874,6 @@ function packAdminStatus(ws) {
   const reasons = [];
   if (!room.practice) {
     reasons.push('not wave mode (PvP)');
-  } else if (room.shopOpen) {
-    const done = room.shopDoneIds ? room.shopDoneIds.size : 0;
-    const need = livingShopHumans(room).length;
-    reasons.push(`shop open (next wave ${room.shopWave | 0}, continued ${done}/${need})`);
   } else if ((room.deathShakeLeft | 0) > 0 || (room.deathBoomLeft | 0) > 0 || room.deathBoomed) {
     reasons.push(`death sequence (shake ${room.deathShakeLeft | 0}, boom ${room.deathBoomLeft | 0}, boomed ${room.deathBoomed ? 1 : 0})`);
   } else if ((room.waveClearLeft | 0) > 0) {
@@ -8104,10 +7889,9 @@ function packAdminStatus(ws) {
   }
   out.waveProgress = {
     wave: room.wave | 0,
-    nextShopAt: room.practice ? (((room.wave | 0) + 1) + (((room.wave | 0) + 1) % 2)) : 0,
+    nextShopAt: 0,
     blocked: !!(room.practice && (
-      room.shopOpen
-      || (room.deathShakeLeft | 0) > 0
+      (room.deathShakeLeft | 0) > 0
       || (room.deathBoomLeft | 0) > 0
       || room.deathBoomed
       || (room.waveClearLeft | 0) > 0

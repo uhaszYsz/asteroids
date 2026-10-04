@@ -13617,7 +13617,8 @@ function applyPreRoundCdMsg(msg) {
 if (pvpShopBtnEl) {
   pvpShopBtnEl.addEventListener('click', () => {
     if (!ws || ws.readyState !== 1 || practiceMode || soloShopOpen) return;
-    ws.send(JSON.stringify({ t: 'shopOpen' }));
+    // shop removed
+    return;
   });
 }
 let soloShopState = null;
@@ -14246,43 +14247,12 @@ function sendShopBuy(item, name, slot, opt) {
 }
 
 function showSoloShop(st) {
-  soloShopOpen = true;
-  shopFocusRow = 0;
-  shopFocusCol = 0;
-  shopBuySlot = (activeWeaponSlot | 0) === 2 ? 2 : 1;
-  pvpShopMode = !!(st && st.pvp);
-  player.vx = 0;
-  player.vy = 0;
-  player.av = 0;
-  if (st && st.shopTimeLeft != null) pvpShopTimeLeft = st.shopTimeLeft | 0;
-  if (ssContinueBtn) {
-    ssContinueBtn.textContent = pvpShopMode ? 'CLOSE SHOP [ENTER]' : 'START WAVE [ENTER]';
-    ssContinueBtn.disabled = false;
-  }
-  applyShopState(st);
-  updateShopSlotBadge();
-  if (soloShopEl) {
-    soloShopEl.classList.add('show');
-    soloShopEl.setAttribute('aria-hidden', 'false');
-  }
-  renderPreRoundHud();
+  /* shop removed */
 }
 
 function hideSoloShop() {
   soloShopOpen = false;
   pvpShopMode = false;
-  soloShopState = null;
-  shopPreviewSlots = [];
-  closeShopWeaponSlotMenu();
-  if (ssContinueBtn) {
-    ssContinueBtn.textContent = 'START WAVE [ENTER]';
-    ssContinueBtn.disabled = false;
-  }
-  if (soloShopEl) {
-    soloShopEl.classList.remove('show');
-    soloShopEl.setAttribute('aria-hidden', 'true');
-  }
-  renderPreRoundHud();
 }
 
 function closeSoloShopContinue() {
@@ -24247,45 +24217,7 @@ function handleWsMessage(e) {
       clearLocalAllGodmode();
       return;
     }
-    if (msg.t === 'shop' && inGame && (practiceMode || consoleAdmin || msg.pvp)) {
-      showSoloShop(msg);
-      return;
-    }
-    if (msg.t === 'shopClose' && inGame) {
-      hideSoloShop();
-      return;
-    }
-    if (msg.t === 'shopBuy' && inGame && (practiceMode || consoleAdmin || pvpShopMode || msg.pvp)) {
-      if (msg.ok) {
-        // Which gun slot this purchase touched — mirror the server's rule against the PRE-buy state.
-        const prevSt = soloShopState;
-        const boughtSlot = (msg.item === 'weapon' || msg.item === 'upgrade')
-          ? ((msg.slot | 0) === 2 || (msg.changed | 0) === 2 ? 2
-            : ((msg.slot | 0) === 1 || (msg.changed | 0) === 1 ? 1
-              : (prevSt && msg.name ? classifyWeaponAcquireClient(prevSt, msg.name).slot : 1)))
-          : 1;
-        applyShopState(msg);
-        if (msg.shopTimeLeft != null) pvpShopTimeLeft = msg.shopTimeLeft | 0;
-        if (msg.weapon) {
-          const slot = WEAPON_NAMES.indexOf(msg.weapon) + 1;
-          if (slot > 0) selectedWeapon = slot;
-        }
-        if (msg.hp != null) player.hp = msg.hp | 0;
-        // Reset only the gun slot this purchase actually changed.
-        if ((msg.item === 'weapon' || msg.item === 'upgrade') && boughtSlot === 2 && equippedWeapon2) {
-          resetLocalShoot(equippedWeapon2, 2);
-        } else if (msg.item === 'weapon' || msg.item === 'upgrade') {
-          resetLocalShoot(currentWeaponName(), 1);
-        }
-        if (boughtSlot === 1 || boughtSlot === 2) {
-          shopBuySlot = boughtSlot;
-          if (boughtSlot === 2 && equippedWeapon2) activeWeaponSlot = 2;
-          else if (boughtSlot === 1) activeWeaponSlot = 1;
-          updateShopSlotBadge();
-        }
-        updateHud();
-        renderPreRoundHud();
-      }
+    if (msg.t === 'shop' || msg.t === 'shopClose' || msg.t === 'shopBuy') {
       return;
     }
     if (msg.t === 'coins' && inGame) {
@@ -26962,7 +26894,7 @@ function adminOpenShop() {
   if (!consoleAdmin || !inGame) return false;
   if (!ws || ws.readyState !== 1) return false;
   if (soloShopOpen || deathSpectating || matchPaused) return false;
-  ws.send(JSON.stringify({ t: 'dbgShop' }));
+  // shop removed
   return true;
 }
 

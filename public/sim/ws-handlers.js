@@ -492,60 +492,8 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if (msg.t === 'shopOpen') {
-      if (!allowAction(ws, 'shopOpen', 200)) return;
-      const room = ws.room;
-      if (!room || ws.playerId == null) return;
-      const result = openPvpShop(room, ws.playerId);
-      if (!result.ok && ws.readyState === 1) {
-        send(ws, { t: 'shopOpen', ok: 0, err: result.err || 'fail' });
-      }
-      return;
-    }
 
-    if (msg.t === 'shopBuy') {
-      if (!allowAction(ws, 'shopBuy', 80)) return;
-      const room = ws.room;
-      if (!room) return;
-      const p = room.players.get(ws.playerId);
-      if (!p || !playerShopSessionOpen(room, p)) return;
-      const item = String(msg.item || '');
-      const name = msg.name != null ? String(msg.name) : '';
-      const slot = msg.slot === 2 ? 2 : 1;
-      const opt = msg.opt != null ? String(msg.opt) : '';
-      const result = handleShopBuy(room, p, item, name, slot, opt);
-      send(ws, Object.assign({ t: 'shopBuy' }, result, {
-        item,
-        name,
-        slot,
-        opt,
-        wave: room.shopWave | 0,
-        coins: p.coins | 0,
-        score: p.coinsCollected | 0,
-        lives: p.lives | 0,
-        hp: p.hp | 0,
-        weapon: p.weapon || 'default',
-        weapon2: p.weapon2 || null,
-        fixingDrone: p.fixingDrone ? 1 : 0,
-        levels: Object.assign({}, syncWeaponLevelsFromUpgrades(p)),
-        upgrades: JSON.parse(JSON.stringify(ensureWeaponUpgrades(p))),
-        unlocked: Object.assign({}, ensureUnlockedWeapons(p)),
-        shopTimeLeft: p.shopTimeLeft | 0,
-        pvp: room.practice ? 0 : 1
-      }));
-      return;
-    }
 
-    if (msg.t === 'shopDone') {
-      const room = ws.room;
-      if (!room || ws.playerId == null) return;
-      if (room.practice && room.shopOpen) {
-        markShopDone(room, ws.playerId);
-        return;
-      }
-      if (!room.practice) closePvpShop(room, ws.playerId, false);
-      return;
-    }
 
     if (msg.t === 'campaignTravel') {
       const room = ws.room;
@@ -615,25 +563,6 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if (msg.t === 'dbgShop') {
-      if (!ws.isAdmin) return;
-      if (!allowAction(ws, 'dbgShop', 200)) return;
-      const room = ws.room;
-      if (!room || (ws.state !== 'playing' && ws.state !== 'practice')) return;
-      const p = room.players.get(ws.playerId);
-      if (!p || (p.hp | 0) <= 0) return;
-      // Admin Q-shop: grant a big credit stash (server-side admin gate only).
-      p.coins = 999999;
-      notifyPlayerCoins(room, p);
-      if (room.shopOpen) {
-        send(ws, packShopState(room, p));
-        return;
-      }
-      // Upcoming wave label (same as natural shop); Continue starts it in wave rooms.
-      const next = Math.max(1, (room.wave | 0) + 1);
-      openSoloShop(room, next);
-      return;
-    }
 
     if (msg.t !== 'in') return;
     const room = ws.room;

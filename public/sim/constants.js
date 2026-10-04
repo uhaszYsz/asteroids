@@ -405,7 +405,6 @@ const GODMODE_SPAWN_CLEAR_R = 75;
 /** PvP pre-round 3-2-1 before movement (match start + each round). */
 const PRE_ROUND_COUNTDOWN_SEC = 3;
 /** Per-player PvP shop open time budget per match (ticks). */
-const PVP_SHOP_BUDGET_TICKS = 2 * 60 * TPS;
 /** Starting coins so PvP shop is usable at match start. */
 const PVP_START_COINS = 2000;
 /** Freeze frame while dying player shakes. */

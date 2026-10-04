@@ -36,7 +36,7 @@ function drainPlayerInputQueue(p) {
  * Seq advances 1:1 with physics so client prediction stays aligned.
  */
 function stepPlayerInputs(room, p) {
-  const frozen = !!(room.shopOpen || room.campaignMapOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice));
+  const frozen = !!(room.campaignMapOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice));
   const live = !!(room.matchLive && !roomPreRoundFrozen(room) && !room.campaignMapOpen);
 
   if (frozen) {
@@ -145,10 +145,8 @@ function createRoom(opts) {
     enemies: [],
     nextEnemyId: 1,
     enemySnapLeft: ENEMY_SNAP_INTERVAL,
-    shopOpen: false,
     shopWave: 0,
     /** PvP: player ids with personal shop open during pre-round. */
-    pvpShopOpen: new Set(),
     /** PvP: seconds left on 3-2-1 (0 = inactive). */
     preRoundCd: 0,
     preRoundAcc: 0,
@@ -614,7 +612,6 @@ function stepRoom(room) {
   }
 
   tickPendingBigSpawns(room);
-  tickPvpShopTimers(room);
   tickPreRoundCountdown(room);
 
   for (const p of room.players.values()) {
@@ -622,7 +619,7 @@ function stepRoom(room) {
       if (room.perfTest) updatePerfBotInput(room, p);
       else updateBotInput(p);
       if (room.matchLive && !roomPreRoundFrozen(room) && p.inp.sp) tryStartBurst(p);
-      if (room.shopOpen || roomPreRoundFrozen(room) || (!room.matchLive && !room.practice)) {
+      if (roomPreRoundFrozen(room) || (!room.matchLive && !room.practice)) {
         p.vx = 0;
         p.vy = 0;
         p.av = 0;
@@ -830,7 +827,7 @@ function stepRoom(room) {
   if (room.matchLive) {
     updateBullets(room);
     updatePickups(room);
-    if (room.practice && !room.shopOpen) updateEnemies(room);
+    if (room.practice) updateEnemies(room);
     // Trail moves in updateEnemies — refresh hash for meteor / post-enemy queries.
     rebuildSnakeSegmentSpatialHash(room);
     tickWorldPoseSnap(room);
@@ -981,7 +978,6 @@ function captureWaitingSnapshot(ws) {
     wave: room.wave | 0,
     world: room.world | 0 || 1,
     waveClearLeft: room.waveClearLeft | 0,
-    shopOpen: !!room.shopOpen,
     shopWave: room.shopWave | 0,
     bossPlan: room.bossPlan || null,
     player: {
@@ -1093,7 +1089,6 @@ function applySnapshotToRoom(room, p, snap) {
   room.wave = Math.max(1, snap.wave | 0);
   room.world = Math.max(1, snap.world | 0 || 1);
   room.waveClearLeft = snap.waveClearLeft | 0;
-  room.shopOpen = false;
   room.shopWave = 0;
   room.shopDoneIds = new Set();
   if (snap.bossPlan && typeof snap.bossPlan === 'object') {
@@ -1211,7 +1206,6 @@ function startMatch(members) {
     }, room);
     p.accountKey = ws.accountKey || null;
     p.coins = PVP_START_COINS;
-    p.shopTimeLeft = PVP_SHOP_BUDGET_TICKS;
     room.players.set(id, p);
     room.clients.add(ws);
     ws.room = room;
@@ -1277,8 +1271,7 @@ function startPractice(ws, queueKind, opts) {
     applySnapshotToRoom(room, p, opts.snap);
     if (room.shopOpen) {
       // Don't resume mid-shop — close and keep wave field.
-      room.shopOpen = false;
-      room.shopWave = 0;
+          room.shopWave = 0;
     }
   } else {
     room.wave = 1;
@@ -1645,9 +1638,6 @@ function leaveRoom(ws) {
   if (livingClients === 0 && !held) destroyRoom(room);
   else if (livingClients === 0 && held) {
     // Keep room alive for rejoin until budget expires.
-  } else if (room.shopOpen) {
-    // Partner left mid-shop — start wave once remaining humans have continued.
-    tryFinishSoloShop(room);
   }
   broadcastPresence();
 }
@@ -1661,7 +1651,6 @@ function sendWelcome(ws, room, p, extra) {
     st: Date.now(),
     practice: !!room.practice,
     coins: p.coins | 0,
-    shopTimeLeft: p.shopTimeLeft | 0,
     you: [p.id, p.x, p.y, p.vx, p.vy, p.angle, p.hp, p.lastSeq, p.av || 0, p.stunned ? 1 : 0, p.godLeft > 0 ? (p.godLeft | 0) : 0],
     scores: packScoreboard(room),
     names: packRosterNames(room),
@@ -1680,19 +1669,9 @@ function humanPlayers(room) {
   return [...room.players.values()].filter(p => !p.bot);
 }
 
-function packPvpShopBudgets(room) {
-  const out = {};
-  for (const p of room.players.values()) {
-    if (p.bot) continue;
-    out[p.id] = Math.max(0, p.shopTimeLeft | 0);
-  }
-  return out;
-}
-
 function roomPreRoundFrozen(room) {
   if (!room || room.practice) return false;
-  if ((room.preRoundCd | 0) > 0) return true;
-  return !!(room.pvpShopOpen && room.pvpShopOpen.size > 0);
+  return (room.preRoundCd | 0) > 0;
 }
 
 function broadcastPreRound(room) {
@@ -1700,8 +1679,6 @@ function broadcastPreRound(room) {
   roomBroadcast(room, {
     t: 'preRoundCd',
     n: room.preRoundCd | 0,
-    shop: (room.preRoundCd | 0) > 0 || (room.pvpShopOpen && room.pvpShopOpen.size > 0) ? 1 : 0,
-    open: room.pvpShopOpen ? [...room.pvpShopOpen] : [],
     budgets: packPvpShopBudgets(room)
   });
 }
@@ -1718,9 +1695,6 @@ function finishPreRoundCountdown(room) {
   if (!room) return;
   room.preRoundCd = 0;
   room.preRoundAcc = 0;
-  if (room.pvpShopOpen && room.pvpShopOpen.size) {
-    for (const id of [...room.pvpShopOpen]) closePvpShop(room, id, true);
-  }
   broadcastPreRound(room);
   if (!room.matchLive) beginMatchLive(room);
 }
@@ -1728,72 +1702,12 @@ function finishPreRoundCountdown(room) {
 function tickPreRoundCountdown(room) {
   if (!room || room.practice) return;
   if ((room.preRoundCd | 0) <= 0) return;
-  if (room.pvpShopOpen && room.pvpShopOpen.size > 0) return; // paused while shopping
   room.preRoundAcc = (room.preRoundAcc | 0) + 1;
   if (room.preRoundAcc < TPS) return;
   room.preRoundAcc = 0;
   room.preRoundCd = Math.max(0, (room.preRoundCd | 0) - 1);
   broadcastPreRound(room);
   if ((room.preRoundCd | 0) <= 0) finishPreRoundCountdown(room);
-}
-
-function tickPvpShopTimers(room) {
-  if (!room || room.practice || !room.pvpShopOpen || !room.pvpShopOpen.size) return;
-  for (const id of [...room.pvpShopOpen]) {
-    const p = room.players.get(id);
-    if (!p) {
-      room.pvpShopOpen.delete(id);
-      continue;
-    }
-    p.shopTimeLeft = Math.max(0, (p.shopTimeLeft | 0) - 1);
-    if ((p.shopTimeLeft | 0) <= 0) closePvpShop(room, id, true);
-  }
-  // ~4 Hz budget sync while shops open.
-  if ((room.tick % Math.max(1, (TPS / 4) | 0)) === 0) broadcastPreRound(room);
-}
-
-function openPvpShop(room, playerId) {
-  if (!room || room.practice) return { ok: 0, err: 'mode' };
-  if ((room.preRoundCd | 0) <= 0 && !(room.pvpShopOpen && room.pvpShopOpen.size)) {
-    return { ok: 0, err: 'closed' };
-  }
-  const p = room.players.get(playerId);
-  if (!p || p.bot || (p.hp | 0) <= 0) return { ok: 0, err: 'player' };
-  if ((p.shopTimeLeft | 0) <= 0) return { ok: 0, err: 'time' };
-  if (!room.pvpShopOpen) room.pvpShopOpen = new Set();
-  if (room.pvpShopOpen.has(playerId)) return { ok: 1 };
-  room.pvpShopOpen.add(playerId);
-  // Pause + reset countdown until everyone closes.
-  room.preRoundCd = PRE_ROUND_COUNTDOWN_SEC;
-  room.preRoundAcc = 0;
-  if (p.weapon) ownOnlyWeapon(p, p.weapon, getWeaponLevel(p, p.weapon));
-  for (const ws of room.clients) {
-    if (ws.playerId === p.id && ws.readyState === 1) {
-      send(ws, Object.assign(packShopState(room, p), {
-        pvp: 1,
-        shopTimeLeft: p.shopTimeLeft | 0
-      }));
-    }
-  }
-  broadcastPreRound(room);
-  return { ok: 1 };
-}
-
-function closePvpShop(room, playerId, forced) {
-  if (!room || !room.pvpShopOpen) return;
-  if (!room.pvpShopOpen.has(playerId)) return;
-  room.pvpShopOpen.delete(playerId);
-  for (const ws of room.clients) {
-    if (ws.playerId === playerId && ws.readyState === 1) {
-      send(ws, { t: 'shopClose', forced: forced ? 1 : 0 });
-    }
-  }
-  if (room.pvpShopOpen.size === 0 && (room.preRoundCd | 0) > 0) {
-    // All closed → restart full 3-2-1.
-    room.preRoundCd = PRE_ROUND_COUNTDOWN_SEC;
-    room.preRoundAcc = 0;
-  }
-  broadcastPreRound(room);
 }
 
 function beginMatchLive(room) {
