@@ -3523,7 +3523,7 @@ function enemyRectDims(e) {
 }
 
 /** Hit volumes (circle enemies only — rect kinds use enemyRectDims).
- *  Snake: head + path stamps (same radius) so tail hits damage the boss.
+ *  Snake: head + path stamps (same radius) so tail hits damage the boss. */
 function enemyHitCircles(e) {
   if (!e || enemyUsesRectHit(e)) return [];
   const r = e.r || ENEMY_R[e.kind] || ENEMY_R.common || 10;
