@@ -4914,14 +4914,11 @@ function respawnPlayer(room, p, keepLoadout, maxHp, resetLevels) {
 }
 
 /**
- * Death respawn: insurance keeps weapons+upgrades (consumed);
- * otherwise strip to default L0 only.
+ * Death respawn: keep equipped weapons and upgrade ranks.
  */
 function respawnAfterDeath(room, p, maxHp) {
   if (!p) return;
-  const insured = !!p.loadoutInsurance;
-  if (insured) p.loadoutInsurance = false;
-  respawnPlayer(room, p, insured, maxHp, false);
+  respawnPlayer(room, p, true, maxHp, false);
 }
 
 /** changedSlot: which gun slot (1 = Z, 2 = X) this update is actually about — drives client FX. */
