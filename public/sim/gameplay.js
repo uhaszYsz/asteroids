@@ -8238,6 +8238,17 @@ function rocketHomingTarget(room, b) {
   return best;
 }
 
+/** Player credited for asteroid damage/kills from this bullet (enemy shots → human target). */
+function bulletAsteroidCreditId(room, b) {
+  const oid = b && (b.owner | 0);
+  if (oid > 0) return oid;
+  if (b && (b.enemyOwner | 0) > 0) {
+    const t = soloHumanTarget(room);
+    if (t && !t.bot) return t.id | 0;
+  }
+  return 0;
+}
+
 /** Accel + per-rocket homing (degrees/tick). Mutates vx/vy.
  *  Speed is signed along flightAng (or velocity heading) so launch can be reverse.
  *  Player + UFO rockets: base accel below boost speed, ×boost mult at/above it. */
@@ -8489,7 +8500,7 @@ function updateBullets(room) {
         detonateRocket(room, b, 2);
       } else {
         roomBroadcast(room, { t: 'bd', id: b.id, hit: 2, x: b.x, y: b.y });
-        damageAsteroid(room, a, projectileHitDmg(b), b.owner | 0);
+        damageAsteroid(room, a, projectileHitDmg(b), bulletAsteroidCreditId(room, b));
       }
       bullets.splice(i, 1);
       return true;

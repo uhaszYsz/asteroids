@@ -157,7 +157,7 @@ const BULLET_TYPES = {
    * NPC glowing shots — circle hit = white core radius (see enemyShotCoreRadius).
    * Visual glow is larger; length/width kept only as size tags for worm scale.
    */
-  enemy: { dmg: 18, col: 'circle', size: 0, skipAsteroids: true, length: 15, width: 3 },
+  enemy: { dmg: 18, col: 'circle', size: 0, length: 15, width: 3 },
   enemySpinner: { dmg: 18, col: 'circle', size: 0, skipAsteroids: true, length: 20, width: 20 },
   /** Worm 360° shotgun pellet — length/width set per bullet (7–30) drive core scale. */
   enemyWorm: { dmg: 18, col: 'circle', size: 0, skipAsteroids: true, length: 15, width: 15 },
